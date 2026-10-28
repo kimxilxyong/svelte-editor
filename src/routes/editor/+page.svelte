@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { BuilderBlock, BlockKind } from '../../lib/editor.js';
+	import type { BuilderBlock, BlockKind, SectionKind, WidgetKind } from '../../lib/editor.js';
 
 	type DragPayload = { source: 'palette'; kind: BlockKind } | { source: 'canvas'; id: string };
 	type EditorApiResponse = {
@@ -9,8 +9,9 @@
 		success?: boolean;
 		error?: string;
 	};
+	type PaletteTab = 'sections' | 'widgets';
 
-	const componentInfo: Record<BlockKind, { label: string; detail: string; mark: string }> = {
+	const sectionInfo: Record<SectionKind, { label: string; detail: string; mark: string }> = {
 		hero: { label: 'Hero section', detail: 'A bold opening for your page', mark: '✳' },
 		text: { label: 'Text block', detail: 'Share a little more detail', mark: 'T' },
 		button: { label: 'Call to action', detail: 'Give visitors a next step', mark: '↗' },
@@ -18,9 +19,35 @@
 		image: { label: 'Image section', detail: 'A visual moment for your story', mark: '▧' },
 		quote: { label: 'Testimonial', detail: 'Let a happy customer speak', mark: '“' }
 	};
-	const componentKinds = Object.keys(componentInfo) as BlockKind[];
+	const widgetInfo: Record<WidgetKind, { label: string; detail: string; mark: string }> = {
+		'widget-button': { label: 'Button', detail: 'A clear action for visitors', mark: '↗' },
+		'widget-text-field': { label: 'Text field', detail: 'A single-line text input', mark: 'T' },
+		'widget-textarea': { label: 'Textarea', detail: 'A multi-line text input', mark: '≡' },
+		'widget-checkbox': { label: 'Checkbox', detail: 'Choose an independent option', mark: '☑' },
+		'widget-radio': { label: 'Radio button', detail: 'Choose one option in a group', mark: '◉' },
+		'widget-switch': { label: 'Switch', detail: 'Turn a setting on or off', mark: '◉' },
+		'widget-select': { label: 'Select menu', detail: 'Pick from a list of options', mark: '▾' },
+		'widget-slider': { label: 'Slider', detail: 'Choose a value in a range', mark: '━' },
+		'widget-badge': { label: 'Badge', detail: 'A compact status or category', mark: '●' },
+		'widget-alert': { label: 'Alert', detail: 'A short message with context', mark: '!' },
+		'widget-progress': { label: 'Progress bar', detail: 'Show completion at a glance', mark: '▰' },
+		'widget-avatar': { label: 'Avatar', detail: 'Represent a person or account', mark: '◉' },
+		'widget-card': { label: 'Card', detail: 'Group related content together', mark: '▣' }
+	};
+	const sectionKinds = Object.keys(sectionInfo) as SectionKind[];
+	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
+	const componentInfo: Record<BlockKind, { label: string; detail: string; mark: string }> = {
+		...sectionInfo,
+		...widgetInfo
+	};
 
-	const defaults: Record<BlockKind, Omit<BuilderBlock, 'id'>> = {
+	const defaults: Record<
+		BlockKind,
+		Omit<
+			BuilderBlock,
+			'id' | 'positioned' | 'x' | 'y' | 'width' | 'height' | 'value' | 'checked' | 'level'
+		>
+	> = {
 		hero: {
 			kind: 'hero',
 			title: 'Make room for your next big idea.',
@@ -62,6 +89,97 @@
 			body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
 			action: 'Maya Chen · Studio founder',
 			theme: 'light'
+		},
+		'widget-button': {
+			kind: 'widget-button',
+			title: 'Button',
+			body: 'A useful action for your visitors.',
+			action: 'Get started',
+			theme: 'lavender'
+		},
+		'widget-text-field': {
+			kind: 'widget-text-field',
+			title: 'Email address',
+			body: 'We’ll only use this to contact you.',
+			action: 'name@example.com',
+			theme: 'light'
+		},
+		'widget-textarea': {
+			kind: 'widget-textarea',
+			title: 'Your message',
+			body: 'Tell us a little more.',
+			action: 'Write your message…',
+			theme: 'light'
+		},
+		'widget-checkbox': {
+			kind: 'widget-checkbox',
+			title: 'Keep me updated',
+			body: 'Receive occasional product news.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-radio': {
+			kind: 'widget-radio',
+			title: 'Standard delivery',
+			body: 'Arrives in 3–5 business days.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-switch': {
+			kind: 'widget-switch',
+			title: 'Enable notifications',
+			body: 'Get notified about important updates.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-select': {
+			kind: 'widget-select',
+			title: 'Choose a country',
+			body: 'Select an option from the menu.',
+			action: 'Canada',
+			theme: 'light'
+		},
+		'widget-slider': {
+			kind: 'widget-slider',
+			title: 'Volume',
+			body: 'Adjust the level to your preference.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-badge': {
+			kind: 'widget-badge',
+			title: 'New',
+			body: 'A small label for status or category.',
+			action: '',
+			theme: 'lavender'
+		},
+		'widget-alert': {
+			kind: 'widget-alert',
+			title: 'Changes saved',
+			body: 'Your settings have been updated successfully.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-progress': {
+			kind: 'widget-progress',
+			title: 'Profile completion',
+			body: 'You’re making great progress.',
+			action: '',
+			theme: 'light'
+		},
+		'widget-avatar': {
+			kind: 'widget-avatar',
+			title: 'Alex Morgan',
+			body: 'Product designer',
+			action: '',
+			theme: 'light'
+		},
+		'widget-card': {
+			kind: 'widget-card',
+			title: 'A thoughtful detail',
+			body: 'Cards group related information into a clear, scannable surface.',
+			action: 'Learn more',
+			theme: 'light'
 		}
 	};
 
@@ -72,7 +190,15 @@
 			title: 'Make room for your next big idea.',
 			body: 'A thoughtful space to share what you do and why it matters.',
 			action: 'Explore what we do',
-			theme: 'lavender'
+			theme: 'lavender',
+			positioned: false,
+			x: 6,
+			y: 40,
+			width: 88,
+			height: 260,
+			value: '',
+			checked: false,
+			level: 60
 		},
 		{
 			id: 'sample-features',
@@ -80,7 +206,15 @@
 			title: 'The details make the difference',
 			body: 'Simple tools, considered design, and a team that cares.',
 			action: '',
-			theme: 'light'
+			theme: 'light',
+			positioned: false,
+			x: 6,
+			y: 40,
+			width: 88,
+			height: 260,
+			value: '',
+			checked: false,
+			level: 60
 		},
 		{
 			id: 'sample-quote',
@@ -88,10 +222,19 @@
 			title: '“It just feels like us.”',
 			body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
 			action: 'Maya Chen · Studio founder',
-			theme: 'light'
+			theme: 'light',
+			positioned: false,
+			x: 6,
+			y: 40,
+			width: 88,
+			height: 260,
+			value: '',
+			checked: false,
+			level: 60
 		}
 	]);
 	let selectedId = $state<string | null>('sample-hero');
+	let paletteTab = $state<PaletteTab>('sections');
 	let dropIndex = $state<number | null>(null);
 	let isPreview = $state(false);
 	let mobileViewport = $state(false);
@@ -100,9 +243,28 @@
 	let databaseStatus = $state('Checking SQLite…');
 	let hasUnsavedChanges = $state(true);
 	let revision = $state(0);
+	let canvasElement: HTMLDivElement | null = null;
+	let pointerInteraction = $state<{
+		id: string;
+		pointerId: number;
+		mode: 'move' | 'resize';
+		startX: number;
+		startY: number;
+		startWidth: number;
+		startHeight: number;
+		pointerX: number;
+		pointerY: number;
+		canvasWidth: number;
+	} | null>(null);
 
 	let selectedBlock = $derived(blocks.find((block) => block.id === selectedId));
 	let blockCount = $derived(blocks.length);
+	let canvasHeight = $derived(
+		Math.max(
+			600,
+			...blocks.filter((block) => block.positioned).map((block) => block.y + block.height + 40)
+		)
+	);
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
 	);
@@ -203,7 +365,133 @@
 	}
 
 	function createBlock(kind: BlockKind): BuilderBlock {
-		return { ...defaults[kind], id: globalThis.crypto.randomUUID() };
+		return {
+			...defaults[kind],
+			id: globalThis.crypto.randomUUID(),
+			positioned: false,
+			x: 6,
+			y: Math.min(40 + blocks.length * 280, 5000),
+			width: 88,
+			height: 260,
+			value: kind === 'widget-select' ? defaults[kind].action : '',
+			checked: false,
+			level: 60
+		};
+	}
+
+	function setPositionMode(positioned: boolean) {
+		if (!selectedBlock || selectedBlock.positioned === positioned) return;
+		selectedBlock.positioned = positioned;
+		markUnsaved();
+	}
+
+	function startPointerInteraction(event: PointerEvent, id: string, mode: 'move' | 'resize') {
+		if (isPreview || !canvasElement) return;
+		const block = blocks.find((item) => item.id === id);
+		if (!block?.positioned || !(event.currentTarget instanceof HTMLElement)) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		event.currentTarget.setPointerCapture(event.pointerId);
+		selectedId = id;
+		pointerInteraction = {
+			id,
+			pointerId: event.pointerId,
+			mode,
+			startX: block.x,
+			startY: block.y,
+			startWidth: block.width,
+			startHeight: block.height,
+			pointerX: event.clientX,
+			pointerY: event.clientY,
+			canvasWidth: canvasElement.clientWidth
+		};
+	}
+
+	function handlePointerMove(event: PointerEvent) {
+		if (!pointerInteraction || event.pointerId !== pointerInteraction.pointerId) return;
+		const block = blocks.find((item) => item.id === pointerInteraction?.id);
+		if (!block || pointerInteraction.canvasWidth <= 0) return;
+
+		const deltaX =
+			((event.clientX - pointerInteraction.pointerX) / pointerInteraction.canvasWidth) * 100;
+		const deltaY = event.clientY - pointerInteraction.pointerY;
+
+		if (pointerInteraction.mode === 'move') {
+			block.x = Math.round(
+				Math.max(0, Math.min(100 - block.width, pointerInteraction.startX + deltaX))
+			);
+			block.y = Math.round(Math.max(0, Math.min(5000, pointerInteraction.startY + deltaY)));
+		} else {
+			block.width = Math.round(
+				Math.max(20, Math.min(100 - block.x, pointerInteraction.startWidth + deltaX))
+			);
+			block.height = Math.round(
+				Math.max(100, Math.min(1600, pointerInteraction.startHeight + deltaY))
+			);
+		}
+
+		markUnsaved();
+	}
+
+	function updateSelectedPosition(field: 'x' | 'y' | 'width' | 'height') {
+		if (!selectedBlock) return;
+
+		if (field === 'x')
+			selectedBlock.x = Math.round(
+				Math.max(0, Math.min(100 - selectedBlock.width, selectedBlock.x))
+			);
+		if (field === 'y') selectedBlock.y = Math.round(Math.max(0, Math.min(5000, selectedBlock.y)));
+		if (field === 'width')
+			selectedBlock.width = Math.round(
+				Math.max(20, Math.min(100 - selectedBlock.x, selectedBlock.width))
+			);
+		if (field === 'height')
+			selectedBlock.height = Math.round(Math.max(100, Math.min(1600, selectedBlock.height)));
+
+		markUnsaved();
+	}
+
+	function attachCanvas(element: HTMLDivElement) {
+		canvasElement = element;
+		return () => {
+			if (canvasElement === element) canvasElement = null;
+		};
+	}
+
+	function stopPointerInteraction(event: PointerEvent) {
+		if (pointerInteraction?.pointerId === event.pointerId) pointerInteraction = null;
+	}
+
+	function handlePositionKeydown(event: KeyboardEvent, mode: 'move' | 'resize') {
+		if (!selectedBlock) return;
+		const amount = event.shiftKey ? 10 : 1;
+		let handled = true;
+
+		if (mode === 'move') {
+			if (event.key === 'ArrowLeft') selectedBlock.x = Math.max(0, selectedBlock.x - amount);
+			else if (event.key === 'ArrowRight')
+				selectedBlock.x = Math.min(100 - selectedBlock.width, selectedBlock.x + amount);
+			else if (event.key === 'ArrowUp') selectedBlock.y = Math.max(0, selectedBlock.y - amount);
+			else if (event.key === 'ArrowDown')
+				selectedBlock.y = Math.min(5000, selectedBlock.y + amount);
+			else handled = false;
+		} else {
+			if (event.key === 'ArrowLeft')
+				selectedBlock.width = Math.max(20, selectedBlock.width - amount);
+			else if (event.key === 'ArrowRight')
+				selectedBlock.width = Math.min(100 - selectedBlock.x, selectedBlock.width + amount);
+			else if (event.key === 'ArrowUp')
+				selectedBlock.height = Math.max(100, selectedBlock.height - amount);
+			else if (event.key === 'ArrowDown')
+				selectedBlock.height = Math.min(1600, selectedBlock.height + amount);
+			else handled = false;
+		}
+
+		if (handled) {
+			event.preventDefault();
+			markUnsaved();
+		}
 	}
 
 	function addBlock(kind: BlockKind, index = blocks.length) {
@@ -243,7 +531,7 @@
 				payload.source === 'palette' &&
 				'kind' in payload &&
 				typeof payload.kind === 'string' &&
-				payload.kind in componentInfo
+				Object.hasOwn(componentInfo, payload.kind)
 			) {
 				return { source: 'palette', kind: payload.kind as BlockKind };
 			}
@@ -329,6 +617,12 @@
 		markUnsaved();
 	}
 </script>
+
+<svelte:window
+	onpointermove={handlePointerMove}
+	onpointerup={stopPointerInteraction}
+	onpointercancel={stopPointerInteraction}
+/>
 
 <svelte:head>
 	<title>Page editor</title>
@@ -416,17 +710,53 @@
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">BUILD YOUR PAGE</p>
-						<h2>Components</h2>
+						<h2>{paletteTab === 'sections' ? 'Components' : 'GUI widgets'}</h2>
 					</div>
-					<span class="count-pill">{componentKinds.length}</span>
+					<span class="count-pill">
+						{paletteTab === 'sections' ? sectionKinds.length : widgetKinds.length}
+					</span>
 				</div>
-				<p class="panel-hint">Drag a block onto your page, or click to add it.</p>
+				<div class="palette-tabs" role="tablist" aria-label="Palette categories">
+					<button
+						type="button"
+						id="sections-tab"
+						role="tab"
+						aria-selected={paletteTab === 'sections'}
+						aria-controls="palette-items"
+						class:tab-active={paletteTab === 'sections'}
+						onclick={() => (paletteTab = 'sections')}
+					>
+						Sections
+					</button>
+					<button
+						type="button"
+						id="widgets-tab"
+						role="tab"
+						aria-selected={paletteTab === 'widgets'}
+						aria-controls="palette-items"
+						class:tab-active={paletteTab === 'widgets'}
+						onclick={() => (paletteTab = 'widgets')}
+					>
+						Widgets
+					</button>
+				</div>
+				<p class="panel-hint">
+					{paletteTab === 'sections'
+						? 'Drag a section onto your page, or click to add it.'
+						: 'Drag a widget onto your page, or click to add it.'}
+				</p>
 
-				<div class="component-list">
-					{#each componentKinds as kind (kind)}
+				<div
+					class="component-list"
+					id="palette-items"
+					role="tabpanel"
+					aria-labelledby="{paletteTab}-tab"
+				>
+					{#each paletteTab === 'sections' ? sectionKinds : widgetKinds as kind (kind)}
 						<button
 							type="button"
 							class="palette-item"
+							class:widget-item={paletteTab === 'widgets'}
 							draggable="true"
 							aria-label="Add {componentInfo[kind].label}"
 							ondragstart={(event) => handlePaletteDragStart(event, kind)}
@@ -444,7 +774,9 @@
 
 				<div class="palette-tip">
 					<span aria-hidden="true">✦</span>
-					<p><strong>A small tip</strong> — select any block to edit its content and style.</p>
+					<p>
+						<strong>A small tip</strong> — select any block to edit its content and style.
+					</p>
 				</div>
 			</aside>
 		{/if}
@@ -458,7 +790,7 @@
 				</div>
 				{#if !isPreview}
 					<div class="canvas-actions">
-						<span>{blockCount} {blockCount === 1 ? 'section' : 'sections'}</span>
+						<span>{blockCount} {blockCount === 1 ? 'item' : 'items'}</span>
 						<button
 							type="button"
 							class="text-button"
@@ -476,8 +808,10 @@
 					class="page-canvas"
 					class:mobile={mobileViewport}
 					class:preview={isPreview}
+					style:min-height="{canvasHeight}px"
 					role="region"
 					aria-label="Page sections drop zone"
+					{@attach attachCanvas}
 					ondragover={handleCanvasDragOver}
 					ondrop={(event) => handleDrop(event, blocks.length)}
 					ondragleave={(event) => {
@@ -500,14 +834,160 @@
 							{/if}
 							<article
 								class="canvas-block {block.kind} theme-{block.theme}"
+								class:positioned={block.positioned}
 								class:selected={!isPreview && selectedId === block.id}
-								draggable={!isPreview}
+								draggable={!isPreview && !block.positioned}
+								style:left={block.positioned ? `${block.x}%` : undefined}
+								style:top={block.positioned ? `${block.y}px` : undefined}
+								style:width={block.positioned ? `${block.width}%` : undefined}
+								style:height={block.positioned ? `${block.height}px` : undefined}
 								ondragstart={(event) => handleBlockDragStart(event, block.id)}
-								ondragover={(event) => !isPreview && handleBlockDragOver(event, index)}
-								ondrop={(event) => !isPreview && handleDrop(event, index)}
+								ondragover={(event) =>
+									!isPreview && !block.positioned && handleBlockDragOver(event, index)}
+								ondrop={(event) => !isPreview && !block.positioned && handleDrop(event, index)}
 								ondragend={() => (dropIndex = null)}
 							>
-								{#if block.kind === 'hero'}
+								{#if block.kind === 'widget-button'}
+									<div class="widget-preview">
+										<button class="widget-button" type="button" onclick={markUnsaved}>
+											{block.action}
+											<span aria-hidden="true">↗</span>
+										</button>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-text-field'}
+									<div class="widget-preview widget-form">
+										<label for="widget-{block.id}">{block.title}</label>
+										<input
+											id="widget-{block.id}"
+											type="text"
+											placeholder={block.action}
+											bind:value={block.value}
+											maxlength="100"
+											oninput={markUnsaved}
+										/>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-textarea'}
+									<div class="widget-preview widget-form">
+										<label for="widget-{block.id}">{block.title}</label>
+										<textarea
+											id="widget-{block.id}"
+											placeholder={block.action}
+											bind:value={block.value}
+											maxlength="100"
+											oninput={markUnsaved}></textarea>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-checkbox'}
+									<div class="widget-preview widget-choice">
+										<label>
+											<input type="checkbox" bind:checked={block.checked} onchange={markUnsaved} />
+											<span><strong>{block.title}</strong><small>{block.body}</small></span>
+										</label>
+									</div>
+								{:else if block.kind === 'widget-radio'}
+									<div class="widget-preview widget-choice">
+										<label>
+											<input
+												type="radio"
+												name="widget-{block.id}"
+												checked={block.checked}
+												onchange={() => {
+													block.checked = true;
+													markUnsaved();
+												}}
+											/>
+											<span><strong>{block.title}</strong><small>{block.body}</small></span>
+										</label>
+									</div>
+								{:else if block.kind === 'widget-switch'}
+									<div class="widget-preview widget-choice">
+										<label class="switch-control">
+											<span><strong>{block.title}</strong><small>{block.body}</small></span>
+											<input
+												type="checkbox"
+												role="switch"
+												bind:checked={block.checked}
+												onchange={markUnsaved}
+											/>
+											<span class="switch-track" aria-hidden="true"></span>
+										</label>
+									</div>
+								{:else if block.kind === 'widget-select'}
+									<div class="widget-preview widget-form">
+										<label for="widget-{block.id}">{block.title}</label>
+										<select bind:value={block.value} id="widget-{block.id}" onchange={markUnsaved}>
+											<option value="">Choose an option</option>
+											<option value="Canada">Canada</option>
+											<option value="United States">United States</option>
+											<option value="United Kingdom">United Kingdom</option>
+										</select>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-slider'}
+									<div class="widget-preview widget-form">
+										<div class="widget-slider-heading">
+											<label for="widget-{block.id}">{block.title}</label>
+											<output for="widget-{block.id}">{block.level}%</output>
+										</div>
+										<input
+											id="widget-{block.id}"
+											class="widget-range"
+											type="range"
+											min="0"
+											max="100"
+											bind:value={block.level}
+											oninput={markUnsaved}
+										/>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-badge'}
+									<div class="widget-preview widget-badge-preview">
+										<span class="widget-badge">{block.title}</span>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-alert'}
+									<div class="widget-preview widget-alert-preview" role="status">
+										<span class="alert-icon" aria-hidden="true">✓</span>
+										<div>
+											<strong>{block.title}</strong>
+											<p>{block.body}</p>
+										</div>
+									</div>
+								{:else if block.kind === 'widget-progress'}
+									<div class="widget-preview widget-form">
+										<div class="widget-slider-heading">
+											<strong>{block.title}</strong><output>{block.level}%</output>
+										</div>
+										<progress value={block.level} max="100" aria-label={block.title}></progress>
+										<p>{block.body}</p>
+									</div>
+								{:else if block.kind === 'widget-avatar'}
+									<div class="widget-preview widget-avatar-preview">
+										<span class="widget-avatar" aria-hidden="true">
+											{block.title
+												.split(' ')
+												.map((part) => part[0] ?? '')
+												.slice(0, 2)
+												.join('')
+												.toUpperCase()}
+										</span>
+										<div>
+											<strong>{block.title}</strong>
+											<p>{block.body}</p>
+										</div>
+									</div>
+								{:else if block.kind === 'widget-card'}
+									<div class="widget-preview widget-card-preview">
+										<span class="widget-card-mark" aria-hidden="true">✦</span>
+										<h2>{block.title}</h2>
+										<p>{block.body}</p>
+										<button type="button" onclick={markUnsaved}
+											>{block.action} <span aria-hidden="true">↗</span></button
+										>
+									</div>
+								{:else if block.kind === 'hero'}
 									<div class="hero-preview">
 										<span class="preview-kicker">A LITTLE MORE YOU</span>
 										<h2>{block.title}</h2>
@@ -586,6 +1066,39 @@
 										aria-pressed={selectedId === block.id}
 										onclick={() => (selectedId = block.id)}
 									></button>
+									{#if block.positioned}
+										<button
+											type="button"
+											class="position-handle move-handle"
+											aria-label="Move {componentInfo[block.kind].label}; use arrow keys to move"
+											onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
+											onkeydown={(event) => {
+												selectedId = block.id;
+												handlePositionKeydown(event, 'move');
+											}}
+										>
+											<svg viewBox="0 0 20 20" aria-hidden="true"
+												><path
+													d="M10 2v16M2 10h16M7 5l3-3 3 3m-6 10 3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3"
+												/></svg
+											>
+										</button>
+										<button
+											type="button"
+											class="position-handle resize-handle"
+											aria-label="Resize {componentInfo[block.kind]
+												.label}; use arrow keys to resize"
+											onpointerdown={(event) => startPointerInteraction(event, block.id, 'resize')}
+											onkeydown={(event) => {
+												selectedId = block.id;
+												handlePositionKeydown(event, 'resize');
+											}}
+										>
+											<svg viewBox="0 0 20 20" aria-hidden="true"
+												><path d="M7 17h10V7M17 7 7 17m3 0H7v-3m10-3v-4h-4" /></svg
+											>
+										</button>
+									{/if}
 								{/if}
 							</article>
 						{/each}
@@ -651,7 +1164,85 @@
 							>
 							<div><strong>{selectedLabel}</strong><small>Selected section</small></div>
 						</div>
-						<label class="field-label" for="block-title">Heading</label>
+						<span class="field-label">Position</span>
+						<div class="position-options" role="group" aria-label="Component position">
+							<button
+								type="button"
+								class:position-active={!selectedBlock.positioned}
+								aria-pressed={!selectedBlock.positioned}
+								onclick={() => setPositionMode(false)}
+							>
+								Flow
+							</button>
+							<button
+								type="button"
+								class:position-active={selectedBlock.positioned}
+								aria-pressed={selectedBlock.positioned}
+								onclick={() => setPositionMode(true)}
+							>
+								Fixed
+							</button>
+						</div>
+						{#if selectedBlock.positioned}
+							<p class="position-hint">Drag the move handle or adjust these values.</p>
+							<div class="position-fields">
+								<div>
+									<label class="field-label" for="block-x">Left (%)</label>
+									<input
+										id="block-x"
+										class="field-control"
+										type="number"
+										min="0"
+										max={100 - selectedBlock.width}
+										step="1"
+										bind:value={selectedBlock.x}
+										oninput={() => updateSelectedPosition('x')}
+									/>
+								</div>
+								<div>
+									<label class="field-label" for="block-y">Top (px)</label>
+									<input
+										id="block-y"
+										class="field-control"
+										type="number"
+										min="0"
+										max="5000"
+										step="1"
+										bind:value={selectedBlock.y}
+										oninput={() => updateSelectedPosition('y')}
+									/>
+								</div>
+								<div>
+									<label class="field-label" for="block-width">Width (%)</label>
+									<input
+										id="block-width"
+										class="field-control"
+										type="number"
+										min="20"
+										max={100 - selectedBlock.x}
+										step="1"
+										bind:value={selectedBlock.width}
+										oninput={() => updateSelectedPosition('width')}
+									/>
+								</div>
+								<div>
+									<label class="field-label" for="block-height">Height (px)</label>
+									<input
+										id="block-height"
+										class="field-control"
+										type="number"
+										min="100"
+										max="1600"
+										step="10"
+										bind:value={selectedBlock.height}
+										oninput={() => updateSelectedPosition('height')}
+									/>
+								</div>
+							</div>
+						{/if}
+						<label class="field-label" for="block-title">
+							{selectedBlock.kind.startsWith('widget-') ? 'Label / text' : 'Heading'}
+						</label>
 						<input
 							id="block-title"
 							class="field-control"
@@ -659,7 +1250,9 @@
 							maxlength="100"
 							oninput={markUnsaved}
 						/>
-						<label class="field-label" for="block-body">Description</label>
+						<label class="field-label" for="block-body">
+							{selectedBlock.kind.startsWith('widget-') ? 'Helper text' : 'Description'}
+						</label>
 						<textarea
 							id="block-body"
 							class="field-control field-textarea"
@@ -667,15 +1260,55 @@
 							rows="4"
 							maxlength="240"
 							oninput={markUnsaved}></textarea>
-						{#if ['hero', 'button', 'quote'].includes(selectedBlock.kind)}
+						{#if ['hero', 'button', 'quote', 'widget-button', 'widget-text-field', 'widget-textarea', 'widget-card'].includes(selectedBlock.kind)}
 							<label class="field-label" for="block-action">
-								{selectedBlock.kind === 'quote' ? 'Attribution' : 'Button label'}
+								{selectedBlock.kind === 'quote'
+									? 'Attribution'
+									: ['widget-text-field', 'widget-textarea'].includes(selectedBlock.kind)
+										? 'Placeholder'
+										: 'Button label'}
 							</label>
 							<input
 								id="block-action"
 								class="field-control"
 								bind:value={selectedBlock.action}
 								maxlength="48"
+								oninput={markUnsaved}
+							/>
+						{/if}
+						{#if selectedBlock.kind === 'widget-select'}
+							<label class="field-label" for="block-select-value">Selected option</label>
+							<select
+								id="block-select-value"
+								class="field-control"
+								bind:value={selectedBlock.value}
+								onchange={markUnsaved}
+							>
+								<option value="">Choose an option</option>
+								<option value="Canada">Canada</option>
+								<option value="United States">United States</option>
+								<option value="United Kingdom">United Kingdom</option>
+							</select>
+						{/if}
+						{#if ['widget-checkbox', 'widget-radio', 'widget-switch'].includes(selectedBlock.kind)}
+							<label class="widget-state-control">
+								<input
+									type="checkbox"
+									bind:checked={selectedBlock.checked}
+									onchange={markUnsaved}
+								/>
+								<span>Initially selected</span>
+							</label>
+						{/if}
+						{#if ['widget-slider', 'widget-progress'].includes(selectedBlock.kind)}
+							<label class="field-label" for="block-level">Value ({selectedBlock.level}%)</label>
+							<input
+								id="block-level"
+								class="field-control"
+								type="range"
+								min="0"
+								max="100"
+								bind:value={selectedBlock.level}
 								oninput={markUnsaved}
 							/>
 						{/if}
@@ -995,9 +1628,45 @@
 		line-height: 1.55;
 	}
 
+	.palette-tabs {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.2rem;
+		padding: 0.22rem;
+		border: 1px solid #e8e7ef;
+		border-radius: 9px;
+		background: #f8f8fb;
+	}
+
+	.palette-tabs button {
+		min-height: 32px;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: #77798c;
+		font-size: 0.69rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.palette-tabs button.tab-active {
+		background: #fff;
+		color: #6253ca;
+		box-shadow: 0 1px 4px rgb(34 34 56 / 0.12);
+	}
+
+	.palette-tabs button:focus-visible,
+	.position-options button:focus-visible {
+		outline: 2px solid #8d7cff;
+		outline-offset: 2px;
+	}
+
 	.component-list {
 		display: grid;
 		gap: 0.5rem;
+		max-height: min(58vh, 620px);
+		overflow-y: auto;
+		padding-right: 0.15rem;
 	}
 
 	.palette-item {
@@ -1050,6 +1719,16 @@
 
 	.palette-item:nth-child(3) .component-mark,
 	.palette-item:nth-child(6) .component-mark {
+		background: #fff2e8;
+		color: #d1844e;
+	}
+
+	.palette-item.widget-item:nth-child(3n + 1) .component-mark {
+		background: #eaf5f3;
+		color: #419a87;
+	}
+
+	.palette-item.widget-item:nth-child(3n + 2) .component-mark {
 		background: #fff2e8;
 		color: #d1844e;
 	}
@@ -1218,14 +1897,47 @@
 		text-align: left;
 	}
 
+	.canvas-block.positioned {
+		position: absolute;
+		z-index: 1;
+		min-height: 0;
+		box-sizing: border-box;
+		border-radius: 8px;
+		box-shadow: 0 5px 18px rgb(34 34 56 / 0.12);
+	}
+
 	.canvas-block + .canvas-block {
 		border-top: 1px solid #f0eff3;
+	}
+
+	.canvas-block.positioned + .canvas-block.positioned {
+		border-top: 0;
 	}
 
 	.canvas-block:hover,
 	.canvas-block.selected {
 		z-index: 1;
 		box-shadow: inset 0 0 0 2px #8d7cff;
+	}
+
+	.canvas-block.positioned.selected {
+		z-index: 2;
+		box-shadow:
+			inset 0 0 0 2px #8d7cff,
+			0 5px 18px rgb(34 34 56 / 0.12);
+	}
+
+	.canvas-block.positioned .hero-preview,
+	.canvas-block.positioned .features-preview,
+	.canvas-block.positioned .quote-preview,
+	.canvas-block.positioned .text-preview,
+	.canvas-block.positioned .button-preview,
+	.canvas-block.positioned .image-preview {
+		width: 100%;
+		height: 100%;
+		min-height: 0;
+		box-sizing: border-box;
+		overflow: auto;
 	}
 
 	.selection-overlay:focus-visible {
@@ -1250,8 +1962,328 @@
 		cursor: grab;
 	}
 
+	.position-handle {
+		position: absolute;
+		z-index: 4;
+		display: grid;
+		width: 28px;
+		height: 28px;
+		place-items: center;
+		padding: 0;
+		border: 1px solid #dcd7ff;
+		border-radius: 7px;
+		background: #fff;
+		color: #6558cb;
+		box-shadow: 0 2px 6px rgb(34 34 56 / 0.15);
+		touch-action: none;
+	}
+
+	.position-handle svg {
+		width: 16px;
+		height: 16px;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.5;
+	}
+
+	.move-handle {
+		top: 7px;
+		left: 7px;
+		cursor: move;
+	}
+
+	.resize-handle {
+		right: 5px;
+		bottom: 5px;
+		cursor: nwse-resize;
+	}
+
 	.canvas-block.hero {
 		min-height: 290px;
+	}
+
+	.widget-preview {
+		display: flex;
+		min-height: 130px;
+		height: 100%;
+		flex-direction: column;
+		justify-content: center;
+		gap: 0.7rem;
+		padding: 1.5rem;
+		background: #fff;
+		color: #323449;
+		font-size: 0.78rem;
+	}
+
+	.widget-preview > p,
+	.widget-preview p {
+		margin: 0;
+		color: #85869a;
+		font-size: 0.68rem;
+		line-height: 1.55;
+	}
+
+	.widget-form {
+		align-items: stretch;
+	}
+
+	.widget-form label,
+	.widget-slider-heading label {
+		color: #4a4b60;
+		font-size: 0.72rem;
+		font-weight: 650;
+	}
+
+	.widget-form input[type='text'],
+	.widget-form textarea,
+	.widget-form select {
+		width: 100%;
+		min-height: 40px;
+		box-sizing: border-box;
+		padding: 0.6rem 0.7rem;
+		border: 1px solid #dfe0e8;
+		border-radius: 7px;
+		background: #fff;
+		color: #393b50;
+		font: inherit;
+		font-size: 0.72rem;
+	}
+
+	.widget-form input[type='text']:focus,
+	.widget-form textarea:focus,
+	.widget-form select:focus {
+		border-color: #9285ec;
+		outline: 3px solid rgb(119 102 223 / 12%);
+	}
+
+	.widget-form textarea {
+		min-height: 90px;
+		resize: vertical;
+	}
+
+	.widget-form progress {
+		width: 100%;
+		height: 10px;
+		accent-color: #6b5ce7;
+	}
+
+	.widget-slider-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.widget-slider-heading output {
+		color: #77798c;
+		font-size: 0.7rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.widget-form input.widget-range {
+		width: 100%;
+		accent-color: #6b5ce7;
+	}
+
+	.widget-button {
+		display: inline-flex;
+		min-height: 42px;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		align-self: flex-start;
+		padding: 0.65rem 1rem;
+		border: 0;
+		border-radius: 8px;
+		background: #6554d8;
+		color: #fff;
+		font: inherit;
+		font-size: 0.76rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.widget-choice {
+		justify-content: center;
+	}
+
+	.widget-choice label {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		cursor: pointer;
+	}
+
+	.widget-choice label > span {
+		display: grid;
+		gap: 0.25rem;
+	}
+
+	.widget-choice strong,
+	.widget-avatar-preview strong {
+		color: #43455a;
+		font-size: 0.76rem;
+		font-weight: 650;
+	}
+
+	.widget-choice small {
+		color: #85869a;
+		font-size: 0.67rem;
+	}
+
+	.widget-choice input[type='checkbox'],
+	.widget-choice input[type='radio'],
+	.widget-state-control input {
+		width: 18px;
+		height: 18px;
+		accent-color: #6b5ce7;
+	}
+
+	.widget-choice .switch-control {
+		position: relative;
+		justify-content: space-between;
+	}
+
+	.switch-control input {
+		position: absolute;
+		right: 0;
+		width: 42px;
+		height: 26px;
+		margin: 0;
+		opacity: 0;
+		cursor: pointer;
+	}
+
+	.switch-track {
+		position: relative;
+		width: 42px;
+		height: 24px;
+		flex: 0 0 42px;
+		border-radius: 999px;
+		background: #d9dae3;
+		transition: background 120ms ease;
+	}
+
+	.switch-track::after {
+		position: absolute;
+		top: 3px;
+		left: 3px;
+		width: 18px;
+		height: 18px;
+		border-radius: 50%;
+		background: #fff;
+		box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+		content: '';
+		transition: transform 120ms ease;
+	}
+
+	.switch-control input:checked + .switch-track {
+		background: #6b5ce7;
+	}
+
+	.switch-control input:checked + .switch-track::after {
+		transform: translateX(18px);
+	}
+
+	.switch-control input:focus-visible + .switch-track {
+		outline: 3px solid rgb(119 102 223 / 24%);
+		outline-offset: 2px;
+	}
+
+	.widget-badge-preview {
+		align-items: flex-start;
+	}
+
+	.widget-badge {
+		display: inline-flex;
+		min-height: 25px;
+		align-items: center;
+		padding: 0.25rem 0.6rem;
+		border-radius: 999px;
+		background: #eeeaff;
+		color: #5e50c8;
+		font-size: 0.68rem;
+		font-weight: 680;
+	}
+
+	.widget-alert-preview {
+		flex-direction: row;
+		align-items: flex-start;
+		justify-content: flex-start;
+		border: 1px solid #cde9d9;
+		border-radius: 9px;
+		background: #f2fbf5;
+	}
+
+	.alert-icon {
+		display: grid;
+		width: 24px;
+		height: 24px;
+		flex: 0 0 24px;
+		place-items: center;
+		border-radius: 50%;
+		background: #d8f1e2;
+		color: #27794b;
+		font-weight: 700;
+	}
+
+	.widget-alert-preview strong {
+		color: #315d43;
+		font-size: 0.75rem;
+	}
+
+	.widget-avatar-preview {
+		flex-direction: row;
+		align-items: center;
+		justify-content: flex-start;
+	}
+
+	.widget-avatar {
+		display: grid;
+		width: 54px;
+		height: 54px;
+		flex: 0 0 54px;
+		place-items: center;
+		border-radius: 50%;
+		background: linear-gradient(135deg, #dcd5ff, #a89af2);
+		color: #453b96;
+		font-size: 0.95rem;
+		font-weight: 750;
+	}
+
+	.widget-card-preview {
+		align-items: flex-start;
+		border: 1px solid #e8e8ef;
+		border-radius: 10px;
+		box-shadow: 0 5px 16px rgb(34 34 56 / 0.07);
+	}
+
+	.widget-card-mark {
+		color: #7667dd;
+		font-size: 1.2rem;
+	}
+
+	.widget-card-preview h2 {
+		margin: 0;
+		color: #36384d;
+		font-size: 0.95rem;
+		font-weight: 700;
+	}
+
+	.widget-card-preview button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: #6253ca;
+		font: inherit;
+		font-size: 0.7rem;
+		font-weight: 650;
+		cursor: pointer;
 	}
 
 	.hero-preview {
@@ -1721,6 +2753,59 @@
 		color: #686a80;
 		font-size: 0.67rem;
 		font-weight: 650;
+	}
+
+	.position-options {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.3rem;
+		padding: 0.2rem;
+		border: 1px solid #e8e7ef;
+		border-radius: 8px;
+		background: #f8f8fb;
+	}
+
+	.position-options button {
+		min-height: 31px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: #77798c;
+		font-size: 0.67rem;
+		cursor: pointer;
+	}
+
+	.position-options button.position-active {
+		background: #fff;
+		color: #6253ca;
+		box-shadow: 0 1px 4px rgb(34 34 56 / 0.12);
+	}
+
+	.position-hint {
+		margin: 0.55rem 0 0.2rem;
+		color: var(--muted);
+		font-size: 0.62rem;
+		line-height: 1.5;
+	}
+
+	.position-fields {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.15rem 0.6rem;
+	}
+
+	.widget-state-control {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.85rem;
+		color: #686a80;
+		font-size: 0.67rem;
+		font-weight: 650;
+	}
+
+	.widget-state-control input {
+		accent-color: #6b5ce7;
 	}
 
 	.field-control {

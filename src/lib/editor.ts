@@ -162,10 +162,55 @@ const themes: Theme[] = ['light', 'lavender', 'dark'];
  */
 export const canvasLimits = {
 	minWidth: 320,
-	maxWidth: 1600,
+	maxWidth: 3840,
 	minHeight: 300,
 	maxHeight: 5000
 };
+
+/** A named, commonly used canvas resolution (CSS pixels). */
+export interface CanvasPreset {
+	/** Human readable name shown in the size picker. */
+	label: string;
+	width: number;
+	height: number;
+	/** Device family used to group the picker options. */
+	group: 'Desktop' | 'Tablet' | 'Mobile';
+}
+
+/**
+ * Common screen resolutions offered by the canvas size picker. Every entry must stay within
+ * {@link canvasLimits}; the order is the display order inside each group.
+ */
+export const canvasPresets: CanvasPreset[] = [
+	{ group: 'Desktop', label: 'Full HD', width: 1920, height: 1080 },
+	{ group: 'Desktop', label: '4K UHD', width: 3840, height: 2160 },
+	{ group: 'Desktop', label: 'QHD (2K)', width: 2560, height: 1440 },
+	{ group: 'Desktop', label: 'WXGA+ laptop', width: 1440, height: 900 },
+	{ group: 'Desktop', label: 'HD laptop', width: 1366, height: 768 },
+	{ group: 'Desktop', label: 'Small desktop', width: 1280, height: 720 },
+	{ group: 'Desktop', label: 'XGA', width: 1024, height: 768 },
+	{ group: 'Tablet', label: 'iPad Pro 12.9" (portrait)', width: 1024, height: 1366 },
+	{ group: 'Tablet', label: 'iPad (portrait)', width: 768, height: 1024 },
+	{ group: 'Tablet', label: 'Android tablet (portrait)', width: 800, height: 1280 },
+	{ group: 'Mobile', label: 'iPhone Pro Max', width: 430, height: 932 },
+	{ group: 'Mobile', label: 'iPhone 14/15', width: 390, height: 844 },
+	{ group: 'Mobile', label: 'Android (Pixel)', width: 412, height: 915 },
+	{ group: 'Mobile', label: 'iPhone SE', width: 375, height: 667 }
+];
+
+/** Canvas size used for newly created pages: Full HD. */
+export const defaultCanvasSize = { width: 1920, height: 1080 } as const;
+
+/**
+ * Finds the preset matching an exact size.
+ *
+ * @param width - Canvas width in pixels.
+ * @param height - Canvas (minimum) height in pixels.
+ * @returns The matching preset, or `undefined` for a custom size.
+ */
+export function findCanvasPreset(width: number, height: number): CanvasPreset | undefined {
+	return canvasPresets.find((preset) => preset.width === width && preset.height === height);
+}
 
 /** Regular expression validating page route slugs. */
 const slugPattern = /^[a-z0-9-]{1,40}$/;

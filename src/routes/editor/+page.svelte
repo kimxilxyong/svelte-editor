@@ -8,7 +8,7 @@
 	 *      and "Custom" (dynamically imported project components).
 	 *    - Pure drag-and-drop placement with canvas-relative percentage coordinates.
 	 * 2. Canvas Stage:
-	 *    - Flexible viewport widths with Mobile (390px), Tablet (768px), and Desktop (1200px) presets.
+	 *    - Canvas size picker with common resolutions (default Full HD 1920×1080).
 	 *    - Direct pointer interaction for moving and resizing blocks.
 	 *    - Automatic vertical expansion accommodating block boundaries.
 	 *    - Multi-page switching and route jump support in Preview mode.
@@ -49,7 +49,9 @@
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import AppNav from '../../lib/components/AppNav.svelte';
+	import CanvasSizePicker from '../../lib/components/CanvasSizePicker.svelte';
 	import {
+		defaultCanvasSize,
 		isValidLinkHref,
 		type BuilderBlock,
 		type BlockKind,
@@ -271,8 +273,8 @@
 		id: 'home',
 		name: 'Home',
 		slug: 'home',
-		width: 800,
-		height: 600,
+		width: defaultCanvasSize.width,
+		height: defaultCanvasSize.height,
 		blocks: [
 			{
 				id: 'sample-hero',
@@ -566,11 +568,6 @@
 			}
 		});
 	});
-
-	function setCanvasWidth(width: number) {
-		currentPage.width = width;
-		markUnsaved();
-	}
 
 	function resolveInternalPage(href: string) {
 		const slug = href.slice(1).split(/[?#]/)[0];
@@ -929,19 +926,12 @@
 					>
 				</button>
 			</div>
-			<div class="viewport-switch" role="group" aria-label="Canvas size presets">
-				{#each [{ label: 'Mobile', width: 390, key: 'M' }, { label: 'Tablet', width: 768, key: 'T' }, { label: 'Desktop', width: 1200, key: 'D' }] as preset (preset.width)}
-					<button
-						type="button"
-						class:active={currentPage.width === preset.width}
-						aria-label="{preset.label} canvas, {preset.width} pixels wide"
-						title="{preset.label} · {preset.width}px"
-						aria-pressed={currentPage.width === preset.width}
-						onclick={() => setCanvasWidth(preset.width)}
-					>
-						{preset.key}
-					</button>
-				{/each}
+			<div class="canvas-size-control">
+				<CanvasSizePicker
+					bind:width={currentPage.width}
+					bind:height={currentPage.height}
+					onchange={markUnsaved}
+				/>
 			</div>
 			<button class="preview-button" type="button" onclick={() => (isPreview = !isPreview)}>
 				{#if isPreview}
@@ -1636,6 +1626,11 @@
 	.project-name,
 	.header-actions,
 	.save-status,
+	.canvas-size-control {
+		min-width: 0;
+		width: 15rem;
+	}
+
 	.viewport-switch,
 	.canvas-label,
 	.canvas-actions {
@@ -1767,11 +1762,6 @@
 		background: transparent;
 		color: #9697a9;
 		cursor: pointer;
-	}
-
-	.viewport-switch button.active {
-		background: #f0edff;
-		color: var(--purple);
 	}
 
 	.viewport-switch svg,

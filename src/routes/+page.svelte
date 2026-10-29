@@ -17,7 +17,13 @@
 	import { resolve } from '$app/paths';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
 	import AppNav from '../lib/components/AppNav.svelte';
-	import { canvasLimits, type EditorPage, type EditorSite } from '../lib/editor.js';
+	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
+	import {
+		canvasLimits,
+		defaultCanvasSize,
+		type EditorPage,
+		type EditorSite
+	} from '../lib/editor.js';
 
 	type ApiResponse = { created?: boolean; site?: EditorSite | null; error?: string };
 
@@ -203,8 +209,8 @@
 			id: globalThis.crypto.randomUUID(),
 			name: `Page ${number}`,
 			slug: uniqueSlug(`page-${number}`),
-			width: selected?.width ?? 800,
-			height: selected?.height ?? 600,
+			width: defaultCanvasSize.width,
+			height: defaultCanvasSize.height,
 			blocks: []
 		};
 		pages.push(page);
@@ -405,7 +411,13 @@
 							onchange={commitSlug}
 						/>
 					</div>
-					<span class="field-label">Canvas size</span>
+					<label class="field-label" for="canvas-size">Canvas size</label>
+					<CanvasSizePicker
+						id="canvas-size"
+						bind:width={selected.width}
+						bind:height={selected.height}
+						onchange={touch}
+					/>
 					<div class="position-fields">
 						<div>
 							<label class="field-label" for="canvas-width">Width (px)</label>

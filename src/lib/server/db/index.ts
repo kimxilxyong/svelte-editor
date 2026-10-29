@@ -80,7 +80,7 @@ export function getSavedSite(): EditorSite | null {
 		const blocks = parseBuilderBlocks(parsed);
 		if (!blocks) throw new Error('The saved editor page contains invalid block data.');
 		return {
-			pages: [{ id: 'home', name: 'Home', slug: 'home', width: 800, height: 600, blocks }]
+			pages: [{ id: 'home', name: 'Home', slug: 'home', width: 1920, height: 1080, blocks }]
 		};
 	}
 

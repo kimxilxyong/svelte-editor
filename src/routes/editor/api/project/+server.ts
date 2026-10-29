@@ -1,3 +1,15 @@
+/**
+ * @fileoverview SvelteKit Project Integration API Endpoint.
+ *
+ * `POST /editor/api/project`
+ *
+ * Routes project-level operations between the client UI and the server filesystem:
+ * - `action: 'export'`: Exports an entire EditorSite to a real SvelteKit application directory.
+ * - `action: 'import'`: Scans and imports all components and pages from a SvelteKit application directory.
+ * - `action: 'export-component'`: Exports a single component by name into `src/lib/components/editor/`.
+ * - `action: 'import-component'`: Imports and parses a single `.svelte` component file.
+ */
+
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../../lib/editor.js';

@@ -1,28 +1,88 @@
+/**
+ * @fileoverview Server-Side SvelteKit Project Exporter and Importer.
+ *
+ * Implements bidirectional integration between the visual editor and real,
+ * on-disk SvelteKit project directory structures:
+ *
+ * Key Capabilities:
+ * 1. Safe Directory Resolution:
+ *    - Resolves real canonical paths using `realpath`.
+ *    - Validates that target folders are genuine SvelteKit projects (must contain
+ *      `package.json` and `src/routes`).
+ * 2. Overwrite Protection:
+ *    - Protects user-crafted code: files without the `<!-- @svelte-editor` header
+ *      are never overwritten and are instead reported as skipped.
+ * 3. Complete Component Export:
+ *    - Writes all 20 built-in native Svelte components (`Hero.svelte`, `WidgetSlider.svelte`, etc.)
+ *      into `src/lib/components/editor/` in the target project.
+ *    - Writes route pages into `src/routes/<slug>/+page.svelte`.
+ * 4. Two-Way Scanning & Component Import:
+ *    - Recursively scans `src/lib/components/` in the target project for any `.svelte` files.
+ *    - Parses AST metadata (props, types, defaults) using `svelte-component-parser`.
+ *    - Imports pages and binds component references back into the editor's live state.
+ * 5. Granular Single-Component Export/Import:
+ *    - Allows exporting or importing individual components on demand.
+ */
+
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { componentNames, type EditorPage, type EditorSite } from '../editor.js';
 import { generatedMarker, parsePageSource, renderPageSource } from '../svelte-pages.js';
 import { parseSvelteComponent, type ParsedComponentMetadata } from '../svelte-component-parser.js';
 
+/**
+ * Raw string templates of all built-in editor components loaded via Vite glob.
+ */
 const componentSources = import.meta.glob('../components/editor/*.svelte', {
 	query: '?raw',
 	import: 'default',
 	eager: true
 }) as Record<string, string>;
 
+/** Route slug format pattern. */
 const slugPattern = /^[a-z0-9-]{1,40}$/;
 
+/**
+ * Custom error class for project validation and filesystem operation errors.
+ */
 export class ProjectError extends Error {}
 
-export type ExportResult = { written: string[]; skipped: { file: string; reason: string }[] };
-export type ImportResult = {
-	pages: EditorPage[];
-	components: ParsedComponentMetadata[];
+/**
+ * Result report from an export operation.
+ */
+export type ExportResult = {
+	/** Relative file paths successfully written. */
+	written: string[];
+	/** Files that could not be written or were skipped for safety. */
 	skipped: { file: string; reason: string }[];
 };
 
-/** Validates that `root` is a SvelteKit project folder and returns its real path. */
-export async function resolveProject(root: unknown) {
+/**
+ * Result report from an import operation.
+ */
+export type ImportResult = {
+	/** Pages successfully reconstructed from project route files. */
+	pages: EditorPage[];
+	/** Native Svelte components discovered and parsed in src/lib/components/. */
+	components: ParsedComponentMetadata[];
+	/** Files that failed validation or could not be parsed. */
+	skipped: { file: string; reason: string }[];
+};
+
+/**
+ * Validates that `root` is a valid, existing SvelteKit project directory.
+ *
+ * Checks for:
+ * - Absolute path and no null bytes.
+ * - Existence on disk via `realpath`.
+ * - Presence of `package.json` file.
+ * - Presence of `src/routes` directory.
+ *
+ * @param root - Absolute path to the candidate directory.
+ * @returns Canonical resolved absolute path.
+ * @throws {ProjectError} If validation fails.
+ */
+export async function resolveProject(root: unknown): Promise<string> {
 	if (typeof root !== 'string' || root.trim() === '' || root.length > 500 || root.includes('\0')) {
 		throw new ProjectError('Enter the absolute path of a SvelteKit project folder.');
 	}
@@ -45,21 +105,27 @@ export async function resolveProject(root: unknown) {
 	return real;
 }
 
-async function isFile(file: string) {
+/** Checks whether a path exists and is a regular file. */
+async function isFile(file: string): Promise<boolean> {
 	return lstat(file).then(
 		(stat) => stat.isFile(),
 		() => false
 	);
 }
 
-async function isDirectory(dir: string) {
+/** Checks whether a path exists and is a directory. */
+async function isDirectory(dir: string): Promise<boolean> {
 	return lstat(dir).then(
 		(stat) => stat.isDirectory(),
 		() => false
 	);
 }
 
-async function ensureDirectory(root: string, dir: string) {
+/**
+ * Recursively creates parent directories within the project root.
+ * Guarantees no escape outside the project root boundaries.
+ */
+async function ensureDirectory(root: string, dir: string): Promise<void> {
 	const relative = path.relative(root, dir);
 	if (relative.startsWith('..') || path.isAbsolute(relative))
 		throw new ProjectError('Invalid path.');
@@ -73,8 +139,21 @@ async function ensureDirectory(root: string, dir: string) {
 	}
 }
 
-/** Writes `content` unless a file that was not generated by the editor is in the way. */
-async function writeGenerated(root: string, file: string, content: string, result: ExportResult) {
+/**
+ * Writes file content safely. If a destination file already exists, it is only
+ * overwritten if it begins with the editor's generated marker comment.
+ *
+ * @param root - Canonical project root path.
+ * @param file - Target absolute file path.
+ * @param content - File contents to write.
+ * @param result - ExportResult accumulator.
+ */
+async function writeGenerated(
+	root: string,
+	file: string,
+	content: string,
+	result: ExportResult
+): Promise<void> {
 	const relative = path.relative(root, file);
 	const stat = await lstat(file).catch(() => null);
 
@@ -85,7 +164,10 @@ async function writeGenerated(root: string, file: string, content: string, resul
 		}
 		const existing = await readFile(file, 'utf8');
 		if (!existing.startsWith('<!-- @svelte-editor')) {
-			result.skipped.push({ file: relative, reason: 'exists and was not generated by the editor' });
+			result.skipped.push({
+				file: relative,
+				reason: 'exists and was not generated by the editor'
+			});
 			return;
 		}
 	}
@@ -95,6 +177,17 @@ async function writeGenerated(root: string, file: string, content: string, resul
 	result.written.push(relative);
 }
 
+/**
+ * Exports an entire EditorSite to a real SvelteKit application directory.
+ *
+ * Writes:
+ * - All 20 built-in components to `src/lib/components/editor/<Name>.svelte`.
+ * - All site pages to `src/routes/<slug>/+page.svelte`.
+ *
+ * @param rootInput - Absolute path to target SvelteKit project.
+ * @param site - EditorSite model containing pages to export.
+ * @returns Result object with lists of written and skipped files.
+ */
 export async function exportSite(rootInput: unknown, site: EditorSite): Promise<ExportResult> {
 	const root = await resolveProject(rootInput);
 	const result: ExportResult = { written: [], skipped: [] };
@@ -122,6 +215,9 @@ export async function exportSite(rootInput: unknown, site: EditorSite): Promise<
 	return result;
 }
 
+/**
+ * Recursively scans a directory for native `.svelte` files and extracts their component metadata.
+ */
 async function scanComponents(
 	dir: string,
 	root: string,
@@ -141,13 +237,23 @@ async function scanComponents(
 				const meta = parseSvelteComponent(src, entry.name);
 				found.push(meta);
 			} catch {
-				// Ignore parse errors for non-standard files
+				// Ignore parse errors for non-standard or malformed files
 			}
 		}
 	}
 	return found;
 }
 
+/**
+ * Imports editor pages and native Svelte components from a real SvelteKit application directory.
+ *
+ * Scans:
+ * - `src/lib/components/` for all `.svelte` components.
+ * - `src/routes/` for valid editor `+page.svelte` files.
+ *
+ * @param rootInput - Absolute path to candidate SvelteKit project directory.
+ * @returns Discovered pages, parsed component descriptors, and skipped file reports.
+ */
 export async function importSite(rootInput: unknown): Promise<ImportResult> {
 	const root = await resolveProject(rootInput);
 	const routes = path.join(root, 'src', 'routes');
@@ -185,6 +291,13 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
 	return result;
 }
 
+/**
+ * Exports a single built-in component into a target SvelteKit project.
+ *
+ * @param rootInput - Absolute path to target SvelteKit project.
+ * @param componentName - Name of the component (e.g. 'WidgetSlider').
+ * @returns Relative path of written component file.
+ */
 export async function exportSingleComponent(
 	rootInput: unknown,
 	componentName: string
@@ -200,6 +313,13 @@ export async function exportSingleComponent(
 	return { written: path.relative(root, targetFile) };
 }
 
+/**
+ * Imports and parses a single `.svelte` component file from a project.
+ *
+ * @param rootInput - Absolute path to target SvelteKit project.
+ * @param componentRelativePath - Path to the component relative to the project root.
+ * @returns Parsed component metadata.
+ */
 export async function importSingleComponent(
 	rootInput: unknown,
 	componentRelativePath: string

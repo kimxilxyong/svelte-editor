@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetSwitch
+	 * Accessible toggle switch widget for turning settings on and off.
+	 *
+	 * @prop {string} [id] - Unique switch element ID.
+	 * @prop {string} title - Switch label text.
+	 * @prop {string} body - Status or context explanation.
+	 * @prop {boolean} [checked=false] - Two-way bindable switch state.
+	 * @prop {() => void} [onchange] - Change event callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

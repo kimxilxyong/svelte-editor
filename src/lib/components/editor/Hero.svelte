@@ -1,4 +1,13 @@
 <script lang="ts">
+	/**
+	 * @component Hero
+	 * Bold opening section for a landing page or website header.
+	 *
+	 * @prop {string} title - Main headline text.
+	 * @prop {string} body - Supporting descriptive text.
+	 * @prop {string} action - Call-to-action button caption.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

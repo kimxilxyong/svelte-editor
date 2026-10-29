@@ -1,4 +1,12 @@
 <script lang="ts">
+	/**
+	 * @component ImageSection
+	 * Visual illustration section combining vector artwork with accompanying copy.
+	 *
+	 * @prop {string} title - Image heading text.
+	 * @prop {string} body - Accompanying caption or description.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

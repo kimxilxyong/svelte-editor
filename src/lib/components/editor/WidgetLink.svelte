@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetLink
+	 * Navigation link widget supporting internal page routing and external URLs.
+	 *
+	 * @prop {string} title - Anchor text.
+	 * @prop {string} body - Accompanying caption.
+	 * @prop {string} href - Target route or URL.
+	 * @prop {boolean} newTab - Whether external links open in a new tab.
+	 * @prop {(event: MouseEvent) => void} [onnavigate] - Intercept handler for preview mode routing.
+	 */
 	let {
 		title,
 		body,

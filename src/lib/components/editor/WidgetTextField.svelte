@@ -1,4 +1,15 @@
 <script lang="ts">
+	/**
+	 * @component WidgetTextField
+	 * Single-line text input widget with label and optional placeholder.
+	 *
+	 * @prop {string} [id] - Optional element ID (falls back to generated ID).
+	 * @prop {string} title - Field label text.
+	 * @prop {string} action - Input placeholder text.
+	 * @prop {string} body - Helper text below input.
+	 * @prop {string} [value] - Two-way bindable text value.
+	 * @prop {() => void} [onchange] - Change notification callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

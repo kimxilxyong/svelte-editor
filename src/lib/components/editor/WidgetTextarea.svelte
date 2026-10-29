@@ -1,4 +1,15 @@
 <script lang="ts">
+	/**
+	 * @component WidgetTextarea
+	 * Multi-line textarea form widget for long-form user responses.
+	 *
+	 * @prop {string} [id] - Optional element ID (falls back to generated ID).
+	 * @prop {string} title - Field label text.
+	 * @prop {string} action - Textarea placeholder text.
+	 * @prop {string} body - Helper text below textarea.
+	 * @prop {string} [value] - Two-way bindable textarea content.
+	 * @prop {() => void} [onchange] - Input change callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

@@ -1,4 +1,13 @@
 <script lang="ts">
+	/**
+	 * @component Quote
+	 * Testimonial quote block displaying customer feedback and author attribution.
+	 *
+	 * @prop {string} title - Pull-quote statement.
+	 * @prop {string} body - Context or background details.
+	 * @prop {string} action - Attributed author name and title.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

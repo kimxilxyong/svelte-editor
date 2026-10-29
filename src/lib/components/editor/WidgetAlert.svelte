@@ -1,4 +1,11 @@
 <script lang="ts">
+	/**
+	 * @component WidgetAlert
+	 * Contextual notification banner widget for success or informational alerts.
+	 *
+	 * @prop {string} title - Alert heading or status summary.
+	 * @prop {string} body - Detailed message copy.
+	 */
 	let { title, body }: { title: string; body: string } = $props();
 </script>
 

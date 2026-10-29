@@ -1,4 +1,12 @@
 <script lang="ts">
+	/**
+	 * @component TextSection
+	 * Rich storytelling text section with header kicker and body copy.
+	 *
+	 * @prop {string} title - Section title heading.
+	 * @prop {string} body - Narrative paragraph content.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

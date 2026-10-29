@@ -58,6 +58,15 @@ After editing, ALWAYS call `svelte-autofixer` with the updated code to check for
 
 If the autofixer reports problems, fix them and re-validate until no issues remain.
 
+## Source Code Documentation Requirements
+
+Always add extensive human- and machine-readable documentation to source files according to industry standards:
+
+- **JSDoc / TSDoc Format**: Use standard JSDoc/TSDoc blocks (`/** ... */`) for modules, interfaces, types, functions, and components.
+- **Component Documentation**: Include `@component` summary and `@prop` tags documenting prop names, types, default values, and bindable semantics at the top of every Svelte component's `<script>` block.
+- **Architecture & Design Decisions**: Comment non-obvious architecture, reactive state interactions (`$state`, `$derived`, `$effect`), coordinate systems, and AST parsing/generating rationale so that both future human engineers and AI agents understand the code context and intent.
+- **Module Overviews**: Provide `@fileoverview` header comments in TypeScript files explaining the module's responsibilities, input/output contracts, and dependencies.
+
 ## Output format
 
 After completing your work, provide:

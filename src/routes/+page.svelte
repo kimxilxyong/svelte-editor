@@ -1,4 +1,18 @@
 <script lang="ts">
+	/**
+	 * @fileoverview Site & Multi-Page Management Home View (`/`).
+	 *
+	 * Serves as the central administration cockpit for website projects:
+	 * - Multi-page management: Add, duplicate, delete, and configure pages and slugs.
+	 * - SQLite persistence: Create tables and save/load entire `EditorSite` models.
+	 * - Canvas settings: Configure page widths (mobile/tablet/desktop) and minimum heights.
+	 * - SvelteKit project sync:
+	 *   - Browse server filesystem via `DirectoryPickerModal`.
+	 *   - Two-way export & import of native `.svelte` components and route pages.
+	 * - Visual preview: Live scaled thumbnail view of page layout and blocks.
+	 * - Direct navigation to the visual WYSIWYG editor (`/editor?page=<id>`).
+	 */
+
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';

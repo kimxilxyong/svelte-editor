@@ -1,4 +1,22 @@
+/**
+ * @fileoverview Core data models, schema definitions, validation logic, and component
+ * resolution for the visual SvelteKit Page Editor.
+ *
+ * This module defines the domain entities used across the application:
+ * - Block kinds (sections, atomic widgets, and user-defined custom components).
+ * - Layout and positioning models (relative x%/width% vs absolute y/height px).
+ * - Site structure (`EditorSite` -> `EditorPage` -> `BuilderBlock`).
+ * - Runtime validation and sanitization for block attributes, routes, and link targets.
+ */
+
+/**
+ * Standard layout section component types.
+ */
 export type SectionKind = 'hero' | 'text' | 'button' | 'features' | 'image' | 'quote';
+
+/**
+ * Atomic GUI widget component types.
+ */
 export type WidgetKind =
 	| 'widget-button'
 	| 'widget-text-field'
@@ -14,45 +32,105 @@ export type WidgetKind =
 	| 'widget-avatar'
 	| 'widget-card'
 	| 'widget-link';
+
+/**
+ * Dynamic custom component kind prefix, e.g., 'custom:NewsletterSignup'.
+ */
 export type CustomKind = `custom:${string}`;
+
+/**
+ * Union of all valid component kinds accepted by the editor canvas and generator.
+ */
 export type BlockKind = SectionKind | WidgetKind | CustomKind;
 
+/**
+ * Validates whether a given string is a correctly formatted custom component kind identifier.
+ *
+ * @param kind - The component kind string to validate.
+ * @returns `true` if the identifier matches the `custom:<PascalOrCamelName>` pattern.
+ */
 export function isValidCustomKind(kind: string): boolean {
 	return /^custom:[A-Za-z0-9_-]{1,60}$/.test(kind);
 }
+
+/**
+ * Visual styling theme applied to layout sections.
+ */
 export type Theme = 'light' | 'lavender' | 'dark';
 
+/**
+ * Represents a single visual component or widget placed onto an editor page.
+ *
+ * Coordinates are hybrid:
+ * - `x`: Horizontal offset as a percentage (0% to 100%) of the canvas width.
+ * - `width`: Horizontal span as a percentage (20% to 100%) of the canvas width.
+ * - `y`: Vertical offset in absolute pixels from the top of the canvas.
+ * - `height`: Vertical height in absolute pixels.
+ */
 export type BuilderBlock = {
+	/** Unique identifier for the block instance (UUID). */
 	id: string;
+	/** Component kind identifier (section, widget, or custom). */
 	kind: BlockKind;
+	/** Primary text label or heading. */
 	title: string;
+	/** Secondary descriptive text or body content. */
 	body: string;
+	/** Action button label or kicker caption. */
 	action: string;
+	/** Visual color theme for section containers. */
 	theme: Theme;
+	/** Whether the block is positioned with coordinates (always true in current version). */
 	positioned: boolean;
+	/** Horizontal coordinate as percentage of canvas width (0-100). */
 	x: number;
+	/** Vertical coordinate in pixels from canvas top. */
 	y: number;
+	/** Width as percentage of canvas width (20-100). */
 	width: number;
+	/** Height in pixels (100-1600). */
 	height: number;
+	/** Input value for text fields, textareas, and select menus. */
 	value: string;
+	/** Checked state for checkboxes, radio buttons, and switches. */
 	checked: boolean;
+	/** Level percentage (0-100) for sliders and progress bars. */
 	level: number;
+	/** Target URL or internal page route for link widgets. */
 	href: string;
+	/** Whether external links should open in a new browser tab. */
 	newTab: boolean;
+	/** Dynamic properties for custom Svelte components imported from target projects. */
 	customProps?: Record<string, string | number | boolean>;
 };
 
+/**
+ * Represents a single route page within a multi-page site.
+ */
 export type EditorPage = {
+	/** Unique identifier for the page (UUID or 'home'). */
 	id: string;
+	/** Human-readable display name for the page. */
 	name: string;
+	/** URL slug used in routes (e.g., 'about', 'contact', 'home'). */
 	slug: string;
+	/** Canvas viewport width in pixels (e.g. 390 for mobile, 1200 for desktop). */
 	width: number;
+	/** Minimum canvas viewport height in pixels. */
 	height: number;
+	/** List of blocks positioned on this page. */
 	blocks: BuilderBlock[];
 };
 
-export type EditorSite = { pages: EditorPage[] };
+/**
+ * Root site model holding all pages in the user's project.
+ */
+export type EditorSite = {
+	/** Ordered list of pages in the site. */
+	pages: EditorPage[];
+};
 
+/** List of recognized built-in section and widget kinds. */
 const blockKinds: BlockKind[] = [
 	'hero',
 	'text',
@@ -75,12 +153,37 @@ const blockKinds: BlockKind[] = [
 	'widget-card',
 	'widget-link'
 ];
+
+/** Permitted theme names. */
 const themes: Theme[] = ['light', 'lavender', 'dark'];
 
-export const canvasLimits = { minWidth: 320, maxWidth: 1600, minHeight: 300, maxHeight: 5000 };
+/**
+ * Allowed boundaries for canvas viewport dimensions.
+ */
+export const canvasLimits = {
+	minWidth: 320,
+	maxWidth: 1600,
+	minHeight: 300,
+	maxHeight: 5000
+};
+
+/** Regular expression validating page route slugs. */
 const slugPattern = /^[a-z0-9-]{1,40}$/;
 
-export function isValidLinkHref(href: string) {
+/**
+ * Validates link href targets for safety against script injection and invalid formats.
+ *
+ * Accepts:
+ * - Empty string
+ * - Relative internal paths matching `^/[a-z0-9\-_/#?=&.]*$`
+ * - Absolute HTTP/HTTPS URLs matching `^https?://[^\s]+$`
+ *
+ * Rejects javascript: URLs, data: URIs, or overly long inputs (>200 chars).
+ *
+ * @param href - The link target string to validate.
+ * @returns `true` if the href is safe and valid.
+ */
+export function isValidLinkHref(href: string): boolean {
 	return (
 		href === '' ||
 		(href.length <= 200 &&
@@ -88,6 +191,15 @@ export function isValidLinkHref(href: string) {
 	);
 }
 
+/**
+ * Parses, sanitizes, and bounds-checks an untrusted block collection payload.
+ *
+ * Automatically converts legacy flow blocks into positioned blocks and enforces
+ * geometry limits (e.g., width 20-100%, height 100-1600px).
+ *
+ * @param value - Untrusted JSON or parsed object array.
+ * @returns Validated BuilderBlock array, or `null` if the payload is malformed.
+ */
 export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 	if (!Array.isArray(value) || value.length > 100) return null;
 
@@ -160,6 +272,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		const positionedY = positioned ? y : nextFlowPosition;
 		ids.add(block.id);
 		if (!positioned) nextFlowPosition = Math.min(5000, positionedY + height + 40);
+
 		let customProps: Record<string, string | number | boolean> | undefined;
 		if (
 			block.customProps &&
@@ -200,6 +313,18 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 	return blocks;
 }
 
+/**
+ * Parses and validates an entire multi-page EditorSite structure.
+ *
+ * Ensures:
+ * - 1 to 20 pages exist.
+ * - Slugs are non-empty, unique, and follow the kebab-case pattern `^[a-z0-9-]{1,40}$`.
+ * - Viewport dimensions respect canvas limits.
+ * - All nested blocks are valid.
+ *
+ * @param value - Untrusted JSON object representing a site payload.
+ * @returns Validated EditorSite, or `null` if invalid.
+ */
 export function parseEditorSite(value: unknown): EditorSite | null {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
 	const pagesValue = (value as Record<string, unknown>).pages;
@@ -253,12 +378,20 @@ export function parseEditorSite(value: unknown): EditorSite | null {
 	return { pages };
 }
 
-// Component file names (without .svelte) in src/lib/components/editor/ for each block kind.
+/**
+ * Maps a block kind identifier to its corresponding native Svelte component PascalCase name.
+ *
+ * @param kind - Block kind identifier (e.g. 'hero', 'widget-button', 'custom:NewsletterSignup').
+ * @returns The component name without file extension (e.g. 'Hero', 'WidgetButton', 'NewsletterSignup').
+ */
 export function getComponentName(kind: BlockKind): string {
 	if (kind.startsWith('custom:')) return kind.slice(7);
 	return (componentNames as Record<string, string>)[kind] || kind;
 }
 
+/**
+ * Registry of PascalCase component file names for built-in sections and widgets.
+ */
 export const componentNames: Record<SectionKind | WidgetKind, string> = {
 	hero: 'Hero',
 	text: 'TextSection',

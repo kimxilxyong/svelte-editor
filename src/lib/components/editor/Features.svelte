@@ -1,4 +1,12 @@
 <script lang="ts">
+	/**
+	 * @component Features
+	 * Feature showcase section highlighting key benefits and value propositions.
+	 *
+	 * @prop {string} title - Feature section title.
+	 * @prop {string} body - Introductory subtitle or summary.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

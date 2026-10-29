@@ -1,21 +1,57 @@
+/**
+ * @fileoverview Native Svelte Component Parser & Metadata Extractor.
+ *
+ * Uses the modern `svelte/compiler` AST parser to inspect `<script>` instances of
+ * `.svelte` component files. It extracts declared props, default values, and prop types
+ * from both:
+ * 1. Modern Svelte 5 runes: `let { prop1, prop2 = defaultValue }: Props = $props();`
+ * 2. Legacy Svelte 4 / 5 syntax: `export let propName = defaultValue;`
+ *
+ * This metadata enables the visual editor to dynamically import custom user components
+ * from an external SvelteKit project and generate reactive inspector controls.
+ */
+
 import { parse } from 'svelte/compiler';
 
+/**
+ * Supported primitive property types for custom editor components.
+ */
 export type ComponentPropType = 'string' | 'number' | 'boolean';
 
+/**
+ * Metadata descriptor for an individual component property.
+ */
 export type ComponentProp = {
+	/** Name of the prop (e.g., 'title', 'count', 'isOpen'). */
 	name: string;
+	/** Inferred primitive data type for UI control selection. */
 	type: ComponentPropType;
+	/** Optional default value defined in the component declaration. */
 	defaultValue?: string | number | boolean;
+	/** Whether the prop is marked as $bindable() in Svelte 5. */
 	bindable?: boolean;
 };
 
+/**
+ * Complete metadata extracted from a native `.svelte` file.
+ */
 export type ParsedComponentMetadata = {
+	/** PascalCase component name extracted from filename. */
 	name: string;
+	/** File name including extension (e.g. 'CustomCard.svelte'). */
 	fileName: string;
+	/** List of extracted public properties. */
 	props: ComponentProp[];
+	/** Unmodified source code of the component. */
 	rawSource: string;
 };
 
+/**
+ * Normalizes TypeScript AST type nodes to one of our supported ComponentPropTypes.
+ *
+ * @param typeNode - AST type annotation node.
+ * @returns ComponentPropType or `undefined` if not a recognized primitive.
+ */
 function normalizeType(typeNode?: any): ComponentPropType | undefined {
 	if (!typeNode) return undefined;
 	if (typeNode.type === 'TSStringKeyword') return 'string';
@@ -24,6 +60,16 @@ function normalizeType(typeNode?: any): ComponentPropType | undefined {
 	return undefined;
 }
 
+/**
+ * Parses a native `.svelte` component source string and extracts its component metadata.
+ *
+ * Safe execution: if parsing fails or AST contains non-standard constructs, it gracefully
+ * falls back to returning the component with an empty props array.
+ *
+ * @param source - Raw content of the `.svelte` file.
+ * @param fileName - File name with extension (e.g., 'Hero.svelte').
+ * @returns Structured metadata including component name and extracted props.
+ */
 export function parseSvelteComponent(source: string, fileName: string): ParsedComponentMetadata {
 	const name = fileName.replace(/\.svelte$/, '');
 	const props: ComponentProp[] = [];
@@ -50,7 +96,7 @@ export function parseSvelteComponent(source: string, fileName: string): ParsedCo
 		};
 	}
 
-	// 1. Gather type information from interfaces or type aliases in script
+	// 1. Gather type information from interfaces or type aliases in script (e.g. interface Props { ... })
 	const typeMap = new Map<string, ComponentPropType>();
 	for (const node of script.content.body) {
 		if (node.type === 'TSInterfaceDeclaration' && node.body?.body) {
@@ -85,6 +131,7 @@ export function parseSvelteComponent(source: string, fileName: string): ParsedCo
 					for (const propNode of decl.id.properties) {
 						if (propNode.type === 'Property' && propNode.key?.name) {
 							const propName = propNode.key.name;
+							// Ignore internal callbacks or snippet slots
 							if (propName.startsWith('on') || propName === 'children') continue;
 
 							let defaultValue: string | number | boolean | undefined;

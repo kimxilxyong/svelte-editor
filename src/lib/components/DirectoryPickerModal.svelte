@@ -1,10 +1,28 @@
 <script lang="ts">
+	/**
+	 * @fileoverview Dual-Mode Local Filesystem Directory Picker Modal.
+	 *
+	 * Provides an interactive modal dialog allowing users to browse and select
+	 * local SvelteKit project folders directly on the server host:
+	 * - Real-time breadcrumb navigation with clickable folder segments.
+	 * - Root (`/`), home (`~`), and parent (`↑ Up`) quick-jump buttons.
+	 * - Automatic detection badge for valid SvelteKit projects.
+	 * - Full keyboard accessibility with Escape-to-close.
+	 */
+
 	import { onMount } from 'svelte';
 
+	/**
+	 * Component Properties.
+	 */
 	interface Props {
+		/** Controls visibility of the modal dialog. */
 		open: boolean;
+		/** Initial directory path to load upon opening. */
 		initialPath?: string;
+		/** Callback invoked when user confirms folder selection. */
 		onselect: (path: string) => void;
+		/** Callback invoked when user cancels or closes modal. */
 		onclose: () => void;
 	}
 

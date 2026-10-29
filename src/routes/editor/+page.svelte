@@ -1,4 +1,28 @@
 <script lang="ts">
+	/**
+	 * @fileoverview Visual Drag-and-Drop Page Builder & WYSIWYG Editor (`/editor`).
+	 *
+	 * Architecture & Features:
+	 * 1. Palette:
+	 *    - Categorized tabs: "Sections" (full-width layouts), "Widgets" (atomic GUI widgets),
+	 *      and "Custom" (dynamically imported project components).
+	 *    - Pure drag-and-drop placement with canvas-relative percentage coordinates.
+	 * 2. Canvas Stage:
+	 *    - Flexible viewport widths with Mobile (390px), Tablet (768px), and Desktop (1200px) presets.
+	 *    - Direct pointer interaction for moving and resizing blocks.
+	 *    - Automatic vertical expansion accommodating block boundaries.
+	 *    - Multi-page switching and route jump support in Preview mode.
+	 * 3. History & State Management:
+	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
+	 *    - Duplicate (Ctrl+D) and Delete (Delete/Backspace) keyboard commands.
+	 * 4. Inspector:
+	 *    - Geometry controls (X%, Y px, Width%, Height px).
+	 *    - Layer ordering: To Front, Forward, Backward, To Back (z-order array management).
+	 *    - Dynamic prop editor for custom imported components and specialized widget controls.
+	 * 5. Database Integration:
+	 *    - Seamless load and save of `EditorSite` models with `/editor/api`.
+	 */
+
 	import { onMount } from 'svelte';
 	import Hero from '../../lib/components/editor/Hero.svelte';
 	import TextSection from '../../lib/components/editor/TextSection.svelte';

@@ -1,4 +1,13 @@
 <script lang="ts">
+	/**
+	 * @component ButtonSection
+	 * Call-to-action banner section pairing message copy with a prominent action button.
+	 *
+	 * @prop {string} title - Heading message.
+	 * @prop {string} body - Explanatory body text.
+	 * @prop {string} action - CTA button text.
+	 * @prop {'light'|'lavender'|'dark'} [theme='light'] - Visual color theme.
+	 */
 	let {
 		title,
 		body,

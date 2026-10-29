@@ -1,3 +1,12 @@
+/**
+ * @fileoverview Editor Database Persistence API Endpoint.
+ *
+ * `GET /editor/api`: Retrieves database initialization status and the saved `EditorSite`.
+ * `POST /editor/api`:
+ *   - `action: 'create-tables'`: Initializes database tables in SQLite.
+ *   - `action: 'save'`: Validates and persists an `EditorSite` payload into SQLite.
+ */
+
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../lib/editor.js';
@@ -65,5 +74,5 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 	}
 
-	return json({ error: 'Unsupported action.' }, { status: 400 });
+	return json({ error: 'Unknown action.' }, { status: 400 });
 };

@@ -1,3 +1,24 @@
+/**
+ * @fileoverview SvelteKit Page Generator and AST-Based Importer.
+ *
+ * Provides bidirectional round-trip transformation between in-memory `EditorPage`
+ * data models and clean, idiomatic, compilable SvelteKit `+page.svelte` source files:
+ *
+ * 1. Generator (`renderPageSource`):
+ *    - Emits a safety marker comment header `<!-- @svelte-editor generated ... -->`.
+ *    - Gathers all unique component dependencies across standard and custom blocks.
+ *    - Emits TypeScript `<script>` with imports pointing to `$lib/components/editor/<Name>.svelte`.
+ *    - Renders `<svelte:head><title>...</title></svelte:head>`.
+ *    - Wraps components in absolute-positioned containers styled with percentage coordinates.
+ *
+ * 2. Importer (`parsePageSource`):
+ *    - Parses `+page.svelte` using `svelte/compiler` `parse({ modern: true })`.
+ *    - Inspects the DOM tree for `data-editor-page` container attribute.
+ *    - Extracts page dimensions from the inline style attributes.
+ *    - Extracts component instances, matching standard components by name or mapping
+ *      unrecognized components to dynamic `custom:<Name>` kinds with `customProps`.
+ */
+
 import { parse } from 'svelte/compiler';
 import {
 	componentNames,
@@ -8,14 +29,25 @@ import {
 	type EditorPage
 } from './editor.js';
 
+/**
+ * Marker comment prepended to all editor-generated files.
+ * The exporter checks this marker to ensure hand-written files are never overwritten.
+ */
 export const generatedMarker =
 	'<!-- @svelte-editor generated — re-exporting overwrites this file -->';
+
+/** Base alias path where exported components reside in target projects. */
 export const componentImportBase = '$lib/components/editor';
 
+/** Allowed property names recognized on built-in builder blocks. */
 type PropName =
 	'title' | 'body' | 'action' | 'theme' | 'value' | 'checked' | 'level' | 'href' | 'newTab';
 
 const sectionProps: PropName[] = ['title', 'body', 'theme'];
+
+/**
+ * Prop attribute whitelist mapping for each built-in block kind.
+ */
 const kindProps: Record<BlockKind, PropName[]> = {
 	hero: ['title', 'body', 'action', 'theme'],
 	text: sectionProps,
@@ -39,17 +71,27 @@ const kindProps: Record<BlockKind, PropName[]> = {
 	'widget-link': ['title', 'body', 'href', 'newTab']
 };
 
+/** Reverse lookup map: Component PascalCase Name -> BlockKind. */
 const kindByComponent = new Map(
 	Object.entries(componentNames).map(([kind, name]) => [name, kind as BlockKind])
 );
 
-export function usedComponentNames(pages: EditorPage[]) {
+/**
+ * Retrieves the unique list of component PascalCase names required by an array of pages.
+ *
+ * @param pages - Collection of EditorPages to inspect.
+ * @returns Deduplicated array of component names.
+ */
+export function usedComponentNames(pages: EditorPage[]): string[] {
 	return [
 		...new Set(pages.flatMap((page) => page.blocks.map((block) => getComponentName(block.kind))))
 	];
 }
 
-function escapeAttribute(value: string) {
+/**
+ * Escapes HTML/Svelte attribute special characters to prevent template injection.
+ */
+function escapeAttribute(value: string): string {
 	return value
 		.replace(/&/g, '&amp;')
 		.replace(/"/g, '&quot;')
@@ -58,17 +100,32 @@ function escapeAttribute(value: string) {
 		.replace(/\}/g, '&#125;');
 }
 
-function renderProp(block: BuilderBlock, prop: PropName) {
+/**
+ * Renders a typed property into a valid Svelte attribute assignment (e.g. `prop="val"` or `prop={123}`).
+ */
+function renderProp(block: BuilderBlock, prop: PropName): string {
 	const value = block[prop];
 	if (typeof value === 'string') return `${prop}="${escapeAttribute(value)}"`;
 	return `${prop}={${value}}`;
 }
 
-export function pageHeight(page: EditorPage) {
+/**
+ * Calculates the required minimum canvas height for an EditorPage based on its blocks.
+ *
+ * @param page - Target page.
+ * @returns Height in pixels accommodating the lowest block plus margin.
+ */
+export function pageHeight(page: EditorPage): number {
 	return Math.max(page.height, ...page.blocks.map((block) => block.y + block.height + 40));
 }
 
-export function renderPageSource(page: EditorPage) {
+/**
+ * Generates compilable SvelteKit `+page.svelte` file content from an EditorPage definition.
+ *
+ * @param page - EditorPage to serialize.
+ * @returns Formatted Svelte 5 component source code.
+ */
+export function renderPageSource(page: EditorPage): string {
 	const names = usedComponentNames([page]);
 	const imports = names
 		.map((name) => `\timport ${name} from '${componentImportBase}/${name}.svelte';`)
@@ -130,7 +187,8 @@ ${blocks}
 `;
 }
 
-function escapeText(value: string) {
+/** Escapes text content for safe inclusion in title tags and text nodes. */
+function escapeText(value: string): string {
 	return value
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
@@ -138,6 +196,7 @@ function escapeText(value: string) {
 		.replace(/\}/g, '&#125;');
 }
 
+/** Svelte AST node interfaces for type safety. */
 type AstNode = {
 	type: string;
 	name?: string;
@@ -147,6 +206,9 @@ type AstNode = {
 type AstAttribute = { type: string; name: string; value: true | AstValue | AstValue[] };
 type AstValue = { type: string; data?: string; expression?: { type: string; value?: unknown } };
 
+/**
+ * Extracts raw or literal value from an AST attribute node.
+ */
 function attributeValue(attribute: AstAttribute): string | number | boolean | undefined {
 	if (attribute.type !== 'Attribute') return undefined;
 	if (attribute.value === true) return true;
@@ -160,11 +222,13 @@ function attributeValue(attribute: AstAttribute): string | number | boolean | un
 	return parts.map((part) => part.data ?? '').join('');
 }
 
-function elementNodes(nodes: AstNode[]) {
+/** Filters AST children to elements and components only. */
+function elementNodes(nodes: AstNode[]): AstNode[] {
 	return nodes.filter((node) => node.type === 'RegularElement' || node.type === 'Component');
 }
 
-function readStyle(style: string) {
+/** Parses CSS inline style declarations into a key-value dictionary of numeric values. */
+function readStyle(style: string): Record<string, number> {
 	const values: Record<string, number> = {};
 	for (const part of style.split(';')) {
 		const [key, raw] = part.split(':');
@@ -174,6 +238,7 @@ function readStyle(style: string) {
 	return values;
 }
 
+/** Finds the container element carrying the `data-editor-page` attribute. */
 function findPageElement(nodes: AstNode[]): AstNode | undefined {
 	for (const node of nodes) {
 		if (
@@ -189,8 +254,14 @@ function findPageElement(nodes: AstNode[]): AstNode | undefined {
 }
 
 /**
- * Reads a +page.svelte that was exported by this editor back into a page.
- * Returns null for files that are not editor pages or fail validation.
+ * Reconstructs an EditorPage instance from an exported `+page.svelte` source file.
+ *
+ * Returns `null` if the source is not an editor-generated page, contains syntax errors,
+ * or fails validation constraints.
+ *
+ * @param source - File contents of `+page.svelte`.
+ * @param slug - Route slug associated with this file.
+ * @returns Parsed EditorPage model or `null`.
  */
 export function parsePageSource(source: string, slug: string): EditorPage | null {
 	let root: { fragment: { nodes: AstNode[] } };

@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetSlider
+	 * Range slider input widget for selecting numerical percentage values.
+	 *
+	 * @prop {string} [id] - Range element ID.
+	 * @prop {string} title - Slider label heading.
+	 * @prop {string} body - Explanatory helper text.
+	 * @prop {number} [level=60] - Two-way bindable numeric value (0-100).
+	 * @prop {() => void} [onchange] - Change event callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

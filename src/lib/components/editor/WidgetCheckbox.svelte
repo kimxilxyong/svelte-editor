@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetCheckbox
+	 * Checkbox toggle widget for independent boolean options.
+	 *
+	 * @prop {string} [id] - Optional element ID.
+	 * @prop {string} title - Option label heading.
+	 * @prop {string} body - Explanatory description.
+	 * @prop {boolean} [checked=false] - Two-way bindable checked state.
+	 * @prop {() => void} [onchange] - Change event callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

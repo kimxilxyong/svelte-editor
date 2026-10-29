@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetSelect
+	 * Dropdown selection menu widget for picking from options.
+	 *
+	 * @prop {string} [id] - Select element ID.
+	 * @prop {string} title - Menu label text.
+	 * @prop {string} body - Explanatory helper caption.
+	 * @prop {string} [value=''] - Two-way bindable selected value.
+	 * @prop {() => void} [onchange] - Change event callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

@@ -1,4 +1,12 @@
 <script lang="ts">
+	/**
+	 * @component WidgetButton
+	 * Atomic button GUI widget providing an interactive action trigger.
+	 *
+	 * @prop {string} action - Button label text.
+	 * @prop {string} body - Explanatory helper caption below button.
+	 * @prop {() => void} [onchange] - Optional click/change event handler.
+	 */
 	let { action, body, onchange }: { action: string; body: string; onchange?: () => void } =
 		$props();
 </script>

@@ -1,4 +1,12 @@
 <script lang="ts">
+	/**
+	 * @component WidgetProgress
+	 * Numerical progress bar widget displaying completion percentage.
+	 *
+	 * @prop {string} title - Metric label heading.
+	 * @prop {string} body - Explanatory progress caption.
+	 * @prop {number} [level=60] - Two-way bindable completion percentage (0-100).
+	 */
 	let {
 		title,
 		body,

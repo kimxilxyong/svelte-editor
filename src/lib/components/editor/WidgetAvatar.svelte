@@ -1,4 +1,11 @@
 <script lang="ts">
+	/**
+	 * @component WidgetAvatar
+	 * User or profile avatar badge widget displaying initials and identity details.
+	 *
+	 * @prop {string} title - Person or organization name (initials derived automatically).
+	 * @prop {string} body - Subtitle, role, or email description.
+	 */
 	let { title, body }: { title: string; body: string } = $props();
 </script>
 

@@ -1,4 +1,13 @@
 <script lang="ts">
+	/**
+	 * @component WidgetCard
+	 * Content card container widget grouping title, description, and link action.
+	 *
+	 * @prop {string} title - Card title headline.
+	 * @prop {string} body - Summary paragraph.
+	 * @prop {string} action - Card link button text.
+	 * @prop {() => void} [onchange] - Optional click action handler.
+	 */
 	let {
 		title,
 		body,

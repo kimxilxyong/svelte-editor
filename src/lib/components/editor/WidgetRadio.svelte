@@ -1,4 +1,14 @@
 <script lang="ts">
+	/**
+	 * @component WidgetRadio
+	 * Radio button widget for selecting single options in a group.
+	 *
+	 * @prop {string} [id] - Unique radio input element ID.
+	 * @prop {string} title - Radio label text.
+	 * @prop {string} body - Explanatory caption.
+	 * @prop {boolean} [checked=false] - Two-way bindable selection state.
+	 * @prop {() => void} [onchange] - Change event callback.
+	 */
 	const generatedId = $props.id();
 	let {
 		id = '',

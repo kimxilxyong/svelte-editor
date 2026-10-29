@@ -1,4 +1,11 @@
 <script lang="ts">
+	/**
+	 * @component WidgetBadge
+	 * Compact status pill or category badge widget.
+	 *
+	 * @prop {string} title - Badge pill label text.
+	 * @prop {string} body - Supporting context caption.
+	 */
 	let { title, body }: { title: string; body: string } = $props();
 </script>
 

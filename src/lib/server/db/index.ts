@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm-node-sqlite';
 import { DatabaseSync } from 'node:sqlite';
 import * as schema from './schema';
-import { parseBuilderBlocks, type BuilderBlock } from '../../editor.js';
+import { parseBuilderBlocks, parseEditorSite, type EditorSite } from '../../editor.js';
 import { DATABASE_URL } from '$app/env/private';
 
 if (!DATABASE_URL) throw new Error('DATABASE_URL is not set');
@@ -33,24 +33,31 @@ export function hasEditorPageTable() {
 	);
 }
 
-export function getSavedPage() {
-	const savedPage = client.prepare('SELECT blocks FROM editor_page WHERE id = ?').get('home');
-	if (!savedPage) return null;
-	if (typeof savedPage.blocks !== 'string') {
-		throw new Error('The saved editor page does not contain valid block data.');
+export function getSavedSite(): EditorSite | null {
+	const saved =
+		client.prepare('SELECT blocks FROM editor_page WHERE id = ?').get('site') ??
+		client.prepare('SELECT blocks FROM editor_page WHERE id = ?').get('home');
+	if (!saved) return null;
+	if (typeof saved.blocks !== 'string') {
+		throw new Error('The saved editor page does not contain valid data.');
 	}
 
-	const parsed: unknown = JSON.parse(savedPage.blocks);
-	const blocks = parseBuilderBlocks(parsed);
-	if (!blocks) throw new Error('The saved editor page contains invalid block data.');
+	const parsed: unknown = JSON.parse(saved.blocks);
+	// Pages saved before multi-page support are a bare array of blocks.
+	if (Array.isArray(parsed)) {
+		const blocks = parseBuilderBlocks(parsed);
+		if (!blocks) throw new Error('The saved editor page contains invalid block data.');
+		return {
+			pages: [{ id: 'home', name: 'Home', slug: 'home', width: 800, height: 600, blocks }]
+		};
+	}
 
-	return blocks;
+	const site = parseEditorSite(parsed);
+	if (!site) throw new Error('The saved editor site contains invalid data.');
+	return site;
 }
 
-export function savePage(blocks: BuilderBlock[]) {
-	const serializedBlocks = JSON.stringify(blocks);
-	const updatedAt = new Date().toISOString();
-
+export function saveSite(site: EditorSite) {
 	client
 		.prepare(
 			`INSERT INTO editor_page (id, blocks, updated_at)
@@ -59,5 +66,5 @@ export function savePage(blocks: BuilderBlock[]) {
 				blocks = excluded.blocks,
 				updated_at = excluded.updated_at`
 		)
-		.run('home', serializedBlocks, updatedAt);
+		.run('site', JSON.stringify(site), new Date().toISOString());
 }

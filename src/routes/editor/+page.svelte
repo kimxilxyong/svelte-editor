@@ -1,11 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { BuilderBlock, BlockKind, SectionKind, WidgetKind } from '../../lib/editor.js';
+	import { page as routePage } from '$app/state';
+	import {
+		isValidLinkHref,
+		type BuilderBlock,
+		type BlockKind,
+		type EditorPage,
+		type EditorSite,
+		type SectionKind,
+		type WidgetKind
+	} from '../../lib/editor.js';
 
-	type DragPayload = { source: 'palette'; kind: BlockKind } | { source: 'canvas'; id: string };
+	type DragPayload = { source: 'palette'; kind: BlockKind };
 	type EditorApiResponse = {
 		created?: boolean;
-		blocks?: BuilderBlock[] | null;
+		site?: EditorSite | null;
 		success?: boolean;
 		error?: string;
 	};
@@ -32,7 +41,8 @@
 		'widget-alert': { label: 'Alert', detail: 'A short message with context', mark: '!' },
 		'widget-progress': { label: 'Progress bar', detail: 'Show completion at a glance', mark: '▰' },
 		'widget-avatar': { label: 'Avatar', detail: 'Represent a person or account', mark: '◉' },
-		'widget-card': { label: 'Card', detail: 'Group related content together', mark: '▣' }
+		'widget-card': { label: 'Card', detail: 'Group related content together', mark: '▣' },
+		'widget-link': { label: 'Link', detail: 'Go to a page or website', mark: '↪' }
 	};
 	const sectionKinds = Object.keys(sectionInfo) as SectionKind[];
 	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
@@ -45,7 +55,17 @@
 		BlockKind,
 		Omit<
 			BuilderBlock,
-			'id' | 'positioned' | 'x' | 'y' | 'width' | 'height' | 'value' | 'checked' | 'level'
+			| 'id'
+			| 'positioned'
+			| 'x'
+			| 'y'
+			| 'width'
+			| 'height'
+			| 'value'
+			| 'checked'
+			| 'level'
+			| 'href'
+			| 'newTab'
 		>
 	> = {
 		hero: {
@@ -180,69 +200,98 @@
 			body: 'Cards group related information into a clear, scannable surface.',
 			action: 'Learn more',
 			theme: 'light'
+		},
+		'widget-link': {
+			kind: 'widget-link',
+			title: 'Read more',
+			body: 'Opens another page.',
+			action: '',
+			theme: 'lavender'
 		}
 	};
 
-	let blocks = $state<BuilderBlock[]>([
-		{
-			id: 'sample-hero',
-			kind: 'hero',
-			title: 'Make room for your next big idea.',
-			body: 'A thoughtful space to share what you do and why it matters.',
-			action: 'Explore what we do',
-			theme: 'lavender',
-			positioned: false,
-			x: 6,
-			y: 40,
-			width: 88,
-			height: 260,
-			value: '',
-			checked: false,
-			level: 60
-		},
-		{
-			id: 'sample-features',
-			kind: 'features',
-			title: 'The details make the difference',
-			body: 'Simple tools, considered design, and a team that cares.',
-			action: '',
-			theme: 'light',
-			positioned: false,
-			x: 6,
-			y: 40,
-			width: 88,
-			height: 260,
-			value: '',
-			checked: false,
-			level: 60
-		},
-		{
-			id: 'sample-quote',
-			kind: 'quote',
-			title: '“It just feels like us.”',
-			body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
-			action: 'Maya Chen · Studio founder',
-			theme: 'light',
-			positioned: false,
-			x: 6,
-			y: 40,
-			width: 88,
-			height: 260,
-			value: '',
-			checked: false,
-			level: 60
-		}
-	]);
+	const initialPage: EditorPage = {
+		id: 'home',
+		name: 'Home',
+		slug: 'home',
+		width: 800,
+		height: 600,
+		blocks: [
+			{
+				id: 'sample-hero',
+				kind: 'hero',
+				title: 'Make room for your next big idea.',
+				body: 'A thoughtful space to share what you do and why it matters.',
+				action: 'Explore what we do',
+				theme: 'lavender',
+				positioned: true,
+				x: 6,
+				y: 40,
+				width: 88,
+				height: 260,
+				value: '',
+				checked: false,
+				level: 60,
+				href: '',
+				newTab: false
+			},
+			{
+				id: 'sample-features',
+				kind: 'features',
+				title: 'The details make the difference',
+				body: 'Simple tools, considered design, and a team that cares.',
+				action: '',
+				theme: 'light',
+				positioned: true,
+				x: 6,
+				y: 340,
+				width: 88,
+				height: 260,
+				value: '',
+				checked: false,
+				level: 60,
+				href: '',
+				newTab: false
+			},
+			{
+				id: 'sample-quote',
+				kind: 'quote',
+				title: '“It just feels like us.”',
+				body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
+				action: 'Maya Chen · Studio founder',
+				theme: 'light',
+				positioned: true,
+				x: 6,
+				y: 640,
+				width: 88,
+				height: 260,
+				value: '',
+				checked: false,
+				level: 60,
+				href: '',
+				newTab: false
+			}
+		]
+	};
+
+	let pages = $state<EditorPage[]>([initialPage]);
+	let currentPageId = $state('home');
+	let currentPage = $derived(pages.find((page) => page.id === currentPageId) ?? pages[0]);
+	let blocks = $derived(currentPage.blocks);
 	let selectedId = $state<string | null>('sample-hero');
 	let paletteTab = $state<PaletteTab>('sections');
-	let dropIndex = $state<number | null>(null);
 	let isPreview = $state(false);
-	let mobileViewport = $state(false);
 	let databaseReady = $state(false);
 	let databaseBusy = $state(true);
 	let databaseStatus = $state('Checking SQLite…');
 	let hasUnsavedChanges = $state(true);
 	let revision = $state(0);
+	let routeError = $state<string | null>(null);
+	let undoStack = $state.raw<string[]>([]);
+	let redoStack = $state.raw<string[]>([]);
+	let historyPending = $state(false);
+	let historyTimer: ReturnType<typeof setTimeout> | undefined;
+	let committedSnapshot = JSON.stringify([initialPage]);
 	let canvasElement: HTMLDivElement | null = null;
 	let pointerInteraction = $state<{
 		id: string;
@@ -260,22 +309,23 @@
 	let selectedBlock = $derived(blocks.find((block) => block.id === selectedId));
 	let blockCount = $derived(blocks.length);
 	let canvasHeight = $derived(
-		Math.max(
-			600,
-			...blocks.filter((block) => block.positioned).map((block) => block.y + block.height + 40)
-		)
+		Math.max(currentPage.height, ...blocks.map((block) => block.y + block.height + 40))
 	);
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
 	);
 
+	let canUndo = $derived(undoStack.length > 0 || historyPending);
+	let canRedo = $derived(redoStack.length > 0);
+
 	onMount(() => {
 		void loadDatabaseState();
+		return () => clearTimeout(historyTimer);
 	});
 
 	async function requestApi(
 		method: 'GET' | 'POST',
-		payload?: { action: 'create-tables' } | { action: 'save'; blocks: BuilderBlock[] }
+		payload?: { action: 'create-tables' } | { action: 'save'; site: EditorSite }
 	): Promise<EditorApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
@@ -302,11 +352,14 @@
 			return;
 		}
 
-		if (Array.isArray(result.blocks)) {
-			blocks = result.blocks;
-			selectedId = blocks[0]?.id ?? null;
+		if (result.site) {
+			pages = result.site.pages;
+			currentPageId =
+				pages.find((item) => item.id === routePage.url.searchParams.get('page'))?.id ?? pages[0].id;
+			selectedId = currentPage.blocks[0]?.id ?? null;
+			resetHistory();
 			hasUnsavedChanges = false;
-			databaseStatus = 'Saved page loaded from SQLite';
+			databaseStatus = 'Saved site loaded from SQLite';
 		} else {
 			hasUnsavedChanges = true;
 			databaseStatus = 'SQLite ready · page not saved';
@@ -342,13 +395,18 @@
 	async function savePageToDatabase() {
 		if (!databaseReady || databaseBusy) return;
 
+		if (pages.some((page) => page.blocks.some((block) => !isValidLinkHref(block.href)))) {
+			databaseStatus = 'A link address is invalid. Use /page or https://…';
+			return;
+		}
+
 		const savedRevision = revision;
-		const pageSnapshot = blocks.map((block) => ({ ...block }));
+		const siteSnapshot: EditorSite = { pages: $state.snapshot(pages) };
 		databaseBusy = true;
-		databaseStatus = 'Saving page to SQLite…';
+		databaseStatus = 'Saving site to SQLite…';
 
 		try {
-			await requestApi('POST', { action: 'save', blocks: pageSnapshot });
+			await requestApi('POST', { action: 'save', site: siteSnapshot });
 			hasUnsavedChanges = revision !== savedRevision;
 			databaseStatus = hasUnsavedChanges ? 'More changes still need saving' : 'Saved to SQLite';
 		} catch (error) {
@@ -362,33 +420,170 @@
 		revision += 1;
 		hasUnsavedChanges = true;
 		if (databaseReady) databaseStatus = 'Unsaved changes';
+		historyPending = true;
+		clearTimeout(historyTimer);
+		historyTimer = setTimeout(commitHistory, 350);
+	}
+
+	function takeSnapshot() {
+		return JSON.stringify($state.snapshot(pages));
+	}
+
+	function commitHistory() {
+		clearTimeout(historyTimer);
+		historyPending = false;
+		const snapshot = takeSnapshot();
+		if (snapshot === committedSnapshot) return;
+		undoStack = [...undoStack.slice(-99), committedSnapshot];
+		redoStack = [];
+		committedSnapshot = snapshot;
+	}
+
+	function resetHistory() {
+		clearTimeout(historyTimer);
+		historyPending = false;
+		undoStack = [];
+		redoStack = [];
+		committedSnapshot = takeSnapshot();
+	}
+
+	function restoreSnapshot(snapshot: string) {
+		pages = JSON.parse(snapshot) as EditorPage[];
+		if (!pages.some((page) => page.id === currentPageId)) currentPageId = pages[0].id;
+		if (!currentPage.blocks.some((block) => block.id === selectedId)) selectedId = null;
+		committedSnapshot = snapshot;
+		revision += 1;
+		hasUnsavedChanges = true;
+		if (databaseReady) databaseStatus = 'Unsaved changes';
+	}
+
+	function undo() {
+		commitHistory();
+		const previous = undoStack.at(-1);
+		if (previous === undefined) return;
+		redoStack = [...redoStack, committedSnapshot];
+		undoStack = undoStack.slice(0, -1);
+		restoreSnapshot(previous);
+	}
+
+	function redo() {
+		commitHistory();
+		const next = redoStack.at(-1);
+		if (next === undefined) return;
+		undoStack = [...undoStack, committedSnapshot];
+		redoStack = redoStack.slice(0, -1);
+		restoreSnapshot(next);
+	}
+
+	function selectPage(id: string) {
+		currentPageId = id;
+		selectedId = null;
+		routeError = null;
+	}
+
+	function setCanvasWidth(width: number) {
+		currentPage.width = width;
+		markUnsaved();
+	}
+
+	function resolveInternalPage(href: string) {
+		const slug = href.slice(1).split(/[?#]/)[0];
+		return slug === '' ? pages[0] : pages.find((page) => page.slug === slug);
+	}
+
+	function handleLinkClick(event: MouseEvent, block: BuilderBlock) {
+		if (!isPreview || !block.href || !isValidLinkHref(block.href)) {
+			event.preventDefault();
+			return;
+		}
+		if (!block.href.startsWith('/')) return;
+
+		event.preventDefault();
+		const target = resolveInternalPage(block.href);
+		if (target) selectPage(target.id);
+		else routeError = `No page found at ${block.href}`;
+	}
+
+	function duplicateSelected() {
+		if (!selectedBlock) return;
+		const source: BuilderBlock = $state.snapshot(selectedBlock);
+		const copy: BuilderBlock = {
+			...source,
+			id: globalThis.crypto.randomUUID(),
+			x: Math.min(100 - source.width, source.x + 3),
+			y: Math.min(5000, source.y + 24)
+		};
+		blocks.push(copy);
+		selectedId = copy.id;
+		markUnsaved();
+	}
+
+	function reorderSelected(action: 'front' | 'back' | 'forward' | 'backward') {
+		if (!selectedId) return;
+		const index = blocks.findIndex((block) => block.id === selectedId);
+		if (index < 0) return;
+		const destination =
+			action === 'front'
+				? blocks.length - 1
+				: action === 'back'
+					? 0
+					: Math.max(0, Math.min(blocks.length - 1, index + (action === 'forward' ? 1 : -1)));
+		if (destination === index) return;
+		const [block] = blocks.splice(index, 1);
+		blocks.splice(destination, 0, block);
+		markUnsaved();
+	}
+
+	function handleWindowKeydown(event: KeyboardEvent) {
+		const target = event.target;
+		if (
+			target instanceof HTMLElement &&
+			(target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+		) {
+			return;
+		}
+
+		const modifier = event.ctrlKey || event.metaKey;
+		const key = event.key.toLowerCase();
+		if (modifier && key === 'z') {
+			event.preventDefault();
+			if (event.shiftKey) redo();
+			else undo();
+		} else if (modifier && key === 'y') {
+			event.preventDefault();
+			redo();
+		} else if (isPreview) {
+			return;
+		} else if (modifier && key === 'd') {
+			event.preventDefault();
+			duplicateSelected();
+		} else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+			event.preventDefault();
+			deleteSelected();
+		}
 	}
 
 	function createBlock(kind: BlockKind): BuilderBlock {
 		return {
 			...defaults[kind],
 			id: globalThis.crypto.randomUUID(),
-			positioned: false,
+			positioned: true,
 			x: 6,
-			y: Math.min(40 + blocks.length * 280, 5000),
+			y: 40,
 			width: 88,
 			height: 260,
 			value: kind === 'widget-select' ? defaults[kind].action : '',
 			checked: false,
-			level: 60
+			level: 60,
+			href: kind === 'widget-link' ? '/home' : '',
+			newTab: false
 		};
-	}
-
-	function setPositionMode(positioned: boolean) {
-		if (!selectedBlock || selectedBlock.positioned === positioned) return;
-		selectedBlock.positioned = positioned;
-		markUnsaved();
 	}
 
 	function startPointerInteraction(event: PointerEvent, id: string, mode: 'move' | 'resize') {
 		if (isPreview || !canvasElement) return;
 		const block = blocks.find((item) => item.id === id);
-		if (!block?.positioned || !(event.currentTarget instanceof HTMLElement)) return;
+		if (!block || !(event.currentTarget instanceof HTMLElement)) return;
 
 		event.preventDefault();
 		event.stopPropagation();
@@ -494,9 +689,21 @@
 		}
 	}
 
-	function addBlock(kind: BlockKind, index = blocks.length) {
+	function addBlock(kind: BlockKind, clientX: number, clientY: number) {
+		if (!canvasElement) return;
+		const bounds = canvasElement.getBoundingClientRect();
 		const block = createBlock(kind);
-		blocks.splice(index, 0, block);
+		block.x = Math.round(
+			Math.max(
+				0,
+				Math.min(
+					100 - block.width,
+					((clientX - bounds.left) / bounds.width) * 100 - block.width / 2
+				)
+			)
+		);
+		block.y = Math.round(Math.max(0, Math.min(5000, clientY - bounds.top - block.height / 2)));
+		blocks.push(block);
 		selectedId = block.id;
 		isPreview = false;
 		markUnsaved();
@@ -508,14 +715,6 @@
 			JSON.stringify({ source: 'palette', kind })
 		);
 		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
-	}
-
-	function handleBlockDragStart(event: DragEvent, id: string) {
-		event.dataTransfer?.setData(
-			'application/x-page-builder',
-			JSON.stringify({ source: 'canvas', id })
-		);
-		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 	}
 
 	function readPayload(event: DragEvent): DragPayload | null {
@@ -535,16 +734,6 @@
 			) {
 				return { source: 'palette', kind: payload.kind as BlockKind };
 			}
-			if (
-				typeof payload === 'object' &&
-				payload !== null &&
-				'source' in payload &&
-				payload.source === 'canvas' &&
-				'id' in payload &&
-				typeof payload.id === 'string'
-			) {
-				return { source: 'canvas', id: payload.id };
-			}
 		} catch {
 			return null;
 		}
@@ -552,73 +741,34 @@
 		return null;
 	}
 
-	function handleBlockDragOver(event: DragEvent, index: number) {
-		event.preventDefault();
-		event.stopPropagation();
-		if (!event.dataTransfer) return;
-		event.dataTransfer.dropEffect = 'move';
-		const bounds =
-			event.currentTarget instanceof HTMLElement
-				? event.currentTarget.getBoundingClientRect()
-				: null;
-		dropIndex = bounds && event.clientY > bounds.top + bounds.height / 2 ? index + 1 : index;
-	}
-
 	function handleCanvasDragOver(event: DragEvent) {
 		event.preventDefault();
 		if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-		dropIndex = blocks.length;
 	}
 
-	function handleDrop(event: DragEvent, index: number) {
+	function handleDrop(event: DragEvent) {
 		event.preventDefault();
-		event.stopPropagation();
 		const payload = readPayload(event);
-		const destination = Math.max(0, Math.min(dropIndex ?? index, blocks.length));
-
-		if (payload?.source === 'palette') {
-			addBlock(payload.kind, destination);
-		} else if (payload?.source === 'canvas') {
-			const sourceIndex = blocks.findIndex((block) => block.id === payload.id);
-			if (sourceIndex !== -1) {
-				const [block] = blocks.splice(sourceIndex, 1);
-				const adjustedIndex = sourceIndex < destination ? destination - 1 : destination;
-				blocks.splice(adjustedIndex, 0, block);
-				selectedId = block.id;
-				markUnsaved();
-			}
-		}
-
-		dropIndex = null;
+		if (payload?.source === 'palette') addBlock(payload.kind, event.clientX, event.clientY);
 	}
 
 	function deleteSelected() {
 		if (!selectedId) return;
 		const index = blocks.findIndex((block) => block.id === selectedId);
-		blocks = blocks.filter((block) => block.id !== selectedId);
+		currentPage.blocks = currentPage.blocks.filter((block) => block.id !== selectedId);
 		selectedId = blocks[Math.min(index, blocks.length - 1)]?.id ?? null;
 		markUnsaved();
 	}
 
-	function moveSelected(direction: -1 | 1) {
-		if (!selectedId) return;
-		const index = blocks.findIndex((block) => block.id === selectedId);
-		const destination = index + direction;
-		if (index < 0 || destination < 0 || destination >= blocks.length) return;
-		const [block] = blocks.splice(index, 1);
-		blocks.splice(destination, 0, block);
-		markUnsaved();
-	}
-
 	function clearPage() {
-		blocks = [];
+		currentPage.blocks = [];
 		selectedId = null;
-		dropIndex = null;
 		markUnsaved();
 	}
 </script>
 
 <svelte:window
+	onkeydown={handleWindowKeydown}
 	onpointermove={handlePointerMove}
 	onpointerup={stopPointerInteraction}
 	onpointercancel={stopPointerInteraction}
@@ -661,31 +811,43 @@
 					Save page
 				</button>
 			</div>
-			<div class="viewport-switch" aria-label="Canvas width">
+			<div class="viewport-switch" role="group" aria-label="History">
 				<button
 					type="button"
-					class:active={!mobileViewport}
-					aria-label="Desktop canvas"
-					aria-pressed={!mobileViewport}
-					onclick={() => (mobileViewport = false)}
+					aria-label="Undo"
+					title="Undo (Ctrl+Z)"
+					disabled={!canUndo}
+					onclick={undo}
 				>
 					<svg viewBox="0 0 20 20" aria-hidden="true"
-						><rect x="2.5" y="3" width="15" height="10.5" rx="1.5" /><path
-							d="M7 17h6m-3-3.5V17"
-						/></svg
+						><path d="M7 5 3.5 8.5 7 12M4 8.5h8a4 4 0 0 1 0 8H9" /></svg
 					>
 				</button>
 				<button
 					type="button"
-					class:active={mobileViewport}
-					aria-label="Mobile canvas"
-					aria-pressed={mobileViewport}
-					onclick={() => (mobileViewport = true)}
+					aria-label="Redo"
+					title="Redo (Ctrl+Shift+Z)"
+					disabled={!canRedo}
+					onclick={redo}
 				>
 					<svg viewBox="0 0 20 20" aria-hidden="true"
-						><rect x="5.5" y="2" width="9" height="16" rx="2" /><path d="M8.5 15.5h3" /></svg
+						><path d="m13 5 3.5 3.5L13 12m3.5-3.5h-8a4 4 0 0 0 0 8H11" /></svg
 					>
 				</button>
+			</div>
+			<div class="viewport-switch" role="group" aria-label="Canvas size presets">
+				{#each [{ label: 'Mobile', width: 390, key: 'M' }, { label: 'Tablet', width: 768, key: 'T' }, { label: 'Desktop', width: 1200, key: 'D' }] as preset (preset.width)}
+					<button
+						type="button"
+						class:active={currentPage.width === preset.width}
+						aria-label="{preset.label} canvas, {preset.width} pixels wide"
+						title="{preset.label} · {preset.width}px"
+						aria-pressed={currentPage.width === preset.width}
+						onclick={() => setCanvasWidth(preset.width)}
+					>
+						{preset.key}
+					</button>
+				{/each}
 			</div>
 			<button class="preview-button" type="button" onclick={() => (isPreview = !isPreview)}>
 				{#if isPreview}
@@ -710,7 +872,9 @@
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">BUILD YOUR PAGE</p>
-						<h2>{paletteTab === 'sections' ? 'Components' : 'GUI widgets'}</h2>
+						<h2>
+							{paletteTab === 'sections' ? 'Components' : 'GUI widgets'}
+						</h2>
 					</div>
 					<span class="count-pill">
 						{paletteTab === 'sections' ? sectionKinds.length : widgetKinds.length}
@@ -742,40 +906,35 @@
 				</div>
 				<p class="panel-hint">
 					{paletteTab === 'sections'
-						? 'Drag a section onto your page, or click to add it.'
-						: 'Drag a widget onto your page, or click to add it.'}
+						? 'Drag a section onto your page to place it.'
+						: 'Drag a widget onto your page to place it.'}
 				</p>
 
-				<div
-					class="component-list"
-					id="palette-items"
-					role="tabpanel"
-					aria-labelledby="{paletteTab}-tab"
-				>
-					{#each paletteTab === 'sections' ? sectionKinds : widgetKinds as kind (kind)}
-						<button
-							type="button"
-							class="palette-item"
-							class:widget-item={paletteTab === 'widgets'}
-							draggable="true"
-							aria-label="Add {componentInfo[kind].label}"
-							ondragstart={(event) => handlePaletteDragStart(event, kind)}
-							onclick={() => addBlock(kind)}
-						>
-							<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
-							<span class="component-copy">
-								<strong>{componentInfo[kind].label}</strong>
-								<small>{componentInfo[kind].detail}</small>
-							</span>
-							<span class="add-mark" aria-hidden="true">+</span>
-						</button>
-					{/each}
+				<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
+					<div class="component-list" role="list" aria-label="Draggable components">
+						{#each paletteTab === 'sections' ? sectionKinds : widgetKinds as kind (kind)}
+							<div
+								class="palette-item"
+								class:widget-item={paletteTab === 'widgets'}
+								draggable="true"
+								role="listitem"
+								aria-label="Drag {componentInfo[kind].label} onto the page"
+								ondragstart={(event) => handlePaletteDragStart(event, kind)}
+							>
+								<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
+								<span class="component-copy">
+									<strong>{componentInfo[kind].label}</strong>
+									<small>{componentInfo[kind].detail}</small>
+								</span>
+							</div>
+						{/each}
+					</div>
 				</div>
 
 				<div class="palette-tip">
 					<span aria-hidden="true">✦</span>
 					<p>
-						<strong>A small tip</strong> — select any block to edit its content and style.
+						<strong>Drag to place</strong> — select any block on the canvas to edit its content and style.
 					</p>
 				</div>
 			</aside>
@@ -786,7 +945,18 @@
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>
 					<span>{isPreview ? 'Live preview' : 'Page canvas'}</span>
-					<span class="canvas-path">/ home</span>
+					<label class="page-switch">
+						<span class="sr-only">Page</span>
+						<select
+							value={currentPage.id}
+							onchange={(event) => selectPage(event.currentTarget.value)}
+						>
+							{#each pages as page (page.id)}
+								<option value={page.id}>{page.name} · /{page.slug}</option>
+							{/each}
+						</select>
+					</label>
+					{#if routeError}<span class="route-error" role="alert">{routeError}</span>{/if}
 				</div>
 				{#if !isPreview}
 					<div class="canvas-actions">
@@ -806,46 +976,32 @@
 			<div class="canvas-stage">
 				<div
 					class="page-canvas"
-					class:mobile={mobileViewport}
 					class:preview={isPreview}
+					style:width="{currentPage.width}px"
 					style:min-height="{canvasHeight}px"
 					role="region"
-					aria-label="Page sections drop zone"
+					aria-label="Page canvas drop zone"
 					{@attach attachCanvas}
 					ondragover={handleCanvasDragOver}
-					ondrop={(event) => handleDrop(event, blocks.length)}
-					ondragleave={(event) => {
-						if (event.target === event.currentTarget) dropIndex = null;
-					}}
+					ondrop={handleDrop}
 				>
 					{#if blocks.length === 0}
 						<div class="empty-canvas">
 							<div class="empty-icon" aria-hidden="true">✳</div>
 							<h2>Your page starts here</h2>
-							<p>Choose a component from the panel to start building something great.</p>
-							<button type="button" class="empty-add" onclick={() => addBlock('hero')}>
-								<span aria-hidden="true">+</span> Add a hero section
-							</button>
+							<p>
+								Drag a component from the panel onto the canvas to start building something great.
+							</p>
 						</div>
 					{:else}
-						{#each blocks as block, index (block.id)}
-							{#if !isPreview && dropIndex === index}
-								<div class="drop-indicator" aria-hidden="true"></div>
-							{/if}
+						{#each blocks as block (block.id)}
 							<article
-								class="canvas-block {block.kind} theme-{block.theme}"
-								class:positioned={block.positioned}
+								class="canvas-block positioned {block.kind} theme-{block.theme}"
 								class:selected={!isPreview && selectedId === block.id}
-								draggable={!isPreview && !block.positioned}
-								style:left={block.positioned ? `${block.x}%` : undefined}
-								style:top={block.positioned ? `${block.y}px` : undefined}
-								style:width={block.positioned ? `${block.width}%` : undefined}
-								style:height={block.positioned ? `${block.height}px` : undefined}
-								ondragstart={(event) => handleBlockDragStart(event, block.id)}
-								ondragover={(event) =>
-									!isPreview && !block.positioned && handleBlockDragOver(event, index)}
-								ondrop={(event) => !isPreview && !block.positioned && handleDrop(event, index)}
-								ondragend={() => (dropIndex = null)}
+								style:left="{block.x}%"
+								style:top="{block.y}px"
+								style:width="{block.width}%"
+								style:height="{block.height}px"
 							>
 								{#if block.kind === 'widget-button'}
 									<div class="widget-preview">
@@ -987,6 +1143,19 @@
 											>{block.action} <span aria-hidden="true">↗</span></button
 										>
 									</div>
+								{:else if block.kind === 'widget-link'}
+									<div class="widget-preview widget-link-preview">
+										<a
+											class="widget-link"
+											href={block.href && isValidLinkHref(block.href) ? block.href : undefined}
+											target={block.newTab && !block.href.startsWith('/') ? '_blank' : undefined}
+											rel="noopener noreferrer"
+											onclick={(event) => handleLinkClick(event, block)}
+										>
+											{block.title}<span aria-hidden="true">↪</span>
+										</a>
+										<p>{block.body}</p>
+									</div>
 								{:else if block.kind === 'hero'}
 									<div class="hero-preview">
 										<span class="preview-kicker">A LITTLE MORE YOU</span>
@@ -1066,52 +1235,46 @@
 										aria-pressed={selectedId === block.id}
 										onclick={() => (selectedId = block.id)}
 									></button>
-									{#if block.positioned}
-										<button
-											type="button"
-											class="position-handle move-handle"
-											aria-label="Move {componentInfo[block.kind].label}; use arrow keys to move"
-											onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
-											onkeydown={(event) => {
-												selectedId = block.id;
-												handlePositionKeydown(event, 'move');
-											}}
+									<button
+										type="button"
+										class="position-handle move-handle"
+										aria-label="Move {componentInfo[block.kind].label}; use arrow keys to move"
+										onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
+										onkeydown={(event) => {
+											selectedId = block.id;
+											handlePositionKeydown(event, 'move');
+										}}
+									>
+										<svg viewBox="0 0 20 20" aria-hidden="true"
+											><path
+												d="M10 2v16M2 10h16M7 5l3-3 3 3m-6 10 3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3"
+											/></svg
 										>
-											<svg viewBox="0 0 20 20" aria-hidden="true"
-												><path
-													d="M10 2v16M2 10h16M7 5l3-3 3 3m-6 10 3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3"
-												/></svg
-											>
-										</button>
-										<button
-											type="button"
-											class="position-handle resize-handle"
-											aria-label="Resize {componentInfo[block.kind]
-												.label}; use arrow keys to resize"
-											onpointerdown={(event) => startPointerInteraction(event, block.id, 'resize')}
-											onkeydown={(event) => {
-												selectedId = block.id;
-												handlePositionKeydown(event, 'resize');
-											}}
+									</button>
+									<button
+										type="button"
+										class="position-handle resize-handle"
+										aria-label="Resize {componentInfo[block.kind].label}; use arrow keys to resize"
+										onpointerdown={(event) => startPointerInteraction(event, block.id, 'resize')}
+										onkeydown={(event) => {
+											selectedId = block.id;
+											handlePositionKeydown(event, 'resize');
+										}}
+									>
+										<svg viewBox="0 0 20 20" aria-hidden="true"
+											><path d="M7 17h10V7M17 7 7 17m3 0H7v-3m10-3v-4h-4" /></svg
 										>
-											<svg viewBox="0 0 20 20" aria-hidden="true"
-												><path d="M7 17h10V7M17 7 7 17m3 0H7v-3m10-3v-4h-4" /></svg
-											>
-										</button>
-									{/if}
+									</button>
 								{/if}
 							</article>
 						{/each}
-						{#if !isPreview && dropIndex === blocks.length}
-							<div class="drop-indicator" aria-hidden="true"></div>
-						{/if}
 					{/if}
 				</div>
 			</div>
 			{#if !isPreview}
 				<p class="canvas-footnote">
-					<span aria-hidden="true">⌘</span> Click a section to select it
-					<span class="footnote-divider">·</span> Drag to rearrange
+					<span aria-hidden="true">⌘</span> Drag components from the palette to place them
+					<span class="footnote-divider">·</span> Drag handles to move or resize
 				</p>
 			{/if}
 		</section>
@@ -1128,20 +1291,15 @@
 							<button
 								class="icon-button"
 								type="button"
-								aria-label="Move selected section up"
-								disabled={blocks[0]?.id === selectedId}
-								onclick={() => moveSelected(-1)}
+								aria-label="Duplicate selected section"
+								title="Duplicate (Ctrl+D)"
+								onclick={duplicateSelected}
 							>
-								<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 11 5-5 5 5M10 6v9" /></svg>
-							</button>
-							<button
-								class="icon-button"
-								type="button"
-								aria-label="Move selected section down"
-								disabled={blocks.at(-1)?.id === selectedId}
-								onclick={() => moveSelected(1)}
-							>
-								<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 9 5 5 5-5m-5 5V5" /></svg>
+								<svg viewBox="0 0 20 20" aria-hidden="true"
+									><rect x="7" y="7" width="9" height="9" rx="1.5" /><path
+										d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2"
+									/></svg
+								>
 							</button>
 							<button
 								class="icon-button delete-button"
@@ -1164,82 +1322,69 @@
 							>
 							<div><strong>{selectedLabel}</strong><small>Selected section</small></div>
 						</div>
-						<span class="field-label">Position</span>
-						<div class="position-options" role="group" aria-label="Component position">
-							<button
-								type="button"
-								class:position-active={!selectedBlock.positioned}
-								aria-pressed={!selectedBlock.positioned}
-								onclick={() => setPositionMode(false)}
-							>
-								Flow
-							</button>
-							<button
-								type="button"
-								class:position-active={selectedBlock.positioned}
-								aria-pressed={selectedBlock.positioned}
-								onclick={() => setPositionMode(true)}
-							>
-								Fixed
-							</button>
+						<span class="field-label">Layer</span>
+						<div class="layer-buttons">
+							<button type="button" onclick={() => reorderSelected('back')}>To back</button>
+							<button type="button" onclick={() => reorderSelected('backward')}>Backward</button>
+							<button type="button" onclick={() => reorderSelected('forward')}>Forward</button>
+							<button type="button" onclick={() => reorderSelected('front')}>To front</button>
 						</div>
-						{#if selectedBlock.positioned}
-							<p class="position-hint">Drag the move handle or adjust these values.</p>
-							<div class="position-fields">
-								<div>
-									<label class="field-label" for="block-x">Left (%)</label>
-									<input
-										id="block-x"
-										class="field-control"
-										type="number"
-										min="0"
-										max={100 - selectedBlock.width}
-										step="1"
-										bind:value={selectedBlock.x}
-										oninput={() => updateSelectedPosition('x')}
-									/>
-								</div>
-								<div>
-									<label class="field-label" for="block-y">Top (px)</label>
-									<input
-										id="block-y"
-										class="field-control"
-										type="number"
-										min="0"
-										max="5000"
-										step="1"
-										bind:value={selectedBlock.y}
-										oninput={() => updateSelectedPosition('y')}
-									/>
-								</div>
-								<div>
-									<label class="field-label" for="block-width">Width (%)</label>
-									<input
-										id="block-width"
-										class="field-control"
-										type="number"
-										min="20"
-										max={100 - selectedBlock.x}
-										step="1"
-										bind:value={selectedBlock.width}
-										oninput={() => updateSelectedPosition('width')}
-									/>
-								</div>
-								<div>
-									<label class="field-label" for="block-height">Height (px)</label>
-									<input
-										id="block-height"
-										class="field-control"
-										type="number"
-										min="100"
-										max="1600"
-										step="10"
-										bind:value={selectedBlock.height}
-										oninput={() => updateSelectedPosition('height')}
-									/>
-								</div>
+						<span class="field-label">Fixed position</span>
+						<p class="position-hint">Drag the move handle or adjust these values.</p>
+						<div class="position-fields">
+							<div>
+								<label class="field-label" for="block-x">Left (%)</label>
+								<input
+									id="block-x"
+									class="field-control"
+									type="number"
+									min="0"
+									max={100 - selectedBlock.width}
+									step="1"
+									bind:value={selectedBlock.x}
+									oninput={() => updateSelectedPosition('x')}
+								/>
 							</div>
-						{/if}
+							<div>
+								<label class="field-label" for="block-y">Top (px)</label>
+								<input
+									id="block-y"
+									class="field-control"
+									type="number"
+									min="0"
+									max="5000"
+									step="1"
+									bind:value={selectedBlock.y}
+									oninput={() => updateSelectedPosition('y')}
+								/>
+							</div>
+							<div>
+								<label class="field-label" for="block-width">Width (%)</label>
+								<input
+									id="block-width"
+									class="field-control"
+									type="number"
+									min="20"
+									max={100 - selectedBlock.x}
+									step="1"
+									bind:value={selectedBlock.width}
+									oninput={() => updateSelectedPosition('width')}
+								/>
+							</div>
+							<div>
+								<label class="field-label" for="block-height">Height (px)</label>
+								<input
+									id="block-height"
+									class="field-control"
+									type="number"
+									min="100"
+									max="1600"
+									step="10"
+									bind:value={selectedBlock.height}
+									oninput={() => updateSelectedPosition('height')}
+								/>
+							</div>
+						</div>
 						<label class="field-label" for="block-title">
 							{selectedBlock.kind.startsWith('widget-') ? 'Label / text' : 'Heading'}
 						</label>
@@ -1260,6 +1405,29 @@
 							rows="4"
 							maxlength="240"
 							oninput={markUnsaved}></textarea>
+						{#if selectedBlock.kind === 'widget-link'}
+							<label class="field-label" for="link-href">Link address</label>
+							<input
+								id="link-href"
+								class="field-control"
+								list="page-routes"
+								maxlength="200"
+								placeholder="/page or https://…"
+								bind:value={selectedBlock.href}
+								oninput={markUnsaved}
+							/>
+							<datalist id="page-routes">
+								{#each pages as page (page.id)}<option value="/{page.slug}">{page.name}</option
+									>{/each}
+							</datalist>
+							{#if !isValidLinkHref(selectedBlock.href)}
+								<p class="route-error" role="alert">Use /page-route or an http(s) address.</p>
+							{/if}
+							<label class="check-row">
+								<input type="checkbox" bind:checked={selectedBlock.newTab} onchange={markUnsaved} />
+								Open external links in a new tab
+							</label>
+						{/if}
 						{#if ['hero', 'button', 'quote', 'widget-button', 'widget-text-field', 'widget-textarea', 'widget-card'].includes(selectedBlock.kind)}
 							<label class="field-label" for="block-action">
 								{selectedBlock.kind === 'quote'
@@ -1552,8 +1720,7 @@
 		stroke-width: 1.5;
 	}
 
-	.preview-button,
-	.empty-add {
+	.preview-button {
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -1569,8 +1736,7 @@
 		cursor: pointer;
 	}
 
-	.preview-button:hover,
-	.empty-add:hover {
+	.preview-button:hover {
 		border-color: #c9c1ff;
 		background: #faf9ff;
 	}
@@ -1587,6 +1753,10 @@
 	}
 
 	.palette-panel {
+		display: flex;
+		height: 100%;
+		min-height: 0;
+		flex-direction: column;
 		padding: 1.5rem 1.1rem;
 		border-right: 1px solid var(--line);
 	}
@@ -1628,6 +1798,13 @@
 		line-height: 1.55;
 	}
 
+	#palette-items {
+		display: flex;
+		min-height: 0;
+		flex: 1 1 0;
+		flex-direction: column;
+	}
+
 	.palette-tabs {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1656,15 +1833,17 @@
 	}
 
 	.palette-tabs button:focus-visible,
-	.position-options button:focus-visible {
+	.inspector-actions button:focus-visible {
 		outline: 2px solid #8d7cff;
 		outline-offset: 2px;
 	}
 
 	.component-list {
 		display: grid;
+		min-height: 0;
+		flex: 1 1 0;
+		align-content: start;
 		gap: 0.5rem;
-		max-height: min(58vh, 620px);
 		overflow-y: auto;
 		padding-right: 0.15rem;
 	}
@@ -1758,16 +1937,10 @@
 		white-space: nowrap;
 	}
 
-	.add-mark {
-		margin-left: auto;
-		color: #b6b4c7;
-		font-size: 1.1rem;
-	}
-
 	.palette-tip {
 		display: flex;
 		gap: 0.55rem;
-		margin-top: 1.5rem;
+		margin-top: auto;
 		padding: 0.8rem;
 		border: 1px solid #efedfb;
 		border-radius: 10px;
@@ -1876,10 +2049,6 @@
 		transition: max-width 200ms ease;
 	}
 
-	.page-canvas.mobile {
-		max-width: 390px;
-	}
-
 	.page-canvas.preview {
 		min-height: 600px;
 	}
@@ -1944,10 +2113,6 @@
 		z-index: 2;
 		outline: 3px solid #8d7cff;
 		outline-offset: -3px;
-	}
-
-	.canvas-block[draggable='true'] {
-		cursor: grab;
 	}
 
 	.selection-overlay {
@@ -2632,15 +2797,6 @@
 		opacity: 1;
 	}
 
-	.drop-indicator {
-		position: relative;
-		z-index: 4;
-		height: 4px;
-		flex: 0 0 4px;
-		background: #7666e7;
-		box-shadow: 0 0 8px rgb(118 102 231 / 40%);
-	}
-
 	.empty-canvas {
 		display: grid;
 		min-height: 600px;
@@ -2677,21 +2833,6 @@
 		color: #898a9a;
 		font-size: 0.73rem;
 		line-height: 1.6;
-	}
-
-	.empty-add {
-		margin-top: 1.2rem;
-		background: #6b5ce7;
-		color: #fff;
-	}
-
-	.empty-add:hover {
-		background: #5e50d1;
-		color: #fff;
-	}
-
-	.empty-add span {
-		font-size: 1.05rem;
 	}
 
 	.canvas-footnote {
@@ -2753,32 +2894,6 @@
 		color: #686a80;
 		font-size: 0.67rem;
 		font-weight: 650;
-	}
-
-	.position-options {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.3rem;
-		padding: 0.2rem;
-		border: 1px solid #e8e7ef;
-		border-radius: 8px;
-		background: #f8f8fb;
-	}
-
-	.position-options button {
-		min-height: 31px;
-		border: 0;
-		border-radius: 6px;
-		background: transparent;
-		color: #77798c;
-		font-size: 0.67rem;
-		cursor: pointer;
-	}
-
-	.position-options button.position-active {
-		background: #fff;
-		color: #6253ca;
-		box-shadow: 0 1px 4px rgb(34 34 56 / 0.12);
 	}
 
 	.position-hint {
@@ -2991,6 +3106,7 @@
 		}
 
 		.palette-panel {
+			display: block;
 			padding: 1rem;
 			border-right: 0;
 			border-bottom: 1px solid var(--line);
@@ -2998,6 +3114,8 @@
 
 		.component-list {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+			max-height: min(58vh, 620px);
+			overflow-y: auto;
 		}
 
 		.palette-item {
@@ -3094,5 +3212,83 @@
 			scroll-behavior: auto !important;
 			transition-duration: 0.01ms !important;
 		}
+	}
+	.route-error {
+		color: #b3261e;
+		font-size: 0.75rem;
+	}
+
+	.page-switch select {
+		max-width: 16rem;
+		padding: 0.2rem 0.4rem;
+		border: 1px solid #d8d4cc;
+		border-radius: 6px;
+		background: #fff;
+		font: inherit;
+		font-size: 0.8rem;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+
+	.layer-buttons {
+		display: flex;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+	}
+
+	.layer-buttons button {
+		flex: 1;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #d8d4cc;
+		border-radius: 6px;
+		background: #fff;
+		font: inherit;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.check-row {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+		font-size: 0.8rem;
+		margin-top: 0.5rem;
+	}
+
+	.widget-link-preview {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.widget-link {
+		color: #1f6f5c;
+		font-weight: 600;
+		text-decoration: underline;
+		display: inline-flex;
+		gap: 0.3rem;
+	}
+
+	.widget-link-preview p {
+		margin: 0;
+		font-size: 0.8rem;
+		opacity: 0.7;
+	}
+
+	.page-canvas {
+		flex: 0 0 auto;
+		margin-inline: auto;
+		max-width: none;
+	}
+
+	.canvas-stage {
+		justify-content: flex-start;
 	}
 </style>

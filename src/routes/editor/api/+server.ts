@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { parseBuilderBlocks } from '../../../lib/editor.js';
+import { parseEditorSite } from '../../../lib/editor.js';
 import {
 	createTables,
-	getSavedPage,
+	getSavedSite,
 	hasEditorPageTable,
-	savePage
+	saveSite
 } from '../../../lib/server/db/index.js';
 
 export const GET: RequestHandler = async () => {
@@ -13,7 +13,7 @@ export const GET: RequestHandler = async () => {
 		const created = hasEditorPageTable();
 		return json({
 			created,
-			blocks: created ? await getSavedPage() : null
+			site: created ? getSavedSite() : null
 		});
 	} catch (error) {
 		console.error('Unable to load the saved editor page.', error);
@@ -45,10 +45,10 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	if (body.action === 'save') {
-		const blocks = parseBuilderBlocks('blocks' in body ? body.blocks : null);
-		if (!blocks) {
+		const site = parseEditorSite('site' in body ? body.site : null);
+		if (!site) {
 			return json(
-				{ error: 'The page contains invalid or unsupported components.' },
+				{ error: 'The site contains invalid pages, links or components.' },
 				{ status: 400 }
 			);
 		}
@@ -57,7 +57,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		try {
-			await savePage(blocks);
+			saveSite(site);
 			return json({ success: true });
 		} catch (error) {
 			console.error('Unable to save the editor page to SQLite.', error);

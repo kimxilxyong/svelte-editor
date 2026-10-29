@@ -12,7 +12,8 @@ export type WidgetKind =
 	| 'widget-alert'
 	| 'widget-progress'
 	| 'widget-avatar'
-	| 'widget-card';
+	| 'widget-card'
+	| 'widget-link';
 export type BlockKind = SectionKind | WidgetKind;
 export type Theme = 'light' | 'lavender' | 'dark';
 
@@ -31,7 +32,20 @@ export type BuilderBlock = {
 	value: string;
 	checked: boolean;
 	level: number;
+	href: string;
+	newTab: boolean;
 };
+
+export type EditorPage = {
+	id: string;
+	name: string;
+	slug: string;
+	width: number;
+	height: number;
+	blocks: BuilderBlock[];
+};
+
+export type EditorSite = { pages: EditorPage[] };
 
 const blockKinds: BlockKind[] = [
 	'hero',
@@ -52,21 +66,34 @@ const blockKinds: BlockKind[] = [
 	'widget-alert',
 	'widget-progress',
 	'widget-avatar',
-	'widget-card'
+	'widget-card',
+	'widget-link'
 ];
 const themes: Theme[] = ['light', 'lavender', 'dark'];
+
+export const canvasLimits = { minWidth: 320, maxWidth: 1600, minHeight: 300, maxHeight: 5000 };
+const slugPattern = /^[a-z0-9-]{1,40}$/;
+
+export function isValidLinkHref(href: string) {
+	return (
+		href === '' ||
+		(href.length <= 200 &&
+			(/^\/[a-z0-9\-_/#?=&.]*$/i.test(href) || /^https?:\/\/[^\s]+$/i.test(href)))
+	);
+}
 
 export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 	if (!Array.isArray(value) || value.length > 100) return null;
 
 	const ids = new Set<string>();
 	const blocks: BuilderBlock[] = [];
+	let nextFlowPosition = 40;
 
 	for (const item of value) {
 		if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
 
 		const block = item as Record<string, unknown>;
-		const positioned = block.positioned ?? false;
+		const positioned = block.positioned ?? true;
 		const x = block.x ?? 6;
 		const y = block.y ?? 40;
 		const width = block.width ?? 88;
@@ -74,6 +101,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		const value = block.value ?? '';
 		const checked = block.checked ?? false;
 		const level = block.level ?? 60;
+		const href = block.href ?? '';
+		const newTab = block.newTab ?? false;
 
 		if (
 			typeof block.id !== 'string' ||
@@ -114,12 +143,17 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			typeof level !== 'number' ||
 			!Number.isFinite(level) ||
 			level < 0 ||
-			level > 100
+			level > 100 ||
+			typeof href !== 'string' ||
+			!isValidLinkHref(href) ||
+			typeof newTab !== 'boolean'
 		) {
 			return null;
 		}
 
+		const positionedY = positioned ? y : nextFlowPosition;
 		ids.add(block.id);
+		if (!positioned) nextFlowPosition = Math.min(5000, positionedY + height + 40);
 		blocks.push({
 			id: block.id,
 			kind: block.kind as BlockKind,
@@ -127,16 +161,71 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			body: block.body,
 			action: block.action,
 			theme: block.theme as Theme,
-			positioned,
+			positioned: true,
 			x,
-			y,
+			y: positionedY,
 			width,
 			height,
 			value,
 			checked,
-			level
+			level,
+			href,
+			newTab
 		});
 	}
 
 	return blocks;
+}
+
+export function parseEditorSite(value: unknown): EditorSite | null {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+	const pagesValue = (value as Record<string, unknown>).pages;
+	if (!Array.isArray(pagesValue) || pagesValue.length < 1 || pagesValue.length > 20) return null;
+
+	const ids = new Set<string>();
+	const slugs = new Set<string>();
+	const pages: EditorPage[] = [];
+
+	for (const item of pagesValue) {
+		if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
+		const page = item as Record<string, unknown>;
+		const blocks = parseBuilderBlocks(page.blocks);
+
+		if (
+			!blocks ||
+			typeof page.id !== 'string' ||
+			page.id.length === 0 ||
+			page.id.length > 100 ||
+			ids.has(page.id) ||
+			typeof page.name !== 'string' ||
+			page.name.trim().length === 0 ||
+			page.name.length > 40 ||
+			typeof page.slug !== 'string' ||
+			!slugPattern.test(page.slug) ||
+			slugs.has(page.slug) ||
+			typeof page.width !== 'number' ||
+			!Number.isFinite(page.width) ||
+			page.width < canvasLimits.minWidth ||
+			page.width > canvasLimits.maxWidth ||
+			typeof page.height !== 'number' ||
+			!Number.isFinite(page.height) ||
+			page.height < canvasLimits.minHeight ||
+			page.height > canvasLimits.maxHeight
+		) {
+			return null;
+		}
+
+		ids.add(page.id);
+		slugs.add(page.slug);
+		pages.push({
+			id: page.id,
+			name: page.name,
+			slug: page.slug,
+			width: page.width,
+			height: page.height,
+			blocks
+		});
+	}
+
+	return { pages };
 }

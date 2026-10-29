@@ -45,6 +45,10 @@
 	import WidgetCard from '../../lib/components/editor/WidgetCard.svelte';
 	import WidgetLink from '../../lib/components/editor/WidgetLink.svelte';
 	import { page as routePage } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { untrack } from 'svelte';
+	import AppNav from '../../lib/components/AppNav.svelte';
 	import {
 		isValidLinkHref,
 		type BuilderBlock,
@@ -533,11 +537,35 @@
 		restoreSnapshot(next);
 	}
 
+	/**
+	 * Selects a page. The URL (`?page=<id>`) is the source of truth for history: the state is
+	 * applied immediately for responsiveness and a history entry is pushed so browser/app Back
+	 * returns to the previously edited page. The URL effect below handles the reverse direction.
+	 */
 	function selectPage(id: string) {
+		applyPageSelection(id);
+		if (routePage.url.searchParams.get('page') !== id) {
+			void goto(resolve(`/editor?page=${encodeURIComponent(id)}`), { reset: false });
+		}
+	}
+
+	function applyPageSelection(id: string) {
 		currentPageId = id;
 		selectedId = null;
 		routeError = null;
 	}
+
+	// URL → state: browser Back/Forward (or a typed URL) changes `?page=`. Only the URL is
+	// tracked so that adding pages or editing never resets the selection.
+	$effect(() => {
+		const urlPageId = routePage.url.searchParams.get('page');
+		untrack(() => {
+			const id = urlPageId ?? pages[0]?.id;
+			if (id && id !== currentPageId && pages.some((item) => item.id === id)) {
+				applyPageSelection(id);
+			}
+		});
+	});
 
 	function setCanvasWidth(width: number) {
 		currentPage.width = width;
@@ -845,6 +873,7 @@
 </svelte:head>
 
 <div class="editor-shell">
+	<AppNav {pages} activePageId={currentPageId} unsavedChanges={hasUnsavedChanges} />
 	<header class="builder-header">
 		<div class="project-name">
 			<div class="brand-mark" aria-hidden="true">✳</div>

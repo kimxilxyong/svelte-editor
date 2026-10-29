@@ -1,10 +1,42 @@
 <script lang="ts">
+	/**
+	 * @fileoverview Root layout. Besides the page chrome it owns the two app-wide navigation
+	 * hooks, because the layout is never re-created between routes:
+	 * - `afterNavigate` feeds every completed navigation into the trail (see `navigation.svelte.ts`).
+	 * - `beforeNavigate` asks for confirmation when the active route reports unsaved changes
+	 *   and the navigation would leave that route (page switches inside the editor are fine).
+	 */
+	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import DemoLinks from './demo/DemoLinks.svelte';
 	import type { LayoutProps } from './$types';
 	import Header from './Header.svelte';
+	import { nav, trackNavigation } from '../lib/navigation.svelte.js';
+	import { toPath } from '../lib/navigation-trail.js';
 	import './layout.css';
 
 	let { children }: LayoutProps = $props();
+
+	afterNavigate((navigation) => {
+		if (!navigation.to) return;
+		trackNavigation(
+			navigation.type,
+			toPath(navigation.to.url),
+			navigation.type === 'popstate' ? navigation.delta : null
+		);
+	});
+
+	beforeNavigate((navigation) => {
+		if (!nav.unsavedChanges) return;
+		if (navigation.type === 'leave') {
+			// Triggers the browser's native "leave site?" dialog.
+			navigation.cancel();
+			return;
+		}
+		const leavesRoute = navigation.to?.route.id !== navigation.from?.route.id;
+		if (leavesRoute && !confirm('You have unsaved changes. Leave without saving?')) {
+			navigation.cancel();
+		}
+	});
 </script>
 
 <div class="app">

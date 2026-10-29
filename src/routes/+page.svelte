@@ -16,6 +16,7 @@
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
+	import AppNav from '../lib/components/AppNav.svelte';
 	import { canvasLimits, type EditorPage, type EditorSite } from '../lib/editor.js';
 
 	type ApiResponse = { created?: boolean; site?: EditorSite | null; error?: string };
@@ -272,6 +273,7 @@
 </svelte:head>
 
 <div class="editor-shell">
+	<AppNav {pages} unsavedChanges={dirty} />
 	<header class="builder-header">
 		<div class="project-name">
 			<div class="brand-mark" aria-hidden="true">✳</div>

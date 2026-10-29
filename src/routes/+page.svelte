@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
+	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
 	import { canvasLimits, type EditorPage, type EditorSite } from '../lib/editor.js';
 
 	type ApiResponse = { created?: boolean; site?: EditorSite | null; error?: string };
@@ -15,6 +16,7 @@
 	let projectRoot = $state('');
 	let projectMessage = $state('');
 	let projectDetails = $state<string[]>([]);
+	let showPickerModal = $state(false);
 
 	let selected = $derived(pages.find((page) => page.id === selectedId) ?? pages[0]);
 	let overviewHeight = $derived(
@@ -128,7 +130,11 @@
 		const root = projectRoot.trim();
 		localStorage.setItem('editor-project-root', root);
 		await run('Importing…', async () => {
-			const result: { pages: EditorPage[]; skipped: FileNote[] } = await projectRequest({
+			const result: {
+				pages: EditorPage[];
+				components: { name: string; fileName: string; props: unknown[] }[];
+				skipped: FileNote[];
+			} = await projectRequest({
 				action: 'import',
 				root
 			});
@@ -140,9 +146,11 @@
 			}
 			pages = merged;
 			if (!pages.some((page) => page.id === selectedId)) selectedId = pages[0]?.id ?? '';
-			if (result.pages.length > 0) touch();
-			projectMessage = `Imported ${result.pages.length} pages${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
+			if (result.pages.length > 0 || (result.components && result.components.length > 0)) touch();
+			const compCount = result.components?.length ?? 0;
+			projectMessage = `Imported ${result.pages.length} pages, ${compCount} components${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
 			projectDetails = [
+				...(result.components?.map((c) => `component ${c.name} (${c.fileName})`) ?? []),
 				...result.pages.map((page) => `read /${page.slug}`),
 				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
 			];
@@ -420,13 +428,27 @@
 					<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
 					exported.
 				</p>
-				<label class="field-label" for="project-root">Absolute path</label>
-				<input
-					id="project-root"
-					class="field-control"
-					placeholder="/home/me/my-app"
-					maxlength="500"
-					bind:value={projectRoot}
+				<label class="field-label" for="project-root">Project path</label>
+				<div class="project-input-row">
+					<input
+						id="project-root"
+						class="field-control"
+						placeholder="/home/me/my-app"
+						maxlength="500"
+						bind:value={projectRoot}
+					/>
+					<button type="button" class="browse-button" onclick={() => (showPickerModal = true)}>
+						Browse…
+					</button>
+				</div>
+				<DirectoryPickerModal
+					open={showPickerModal}
+					initialPath={projectRoot}
+					onselect={(path) => {
+						projectRoot = path;
+						localStorage.setItem('editor-project-root', path);
+					}}
+					onclose={() => (showPickerModal = false)}
 				/>
 				<div class="actions">
 					<button
@@ -821,6 +843,31 @@
 		margin-top: 1.4rem;
 		padding-top: 0.4rem;
 		border-top: 1px solid var(--line);
+	}
+
+	.project-input-row {
+		display: flex;
+		gap: 0.35rem;
+		align-items: center;
+	}
+
+	.browse-button {
+		flex-shrink: 0;
+		min-height: 37px;
+		padding: 0 0.75rem;
+		border: 1px solid #d8d4cc;
+		border-radius: 7px;
+		background: #fff;
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 650;
+		cursor: pointer;
+		color: #4b456f;
+	}
+
+	.browse-button:hover {
+		border-color: #c9c1ff;
+		background: #faf9ff;
 	}
 
 	.project-section .actions {

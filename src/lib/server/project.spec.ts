@@ -4,7 +4,13 @@ import path from 'node:path';
 import { compile } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import { componentNames, type BlockKind, type EditorSite } from '../editor.js';
-import { exportSite, importSite, ProjectError } from './project.js';
+import {
+	exportSite,
+	importSite,
+	exportSingleComponent,
+	importSingleComponent,
+	ProjectError
+} from './project.js';
 
 const dirs: string[] = [];
 
@@ -51,7 +57,7 @@ const site: EditorSite = {
 };
 
 describe('project export/import', () => {
-	it('exports compilable files and imports them back', async () => {
+	it('exports all 20 native components and compilable pages', async () => {
 		const root = await makeProject();
 		const result = await exportSite(root, site);
 		expect(result.skipped).toEqual([]);
@@ -67,6 +73,53 @@ describe('project export/import', () => {
 		expect(imported.pages).toHaveLength(1);
 		expect(imported.pages[0].slug).toBe('home');
 		expect(imported.pages[0].blocks).toHaveLength(20);
+		// All 20 built-in components are scanned in src/lib/components/editor
+		expect(imported.components.length).toBeGreaterThanOrEqual(20);
+	});
+
+	it('imports custom native Svelte components added to the project', async () => {
+		const root = await makeProject();
+		await exportSite(root, site);
+
+		// Add a custom native Svelte component to src/lib/components/
+		const customCompDir = path.join(root, 'src', 'lib', 'components');
+		await mkdir(customCompDir, { recursive: true });
+		const customCompCode = `
+<script lang="ts">
+  interface Props {
+    heading?: string;
+    subscribedCount?: number;
+    optIn?: boolean;
+  }
+  let { heading = 'Join us', subscribedCount = 500, optIn = true }: Props = $props();
+</script>
+<section>
+  <h2>{heading}</h2>
+  <p>{subscribedCount} members</p>
+</section>
+`;
+		await writeFile(path.join(customCompDir, 'NewsletterSignup.svelte'), customCompCode);
+
+		// Import the project
+		const imported = await importSite(root);
+		const found = imported.components.find((c) => c.name === 'NewsletterSignup');
+		expect(found).toBeDefined();
+		expect(found?.fileName).toBe('NewsletterSignup.svelte');
+		expect(found?.props.map((p) => p.name)).toContain('heading');
+		expect(found?.props.map((p) => p.name)).toContain('subscribedCount');
+		expect(found?.props.map((p) => p.name)).toContain('optIn');
+	});
+
+	it('supports exportSingleComponent and importSingleComponent', async () => {
+		const root = await makeProject();
+		const exported = await exportSingleComponent(root, 'WidgetSlider');
+		expect(exported.written).toBe(
+			path.join('src', 'lib', 'components', 'editor', 'WidgetSlider.svelte')
+		);
+
+		const imported = await importSingleComponent(root, exported.written);
+		expect(imported.name).toBe('WidgetSlider');
+		expect(imported.props.map((p) => p.name)).toContain('level');
 	});
 
 	it('never overwrites files it did not generate', async () => {

@@ -1,7 +1,13 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../../lib/editor.js';
-import { exportSite, importSite, ProjectError } from '../../../../lib/server/project.js';
+import {
+	exportSite,
+	importSite,
+	exportSingleComponent,
+	importSingleComponent,
+	ProjectError
+} from '../../../../lib/server/project.js';
 
 export const POST: RequestHandler = async ({ request }) => {
 	let body: unknown;
@@ -14,7 +20,13 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
 		return json({ error: 'Invalid request.' }, { status: 400 });
 	}
-	const { action, root, site: siteInput } = body as Record<string, unknown>;
+	const {
+		action,
+		root,
+		site: siteInput,
+		componentName,
+		componentPath
+	} = body as Record<string, unknown>;
 
 	try {
 		if (action === 'export') {
@@ -28,6 +40,18 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json(await exportSite(root, site));
 		}
 		if (action === 'import') return json(await importSite(root));
+		if (action === 'export-component') {
+			if (typeof componentName !== 'string' || !componentName.trim()) {
+				return json({ error: 'componentName is required.' }, { status: 400 });
+			}
+			return json(await exportSingleComponent(root, componentName.trim()));
+		}
+		if (action === 'import-component') {
+			if (typeof componentPath !== 'string' || !componentPath.trim()) {
+				return json({ error: 'componentPath is required.' }, { status: 400 });
+			}
+			return json(await importSingleComponent(root, componentPath.trim()));
+		}
 		return json({ error: 'Unknown action.' }, { status: 400 });
 	} catch (error) {
 		if (error instanceof ProjectError) return json({ error: error.message }, { status: 400 });

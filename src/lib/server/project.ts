@@ -1,12 +1,8 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { componentNames, type EditorPage, type EditorSite } from '../editor.js';
-import {
-	generatedMarker,
-	parsePageSource,
-	renderPageSource,
-	usedComponentNames
-} from '../svelte-pages.js';
+import { generatedMarker, parsePageSource, renderPageSource } from '../svelte-pages.js';
+import { parseSvelteComponent, type ParsedComponentMetadata } from '../svelte-component-parser.js';
 
 const componentSources = import.meta.glob('../components/editor/*.svelte', {
 	query: '?raw',
@@ -19,7 +15,11 @@ const slugPattern = /^[a-z0-9-]{1,40}$/;
 export class ProjectError extends Error {}
 
 export type ExportResult = { written: string[]; skipped: { file: string; reason: string }[] };
-export type ImportResult = { pages: EditorPage[]; skipped: { file: string; reason: string }[] };
+export type ImportResult = {
+	pages: EditorPage[];
+	components: ParsedComponentMetadata[];
+	skipped: { file: string; reason: string }[];
+};
 
 /** Validates that `root` is a SvelteKit project folder and returns its real path. */
 export async function resolveProject(root: unknown) {
@@ -100,15 +100,17 @@ export async function exportSite(rootInput: unknown, site: EditorSite): Promise<
 	const result: ExportResult = { written: [], skipped: [] };
 	const componentDir = path.join(root, 'src', 'lib', 'components', 'editor');
 
-	for (const name of usedComponentNames(site.pages)) {
+	// Export all 20 built-in components & widgets as real native Name.svelte components
+	for (const name of Object.values(componentNames)) {
 		const source = componentSources[`../components/editor/${name}.svelte`];
-		if (source === undefined) throw new ProjectError(`Missing component source for ${name}.`);
-		await writeGenerated(
-			root,
-			path.join(componentDir, `${name}.svelte`),
-			`${generatedMarker}\n${source}`,
-			result
-		);
+		if (source !== undefined) {
+			await writeGenerated(
+				root,
+				path.join(componentDir, `${name}.svelte`),
+				`${generatedMarker}\n${source}`,
+				result
+			);
+		}
 	}
 
 	for (const page of site.pages) {
@@ -120,10 +122,39 @@ export async function exportSite(rootInput: unknown, site: EditorSite): Promise<
 	return result;
 }
 
+async function scanComponents(
+	dir: string,
+	root: string,
+	found: ParsedComponentMetadata[] = []
+): Promise<ParsedComponentMetadata[]> {
+	const exists = await isDirectory(dir);
+	if (!exists) return found;
+
+	const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory() && !entry.name.startsWith('.')) {
+			await scanComponents(full, root, found);
+		} else if (entry.isFile() && entry.name.endsWith('.svelte')) {
+			try {
+				const src = await readFile(full, 'utf8');
+				const meta = parseSvelteComponent(src, entry.name);
+				found.push(meta);
+			} catch {
+				// Ignore parse errors for non-standard files
+			}
+		}
+	}
+	return found;
+}
+
 export async function importSite(rootInput: unknown): Promise<ImportResult> {
 	const root = await resolveProject(rootInput);
 	const routes = path.join(root, 'src', 'routes');
-	const result: ImportResult = { pages: [], skipped: [] };
+	const componentsDir = path.join(root, 'src', 'lib', 'components');
+
+	const components = await scanComponents(componentsDir, root);
+	const result: ImportResult = { pages: [], components, skipped: [] };
 
 	for (const entry of (await readdir(routes, { withFileTypes: true })).sort((a, b) =>
 		a.name.localeCompare(b.name)
@@ -152,6 +183,35 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
 		result.pages = result.pages.slice(0, 20);
 	}
 	return result;
+}
+
+export async function exportSingleComponent(
+	rootInput: unknown,
+	componentName: string
+): Promise<{ written: string }> {
+	const root = await resolveProject(rootInput);
+	const source = componentSources[`../components/editor/${componentName}.svelte`];
+	if (!source) throw new ProjectError(`Component "${componentName}" not found.`);
+
+	const targetDir = path.join(root, 'src', 'lib', 'components', 'editor');
+	await ensureDirectory(root, targetDir);
+	const targetFile = path.join(targetDir, `${componentName}.svelte`);
+	await writeFile(targetFile, `${generatedMarker}\n${source}`);
+	return { written: path.relative(root, targetFile) };
+}
+
+export async function importSingleComponent(
+	rootInput: unknown,
+	componentRelativePath: string
+): Promise<ParsedComponentMetadata> {
+	const root = await resolveProject(rootInput);
+	const full = path.resolve(root, componentRelativePath);
+	if (!full.startsWith(root) || !full.endsWith('.svelte')) {
+		throw new ProjectError('Invalid component path.');
+	}
+
+	const source = await readFile(full, 'utf8');
+	return parseSvelteComponent(source, path.basename(full));
 }
 
 export { componentNames };

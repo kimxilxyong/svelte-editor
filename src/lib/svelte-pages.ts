@@ -1,6 +1,7 @@
 import { parse } from 'svelte/compiler';
 import {
 	componentNames,
+	getComponentName,
 	parseBuilderBlocks,
 	type BlockKind,
 	type BuilderBlock,
@@ -44,7 +45,7 @@ const kindByComponent = new Map(
 
 export function usedComponentNames(pages: EditorPage[]) {
 	return [
-		...new Set(pages.flatMap((page) => page.blocks.map((block) => componentNames[block.kind])))
+		...new Set(pages.flatMap((page) => page.blocks.map((block) => getComponentName(block.kind))))
 	];
 }
 
@@ -74,14 +75,25 @@ export function renderPageSource(page: EditorPage) {
 		.join('\n');
 	const blocks = page.blocks
 		.map((block) => {
-			const name = componentNames[block.kind];
-			const props = kindProps[block.kind].map((prop) => renderProp(block, prop)).join(' ');
-			return `\t\t<div
-\t\t\tclass="editor-block"
-\t\t\tstyle="left: ${block.x}%; top: ${block.y}px; width: ${block.width}%; height: ${block.height}px"
-\t\t>
-\t\t\t<${name} ${props} />
-\t\t</div>`;
+			const name = getComponentName(block.kind);
+			let propsStr = '';
+			if (block.kind.startsWith('custom:')) {
+				const rendered: string[] = [];
+				if (block.title) rendered.push(`title="${escapeAttribute(block.title)}"`);
+				if (block.body) rendered.push(`body="${escapeAttribute(block.body)}"`);
+				if (block.action) rendered.push(`action="${escapeAttribute(block.action)}"`);
+				if (block.customProps) {
+					for (const [k, v] of Object.entries(block.customProps)) {
+						if (typeof v === 'string') rendered.push(`${k}="${escapeAttribute(v)}"`);
+						else rendered.push(`${k}={${v}}`);
+					}
+				}
+				propsStr = rendered.join(' ');
+			} else {
+				const allowed = kindProps[block.kind as keyof typeof kindProps] || [];
+				propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
+			}
+			return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="left: ${block.x}%; top: ${block.y}px; width: ${block.width}%; height: ${block.height}px"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
 		})
 		.join('\n');
 
@@ -204,16 +216,39 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 			)
 		);
 		const component = elementNodes(wrapper.fragment?.nodes ?? []).find(
-			(node) => node.type === 'Component' && kindByComponent.has(node.name ?? '')
+			(node) =>
+				node.type === 'Component' &&
+				(kindByComponent.has(node.name ?? '') || /^[A-Z][a-zA-Z0-9_]*$/.test(node.name ?? ''))
 		);
 		if (!component) continue;
 
-		const kind = kindByComponent.get(component.name!)!;
+		const isStandard = kindByComponent.has(component.name!);
+		const kind: BlockKind = isStandard
+			? kindByComponent.get(component.name!)!
+			: (`custom:${component.name!}` as BlockKind);
+
 		const props: Record<string, unknown> = {};
+		const customProps: Record<string, string | number | boolean> = {};
+
 		for (const attribute of component.attributes ?? []) {
 			const value = attributeValue(attribute);
-			if (value !== undefined && kindProps[kind].includes(attribute.name as PropName)) {
-				props[attribute.name] = value;
+			if (value !== undefined) {
+				if (
+					isStandard &&
+					kindProps[kind as keyof typeof kindProps]?.includes(attribute.name as PropName)
+				) {
+					props[attribute.name] = value;
+				} else if (!isStandard) {
+					if (['title', 'body', 'action'].includes(attribute.name) && typeof value === 'string') {
+						props[attribute.name] = value;
+					} else if (
+						typeof value === 'string' ||
+						typeof value === 'number' ||
+						typeof value === 'boolean'
+					) {
+						customProps[attribute.name] = value;
+					}
+				}
 			}
 		}
 
@@ -228,7 +263,8 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 			y: wrapperStyle.top,
 			width: wrapperStyle.width,
 			height: wrapperStyle.height,
-			...props
+			...props,
+			...(Object.keys(customProps).length > 0 ? { customProps } : {})
 		});
 	}
 

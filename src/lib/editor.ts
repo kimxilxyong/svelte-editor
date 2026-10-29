@@ -14,7 +14,12 @@ export type WidgetKind =
 	| 'widget-avatar'
 	| 'widget-card'
 	| 'widget-link';
-export type BlockKind = SectionKind | WidgetKind;
+export type CustomKind = `custom:${string}`;
+export type BlockKind = SectionKind | WidgetKind | CustomKind;
+
+export function isValidCustomKind(kind: string): boolean {
+	return /^custom:[A-Za-z0-9_-]{1,60}$/.test(kind);
+}
 export type Theme = 'light' | 'lavender' | 'dark';
 
 export type BuilderBlock = {
@@ -34,6 +39,7 @@ export type BuilderBlock = {
 	level: number;
 	href: string;
 	newTab: boolean;
+	customProps?: Record<string, string | number | boolean>;
 };
 
 export type EditorPage = {
@@ -110,7 +116,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			block.id.length > 100 ||
 			ids.has(block.id) ||
 			typeof block.kind !== 'string' ||
-			!blockKinds.includes(block.kind as BlockKind) ||
+			(!blockKinds.includes(block.kind as BlockKind) && !isValidCustomKind(block.kind)) ||
 			typeof block.title !== 'string' ||
 			block.title.length > 100 ||
 			typeof block.body !== 'string' ||
@@ -154,6 +160,22 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		const positionedY = positioned ? y : nextFlowPosition;
 		ids.add(block.id);
 		if (!positioned) nextFlowPosition = Math.min(5000, positionedY + height + 40);
+		let customProps: Record<string, string | number | boolean> | undefined;
+		if (
+			block.customProps &&
+			typeof block.customProps === 'object' &&
+			!Array.isArray(block.customProps)
+		) {
+			customProps = {};
+			for (const [k, v] of Object.entries(block.customProps as Record<string, unknown>)) {
+				if (typeof k === 'string' && k.length <= 60) {
+					if (typeof v === 'string' && v.length <= 500) customProps[k] = v;
+					else if (typeof v === 'number' && Number.isFinite(v)) customProps[k] = v;
+					else if (typeof v === 'boolean') customProps[k] = v;
+				}
+			}
+		}
+
 		blocks.push({
 			id: block.id,
 			kind: block.kind as BlockKind,
@@ -170,7 +192,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			checked,
 			level,
 			href,
-			newTab
+			newTab,
+			...(customProps ? { customProps } : {})
 		});
 	}
 
@@ -231,7 +254,12 @@ export function parseEditorSite(value: unknown): EditorSite | null {
 }
 
 // Component file names (without .svelte) in src/lib/components/editor/ for each block kind.
-export const componentNames: Record<BlockKind, string> = {
+export function getComponentName(kind: BlockKind): string {
+	if (kind.startsWith('custom:')) return kind.slice(7);
+	return (componentNames as Record<string, string>)[kind] || kind;
+}
+
+export const componentNames: Record<SectionKind | WidgetKind, string> = {
 	hero: 'Hero',
 	text: 'TextSection',
 	button: 'ButtonSection',

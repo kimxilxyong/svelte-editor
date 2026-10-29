@@ -86,6 +86,59 @@ describe('svelte page export/import', () => {
 		expect(parsed?.name).toBe(page.name);
 	});
 
+	it('handles custom components with customProps', () => {
+		const page: EditorPage = {
+			id: 'custom-p',
+			name: 'Custom Page',
+			slug: 'custom',
+			width: 1000,
+			height: 800,
+			blocks: [
+				{
+					id: 'c1',
+					kind: 'custom:NewsletterSignup',
+					title: 'Stay in touch',
+					body: 'Weekly updates',
+					action: 'Subscribe',
+					theme: 'light',
+					positioned: true,
+					x: 10,
+					y: 50,
+					width: 80,
+					height: 200,
+					value: '',
+					checked: false,
+					level: 0,
+					href: '',
+					newTab: false,
+					customProps: {
+						ctaText: 'Join Now',
+						showConsent: true,
+						limit: 5
+					}
+				}
+			]
+		};
+
+		const source = renderPageSource(page);
+		expect(source).toContain(
+			"import NewsletterSignup from '$lib/components/editor/NewsletterSignup.svelte';"
+		);
+		expect(source).toContain('ctaText="Join Now"');
+		expect(source).toContain('showConsent={true}');
+		expect(source).toContain('limit={5}');
+
+		const parsed = parsePageSource(source, 'custom');
+		expect(parsed).not.toBeNull();
+		expect(parsed!.blocks[0].kind).toBe('custom:NewsletterSignup');
+		expect(parsed!.blocks[0].title).toBe('Stay in touch');
+		expect(parsed!.blocks[0].customProps).toEqual({
+			ctaText: 'Join Now',
+			showConsent: true,
+			limit: 5
+		});
+	});
+
 	it('ignores ordinary svelte files', () => {
 		expect(parsePageSource('<h1>Hello</h1>', 'hello')).toBeNull();
 		expect(parsePageSource('<div', 'broken')).toBeNull();

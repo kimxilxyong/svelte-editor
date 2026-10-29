@@ -38,7 +38,7 @@
 		success?: boolean;
 		error?: string;
 	};
-	type PaletteTab = 'sections' | 'widgets';
+	type PaletteTab = 'sections' | 'widgets' | 'custom';
 
 	const sectionInfo: Record<SectionKind, { label: string; detail: string; mark: string }> = {
 		hero: { label: 'Hero section', detail: 'A bold opening for your page', mark: '✳' },
@@ -66,10 +66,19 @@
 	};
 	const sectionKinds = Object.keys(sectionInfo) as SectionKind[];
 	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
-	const componentInfo: Record<BlockKind, { label: string; detail: string; mark: string }> = {
+	const rawComponentInfo: Record<string, { label: string; detail: string; mark: string }> = {
 		...sectionInfo,
 		...widgetInfo
 	};
+	const componentInfo = new Proxy(rawComponentInfo, {
+		get(target, prop: string) {
+			if (typeof prop === 'string' && prop in target) return target[prop];
+			if (typeof prop === 'string' && prop.startsWith('custom:')) {
+				return { label: prop.slice(7), detail: 'Custom component', mark: '✳' };
+			}
+			return { label: String(prop), detail: 'Component', mark: '✳' };
+		}
+	}) as Record<BlockKind, { label: string; detail: string; mark: string }>;
 
 	const defaults: Record<
 		BlockKind,
@@ -326,6 +335,11 @@
 		canvasWidth: number;
 	} | null>(null);
 
+	let customKinds = $derived([
+		...new Set(
+			pages.flatMap((page) => page.blocks.map((b) => b.kind).filter((k) => k.startsWith('custom:')))
+		)
+	]);
 	let selectedBlock = $derived(blocks.find((block) => block.id === selectedId));
 	let blockCount = $derived(blocks.length);
 	let canvasHeight = $derived(
@@ -584,8 +598,15 @@
 	}
 
 	function createBlock(kind: BlockKind): BuilderBlock {
+		const base = (defaults as Record<string, any>)[kind] || {
+			kind,
+			title: kind.startsWith('custom:') ? kind.slice(7) : 'Custom Component',
+			body: '',
+			action: '',
+			theme: 'light'
+		};
 		return {
-			...defaults[kind],
+			...base,
 			id: globalThis.crypto.randomUUID(),
 			positioned: true,
 			x: 6,
@@ -923,6 +944,19 @@
 					>
 						Widgets
 					</button>
+					{#if customKinds.length > 0}
+						<button
+							type="button"
+							id="custom-tab"
+							role="tab"
+							aria-selected={paletteTab === 'custom'}
+							aria-controls="palette-items"
+							class:tab-active={paletteTab === 'custom'}
+							onclick={() => (paletteTab = 'custom')}
+						>
+							Custom
+						</button>
+					{/if}
 				</div>
 				<p class="panel-hint">
 					{paletteTab === 'sections'
@@ -932,7 +966,7 @@
 
 				<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
 					<div class="component-list" role="list" aria-label="Draggable components">
-						{#each paletteTab === 'sections' ? sectionKinds : widgetKinds as kind (kind)}
+						{#each paletteTab === 'sections' ? sectionKinds : paletteTab === 'widgets' ? widgetKinds : customKinds as kind (kind)}
 							<div
 								class="palette-item"
 								class:widget-item={paletteTab === 'widgets'}
@@ -1132,7 +1166,22 @@
 										href={block.href}
 										newTab={block.newTab}
 										onnavigate={(event) => handleLinkClick(event, block)}
-									/>{/if}
+									/>
+								{:else if block.kind.startsWith('custom:')}
+									<div class="custom-block-preview">
+										<div class="custom-badge-row">
+											<span class="custom-pill">✳ {block.kind.slice(7)}</span>
+										</div>
+										<h4>{block.title || block.kind.slice(7)}</h4>
+										{#if block.body}<p>{block.body}</p>{/if}
+										{#if block.customProps && Object.keys(block.customProps).length > 0}
+											<div class="custom-props-preview">
+												{#each Object.entries(block.customProps) as [k, v] (k)}
+													<span class="custom-prop-tag"><code>{k}</code>: {String(v)}</span>
+												{/each}
+											</div>
+										{/if}
+									</div>{/if}
 								{#if !isPreview}
 									<span class="block-type-tag">{componentInfo[block.kind].label}</span>
 									<button
@@ -1312,6 +1361,63 @@
 							rows="4"
 							maxlength="240"
 							oninput={markUnsaved}></textarea>
+						{#if selectedBlock.kind.startsWith('custom:')}
+							<label class="field-label" for="custom-title">Title / Heading</label>
+							<input
+								id="custom-title"
+								class="field-control"
+								bind:value={selectedBlock.title}
+								oninput={markUnsaved}
+							/>
+							<label class="field-label" for="custom-body">Description</label>
+							<textarea
+								id="custom-body"
+								class="field-control field-textarea"
+								bind:value={selectedBlock.body}
+								oninput={markUnsaved}></textarea>
+							{#if selectedBlock.customProps && Object.keys(selectedBlock.customProps).length > 0}
+								<span class="field-label">Component Props</span>
+								{#each Object.entries(selectedBlock.customProps) as [propKey, propVal] (propKey)}
+									{#if typeof propVal === 'boolean'}
+										<label class="widget-state-control">
+											<input
+												type="checkbox"
+												checked={Boolean(selectedBlock.customProps[propKey])}
+												onchange={(e) => {
+													selectedBlock.customProps![propKey] = e.currentTarget.checked;
+													markUnsaved();
+												}}
+											/>
+											<span>{propKey}</span>
+										</label>
+									{:else if typeof propVal === 'number'}
+										<label class="field-label" for="prop-{propKey}">{propKey}</label>
+										<input
+											id="prop-{propKey}"
+											class="field-control"
+											type="number"
+											value={Number(selectedBlock.customProps[propKey])}
+											oninput={(e) => {
+												selectedBlock.customProps![propKey] = Number(e.currentTarget.value);
+												markUnsaved();
+											}}
+										/>
+									{:else}
+										<label class="field-label" for="prop-{propKey}">{propKey}</label>
+										<input
+											id="prop-{propKey}"
+											class="field-control"
+											value={String(selectedBlock.customProps[propKey])}
+											oninput={(e) => {
+												selectedBlock.customProps![propKey] = e.currentTarget.value;
+												markUnsaved();
+											}}
+										/>
+									{/if}
+								{/each}
+							{/if}
+						{/if}
+
 						{#if selectedBlock.kind === 'widget-link'}
 							<label class="field-label" for="link-href">Link address</label>
 							<input
@@ -2503,5 +2609,59 @@
 
 	.canvas-stage {
 		justify-content: flex-start;
+	}
+
+	.custom-block-preview {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		padding: 1rem;
+		box-sizing: border-box;
+		background: #fff;
+		border-radius: 8px;
+		border: 1px dashed #c9c1ff;
+	}
+
+	.custom-badge-row {
+		margin-bottom: 0.4rem;
+	}
+
+	.custom-pill {
+		display: inline-block;
+		padding: 0.15rem 0.45rem;
+		border-radius: 4px;
+		background: #eeeaff;
+		color: var(--purple);
+		font-size: 0.65rem;
+		font-weight: 700;
+	}
+
+	.custom-block-preview h4 {
+		margin: 0 0 0.25rem;
+		font-size: 0.95rem;
+		font-weight: 700;
+		color: var(--ink);
+	}
+
+	.custom-block-preview p {
+		margin: 0 0 0.5rem;
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+
+	.custom-props-preview {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+		margin-top: auto;
+	}
+
+	.custom-prop-tag {
+		font-size: 0.65rem;
+		background: #f7f7fa;
+		padding: 0.15rem 0.35rem;
+		border-radius: 4px;
+		border: 1px solid #e8e8ed;
+		color: #4b456f;
 	}
 </style>

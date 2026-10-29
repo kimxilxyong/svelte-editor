@@ -19,6 +19,7 @@
 	 * @prop {boolean} [canUndo=false] - Whether Undo is currently allowed.
 	 * @prop {boolean} [canRedo=false] - Whether Redo is currently allowed.
 	 * @prop {boolean} [previewing=false] - Preview mode is on; the button then reads "Back to editor".
+	 * @prop {string} [eyebrow='PAGE BUILDER'] - Small caps label above the title (the component editor uses 'COMPONENT EDITOR').
 	 * @prop {string} [title='Untitled website'] - Site title shown next to the eyebrow.
 	 * @prop {string} [saveLabel='Save'] - Text of the save button.
 	 * @prop {() => void} [onsave] - Save clicked.
@@ -37,6 +38,7 @@
 		canUndo = false,
 		canRedo = false,
 		previewing = false,
+		eyebrow = 'PAGE BUILDER',
 		title = 'Untitled website',
 		saveLabel = 'Save',
 		onsave,
@@ -51,6 +53,7 @@
 		canUndo?: boolean;
 		canRedo?: boolean;
 		previewing?: boolean;
+		eyebrow?: string;
 		title?: string;
 		saveLabel?: string;
 		onsave?: () => void;
@@ -64,7 +67,7 @@
 	<div class="project-name">
 		<div class="brand-mark" aria-hidden="true">✳</div>
 		<div>
-			<p class="eyebrow">PAGE BUILDER</p>
+			<p class="eyebrow">{eyebrow}</p>
 			<h1>{title}</h1>
 		</div>
 		<span class="save-status" role="status" aria-live="polite" aria-busy={busy}>

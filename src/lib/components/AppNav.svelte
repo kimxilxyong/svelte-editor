@@ -22,7 +22,7 @@
 	 * The host route passes `unsavedChanges`; the root layout then asks for confirmation before
 	 * leaving the route (see `+layout.svelte`).
 	 *
-	 * @prop {{ id: string; name: string }[]} pages - Pages of the site, used for the switcher and labels.
+	 * @prop {{ id: string; name: string }[]} [pages=[]] - Pages of the site, used for the switcher and labels (empty on routes without pages, e.g. the component editor).
 	 * @prop {string | null} [activePageId=null] - Page currently selected in the host route (editor).
 	 * @prop {boolean} [unsavedChanges=false] - Whether leaving the route would discard edits.
 	 *
@@ -39,17 +39,18 @@
 		describePath,
 		forwardTarget,
 		splitPath,
-		toPath
+		toPath,
+		componentEditorPath
 	} from '../navigation-trail.js';
 	import { goBack, goForward, goToEntry, nav, rememberPages } from '../navigation.svelte.js';
 
 	interface Props {
-		pages: { id: string; name: string }[];
+		pages?: { id: string; name: string }[];
 		activePageId?: string | null;
 		unsavedChanges?: boolean;
 	}
 
-	let { pages, activePageId = null, unsavedChanges = false }: Props = $props();
+	let { pages = [], activePageId = null, unsavedChanges = false }: Props = $props();
 
 	let historyOpen = $state(false);
 
@@ -58,6 +59,7 @@
 	const currentPath = $derived(browser ? toPath(routePage.url) : routePage.url.pathname);
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onPages = $derived(splitPath(currentPath).pathname === '/');
+	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
 
 	/** Page the "Editor" tab opens: the active one, else the last edited one, else the first. */
 	const editorTargetId = $derived.by(() => {
@@ -159,6 +161,15 @@
 		<li>
 			<a href={editorHref} class:active={onEditor} aria-current={onEditor ? 'page' : undefined}>
 				Editor
+			</a>
+		</li>
+		<li>
+			<a
+				href={resolve('/component-editor')}
+				class:active={onComponents}
+				aria-current={onComponents ? 'page' : undefined}
+			>
+				Components
 			</a>
 		</li>
 	</ul>

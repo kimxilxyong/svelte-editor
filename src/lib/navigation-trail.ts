@@ -42,7 +42,7 @@ export interface PathDescription {
 	/** Short label, for example `Pages` or `Editor · Home`. */
 	label: string;
 	/** Coarse area of the app, used for icons and grouping. */
-	section: 'pages' | 'editor' | 'other';
+	section: 'pages' | 'editor' | 'components' | 'other';
 }
 
 /** One breadcrumb segment. `path` is `null` for the current (non-clickable) segment. */
@@ -63,6 +63,9 @@ export const pagesPath = '/';
 
 /** The base path of the single-page editor. */
 export const editorPath = '/editor';
+
+/** Path of the Svelte source (component) editor. */
+export const componentEditorPath = '/component-editor';
 
 /** An empty trail, used before the first navigation was observed. */
 export const emptyTrail: TrailState = { entries: [], index: -1 };
@@ -182,6 +185,7 @@ export function describePath(
 		const name = pageId ? pageNames[pageId] : undefined;
 		return { label: name ? `Editor · ${name}` : 'Editor', section: 'editor' };
 	}
+	if (pathname === componentEditorPath) return { label: 'Component editor', section: 'components' };
 	const last = pathname.split('/').filter(Boolean).at(-1) ?? pathname;
 	return { label: last.charAt(0).toUpperCase() + last.slice(1), section: 'other' };
 }

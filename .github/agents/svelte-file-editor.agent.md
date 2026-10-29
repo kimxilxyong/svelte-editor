@@ -67,6 +67,19 @@ Always add extensive human- and machine-readable documentation to source files a
 - **Architecture & Design Decisions**: Comment non-obvious architecture, reactive state interactions (`$state`, `$derived`, `$effect`), coordinate systems, and AST parsing/generating rationale so that both future human engineers and AI agents understand the code context and intent.
 - **Module Overviews**: Provide `@fileoverview` header comments in TypeScript files explaining the module's responsibilities, input/output contracts, and dependencies.
 
+## Component Editor Architecture Map
+
+The `/component-editor` route edits native `.svelte` files section by section. When changing it, keep these module responsibilities and documentation expectations:
+
+- `src/lib/svelte-sections.ts` – pure split/join of a `.svelte` file into Script / Module script / Markup / Style, with indentation preservation and a line map (`SectionMap`) that translates whole-file compiler positions into section editor positions (`distributeDiagnostics`). Lines are 1-based, columns 0-based.
+- `src/lib/svelte-diagnostics.ts` – `checkSvelteSource` wraps `svelte/compiler` (`generate: false`); isomorphic, used live in the browser and again on the server before writing.
+- `src/lib/server/component-files.ts` – the only place that touches the file system for this feature (path validation, symlink refusal, size limits, overwrite protection, server-side compile check). Never bypass it.
+- `src/routes/component-editor/api/+server.ts` – thin JSON action endpoint (`list`/`read`/`save`/`create`).
+- `src/lib/components/CodeEditor.svelte` – reusable CodeMirror 6 wrapper (`value`, `language`, `diagnostics`, `api`); the view is created once in an attachment and props are pushed in through Compartments/transactions.
+- `src/routes/component-editor/+page.svelte` – composes the above; documents the data flow in its `@component` block.
+
+Document any change to these modules in the matching `@fileoverview` / `@component` block, and keep the position conventions (1-based lines, 0-based columns) explicit in new types.
+
 ## Output format
 
 After completing your work, provide:

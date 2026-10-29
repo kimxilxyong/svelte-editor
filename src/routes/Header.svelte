@@ -23,6 +23,9 @@
 			<li aria-current={page.url.pathname === '/editor' ? 'page' : undefined}>
 				<a href={resolve('/editor')}>Editor</a>
 			</li>
+			<li aria-current={page.url.pathname === '/component-editor' ? 'page' : undefined}>
+				<a href={resolve('/component-editor')}>Components</a>
+			</li>
 			<li aria-current={page.url.pathname === '/about' ? 'page' : undefined}>
 				<a href={resolve('/about')}>About</a>
 			</li>

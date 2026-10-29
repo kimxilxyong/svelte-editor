@@ -1,5 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import Hero from '../../lib/components/editor/Hero.svelte';
+	import TextSection from '../../lib/components/editor/TextSection.svelte';
+	import ButtonSection from '../../lib/components/editor/ButtonSection.svelte';
+	import Features from '../../lib/components/editor/Features.svelte';
+	import ImageSection from '../../lib/components/editor/ImageSection.svelte';
+	import Quote from '../../lib/components/editor/Quote.svelte';
+	import WidgetButton from '../../lib/components/editor/WidgetButton.svelte';
+	import WidgetTextField from '../../lib/components/editor/WidgetTextField.svelte';
+	import WidgetTextarea from '../../lib/components/editor/WidgetTextarea.svelte';
+	import WidgetCheckbox from '../../lib/components/editor/WidgetCheckbox.svelte';
+	import WidgetRadio from '../../lib/components/editor/WidgetRadio.svelte';
+	import WidgetSwitch from '../../lib/components/editor/WidgetSwitch.svelte';
+	import WidgetSelect from '../../lib/components/editor/WidgetSelect.svelte';
+	import WidgetSlider from '../../lib/components/editor/WidgetSlider.svelte';
+	import WidgetBadge from '../../lib/components/editor/WidgetBadge.svelte';
+	import WidgetAlert from '../../lib/components/editor/WidgetAlert.svelte';
+	import WidgetProgress from '../../lib/components/editor/WidgetProgress.svelte';
+	import WidgetAvatar from '../../lib/components/editor/WidgetAvatar.svelte';
+	import WidgetCard from '../../lib/components/editor/WidgetCard.svelte';
+	import WidgetLink from '../../lib/components/editor/WidgetLink.svelte';
 	import { page as routePage } from '$app/state';
 	import {
 		isValidLinkHref,
@@ -1003,229 +1023,116 @@
 								style:width="{block.width}%"
 								style:height="{block.height}px"
 							>
-								{#if block.kind === 'widget-button'}
-									<div class="widget-preview">
-										<button class="widget-button" type="button" onclick={markUnsaved}>
-											{block.action}
-											<span aria-hidden="true">↗</span>
-										</button>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-text-field'}
-									<div class="widget-preview widget-form">
-										<label for="widget-{block.id}">{block.title}</label>
-										<input
-											id="widget-{block.id}"
-											type="text"
-											placeholder={block.action}
-											bind:value={block.value}
-											maxlength="100"
-											oninput={markUnsaved}
-										/>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-textarea'}
-									<div class="widget-preview widget-form">
-										<label for="widget-{block.id}">{block.title}</label>
-										<textarea
-											id="widget-{block.id}"
-											placeholder={block.action}
-											bind:value={block.value}
-											maxlength="100"
-											oninput={markUnsaved}></textarea>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-checkbox'}
-									<div class="widget-preview widget-choice">
-										<label>
-											<input type="checkbox" bind:checked={block.checked} onchange={markUnsaved} />
-											<span><strong>{block.title}</strong><small>{block.body}</small></span>
-										</label>
-									</div>
-								{:else if block.kind === 'widget-radio'}
-									<div class="widget-preview widget-choice">
-										<label>
-											<input
-												type="radio"
-												name="widget-{block.id}"
-												checked={block.checked}
-												onchange={() => {
-													block.checked = true;
-													markUnsaved();
-												}}
-											/>
-											<span><strong>{block.title}</strong><small>{block.body}</small></span>
-										</label>
-									</div>
-								{:else if block.kind === 'widget-switch'}
-									<div class="widget-preview widget-choice">
-										<label class="switch-control">
-											<span><strong>{block.title}</strong><small>{block.body}</small></span>
-											<input
-												type="checkbox"
-												role="switch"
-												bind:checked={block.checked}
-												onchange={markUnsaved}
-											/>
-											<span class="switch-track" aria-hidden="true"></span>
-										</label>
-									</div>
-								{:else if block.kind === 'widget-select'}
-									<div class="widget-preview widget-form">
-										<label for="widget-{block.id}">{block.title}</label>
-										<select bind:value={block.value} id="widget-{block.id}" onchange={markUnsaved}>
-											<option value="">Choose an option</option>
-											<option value="Canada">Canada</option>
-											<option value="United States">United States</option>
-											<option value="United Kingdom">United Kingdom</option>
-										</select>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-slider'}
-									<div class="widget-preview widget-form">
-										<div class="widget-slider-heading">
-											<label for="widget-{block.id}">{block.title}</label>
-											<output for="widget-{block.id}">{block.level}%</output>
-										</div>
-										<input
-											id="widget-{block.id}"
-											class="widget-range"
-											type="range"
-											min="0"
-											max="100"
-											bind:value={block.level}
-											oninput={markUnsaved}
-										/>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-badge'}
-									<div class="widget-preview widget-badge-preview">
-										<span class="widget-badge">{block.title}</span>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-alert'}
-									<div class="widget-preview widget-alert-preview" role="status">
-										<span class="alert-icon" aria-hidden="true">✓</span>
-										<div>
-											<strong>{block.title}</strong>
-											<p>{block.body}</p>
-										</div>
-									</div>
-								{:else if block.kind === 'widget-progress'}
-									<div class="widget-preview widget-form">
-										<div class="widget-slider-heading">
-											<strong>{block.title}</strong><output>{block.level}%</output>
-										</div>
-										<progress value={block.level} max="100" aria-label={block.title}></progress>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'widget-avatar'}
-									<div class="widget-preview widget-avatar-preview">
-										<span class="widget-avatar" aria-hidden="true">
-											{block.title
-												.split(' ')
-												.map((part) => part[0] ?? '')
-												.slice(0, 2)
-												.join('')
-												.toUpperCase()}
-										</span>
-										<div>
-											<strong>{block.title}</strong>
-											<p>{block.body}</p>
-										</div>
-									</div>
-								{:else if block.kind === 'widget-card'}
-									<div class="widget-preview widget-card-preview">
-										<span class="widget-card-mark" aria-hidden="true">✦</span>
-										<h2>{block.title}</h2>
-										<p>{block.body}</p>
-										<button type="button" onclick={markUnsaved}
-											>{block.action} <span aria-hidden="true">↗</span></button
-										>
-									</div>
-								{:else if block.kind === 'widget-link'}
-									<div class="widget-preview widget-link-preview">
-										<a
-											class="widget-link"
-											href={block.href && isValidLinkHref(block.href) ? block.href : undefined}
-											target={block.newTab && !block.href.startsWith('/') ? '_blank' : undefined}
-											rel="noopener noreferrer"
-											onclick={(event) => handleLinkClick(event, block)}
-										>
-											{block.title}<span aria-hidden="true">↪</span>
-										</a>
-										<p>{block.body}</p>
-									</div>
-								{:else if block.kind === 'hero'}
-									<div class="hero-preview">
-										<span class="preview-kicker">A LITTLE MORE YOU</span>
-										<h2>{block.title}</h2>
-										<p>{block.body}</p>
-										{#if block.action}<span class="mock-cta"
-												>{block.action}<span aria-hidden="true"> ↗</span></span
-											>{/if}
-										<div class="hero-orbit" aria-hidden="true"><span>✳</span><i></i></div>
-									</div>
-								{:else if block.kind === 'features'}
-									<div class="features-preview">
-										<span class="preview-kicker">MADE WITH INTENTION</span>
-										<h2>{block.title}</h2>
-										<p>{block.body}</p>
-										<div class="feature-cards" aria-hidden="true">
-											<div>
-												<span>✧</span><strong>Thoughtful by design</strong><small
-													>Every detail has a purpose.</small
-												>
-											</div>
-											<div>
-												<span>↗</span><strong>Room to grow</strong><small
-													>Built around your next step.</small
-												>
-											</div>
-											<div>
-												<span>♡</span><strong>People first</strong><small
-													>Good work, together.</small
-												>
-											</div>
-										</div>
-									</div>
-								{:else if block.kind === 'quote'}
-									<div class="quote-preview">
-										<span class="quote-mark" aria-hidden="true">“</span>
-										<h2>{block.title}</h2>
-										<p>{block.body}</p>
-										<span class="quote-author">{block.action}</span>
-									</div>
+								{#if block.kind === 'hero'}
+									<Hero
+										title={block.title}
+										body={block.body}
+										action={block.action}
+										theme={block.theme}
+									/>
 								{:else if block.kind === 'text'}
-									<div class="text-preview">
-										<span class="preview-kicker">OUR STORY</span>
-										<h2>{block.title}</h2>
-										<p>{block.body}</p>
-									</div>
+									<TextSection title={block.title} body={block.body} theme={block.theme} />
 								{:else if block.kind === 'button'}
-									<div class="button-preview">
-										<div>
-											<span class="preview-kicker">YOUR NEXT CHAPTER</span>
-											<h2>{block.title}</h2>
-											<p>{block.body}</p>
-										</div>
-										<span class="mock-cta">{block.action}<span aria-hidden="true"> ↗</span></span>
-									</div>
-								{:else}
-									<div class="image-preview">
-										<div class="image-art" aria-hidden="true">
-											<div class="sun"></div>
-											<div class="hill hill-back"></div>
-											<div class="hill hill-front"></div>
-											<span>✳</span>
-										</div>
-										<div>
-											<span class="preview-kicker">A FRESH PERSPECTIVE</span>
-											<h2>{block.title}</h2>
-											<p>{block.body}</p>
-										</div>
-									</div>
-								{/if}
+									<ButtonSection
+										title={block.title}
+										body={block.body}
+										action={block.action}
+										theme={block.theme}
+									/>
+								{:else if block.kind === 'features'}
+									<Features title={block.title} body={block.body} theme={block.theme} />
+								{:else if block.kind === 'image'}
+									<ImageSection title={block.title} body={block.body} theme={block.theme} />
+								{:else if block.kind === 'quote'}
+									<Quote
+										title={block.title}
+										body={block.body}
+										action={block.action}
+										theme={block.theme}
+									/>
+								{:else if block.kind === 'widget-button'}
+									<WidgetButton action={block.action} body={block.body} onchange={markUnsaved} />
+								{:else if block.kind === 'widget-text-field'}
+									<WidgetTextField
+										id={block.id}
+										title={block.title}
+										action={block.action}
+										body={block.body}
+										bind:value={block.value}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-textarea'}
+									<WidgetTextarea
+										id={block.id}
+										title={block.title}
+										action={block.action}
+										body={block.body}
+										bind:value={block.value}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-checkbox'}
+									<WidgetCheckbox
+										id={block.id}
+										title={block.title}
+										body={block.body}
+										bind:checked={block.checked}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-radio'}
+									<WidgetRadio
+										id={block.id}
+										title={block.title}
+										body={block.body}
+										bind:checked={block.checked}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-switch'}
+									<WidgetSwitch
+										id={block.id}
+										title={block.title}
+										body={block.body}
+										bind:checked={block.checked}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-select'}
+									<WidgetSelect
+										id={block.id}
+										title={block.title}
+										body={block.body}
+										bind:value={block.value}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-slider'}
+									<WidgetSlider
+										id={block.id}
+										title={block.title}
+										body={block.body}
+										bind:level={block.level}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-badge'}
+									<WidgetBadge title={block.title} body={block.body} />
+								{:else if block.kind === 'widget-alert'}
+									<WidgetAlert title={block.title} body={block.body} />
+								{:else if block.kind === 'widget-progress'}
+									<WidgetProgress title={block.title} body={block.body} bind:level={block.level} />
+								{:else if block.kind === 'widget-avatar'}
+									<WidgetAvatar title={block.title} body={block.body} />
+								{:else if block.kind === 'widget-card'}
+									<WidgetCard
+										title={block.title}
+										body={block.body}
+										action={block.action}
+										onchange={markUnsaved}
+									/>
+								{:else if block.kind === 'widget-link'}
+									<WidgetLink
+										title={block.title}
+										body={block.body}
+										href={block.href}
+										newTab={block.newTab}
+										onnavigate={(event) => handleLinkClick(event, block)}
+									/>{/if}
 								{#if !isPreview}
 									<span class="block-type-tag">{componentInfo[block.kind].label}</span>
 									<button
@@ -2096,19 +2003,6 @@
 			0 5px 18px rgb(34 34 56 / 0.12);
 	}
 
-	.canvas-block.positioned .hero-preview,
-	.canvas-block.positioned .features-preview,
-	.canvas-block.positioned .quote-preview,
-	.canvas-block.positioned .text-preview,
-	.canvas-block.positioned .button-preview,
-	.canvas-block.positioned .image-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 0;
-		box-sizing: border-box;
-		overflow: auto;
-	}
-
 	.selection-overlay:focus-visible {
 		z-index: 2;
 		outline: 3px solid #8d7cff;
@@ -2167,613 +2061,6 @@
 
 	.canvas-block.hero {
 		min-height: 290px;
-	}
-
-	.widget-preview {
-		display: flex;
-		min-height: 130px;
-		height: 100%;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-
-	.widget-preview > p,
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-
-	.widget-form {
-		align-items: stretch;
-	}
-
-	.widget-form label,
-	.widget-slider-heading label {
-		color: #4a4b60;
-		font-size: 0.72rem;
-		font-weight: 650;
-	}
-
-	.widget-form input[type='text'],
-	.widget-form textarea,
-	.widget-form select {
-		width: 100%;
-		min-height: 40px;
-		box-sizing: border-box;
-		padding: 0.6rem 0.7rem;
-		border: 1px solid #dfe0e8;
-		border-radius: 7px;
-		background: #fff;
-		color: #393b50;
-		font: inherit;
-		font-size: 0.72rem;
-	}
-
-	.widget-form input[type='text']:focus,
-	.widget-form textarea:focus,
-	.widget-form select:focus {
-		border-color: #9285ec;
-		outline: 3px solid rgb(119 102 223 / 12%);
-	}
-
-	.widget-form textarea {
-		min-height: 90px;
-		resize: vertical;
-	}
-
-	.widget-form progress {
-		width: 100%;
-		height: 10px;
-		accent-color: #6b5ce7;
-	}
-
-	.widget-slider-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-
-	.widget-slider-heading output {
-		color: #77798c;
-		font-size: 0.7rem;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.widget-form input.widget-range {
-		width: 100%;
-		accent-color: #6b5ce7;
-	}
-
-	.widget-button {
-		display: inline-flex;
-		min-height: 42px;
-		align-items: center;
-		justify-content: center;
-		gap: 0.75rem;
-		align-self: flex-start;
-		padding: 0.65rem 1rem;
-		border: 0;
-		border-radius: 8px;
-		background: #6554d8;
-		color: #fff;
-		font: inherit;
-		font-size: 0.76rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.widget-choice {
-		justify-content: center;
-	}
-
-	.widget-choice label {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		cursor: pointer;
-	}
-
-	.widget-choice label > span {
-		display: grid;
-		gap: 0.25rem;
-	}
-
-	.widget-choice strong,
-	.widget-avatar-preview strong {
-		color: #43455a;
-		font-size: 0.76rem;
-		font-weight: 650;
-	}
-
-	.widget-choice small {
-		color: #85869a;
-		font-size: 0.67rem;
-	}
-
-	.widget-choice input[type='checkbox'],
-	.widget-choice input[type='radio'],
-	.widget-state-control input {
-		width: 18px;
-		height: 18px;
-		accent-color: #6b5ce7;
-	}
-
-	.widget-choice .switch-control {
-		position: relative;
-		justify-content: space-between;
-	}
-
-	.switch-control input {
-		position: absolute;
-		right: 0;
-		width: 42px;
-		height: 26px;
-		margin: 0;
-		opacity: 0;
-		cursor: pointer;
-	}
-
-	.switch-track {
-		position: relative;
-		width: 42px;
-		height: 24px;
-		flex: 0 0 42px;
-		border-radius: 999px;
-		background: #d9dae3;
-		transition: background 120ms ease;
-	}
-
-	.switch-track::after {
-		position: absolute;
-		top: 3px;
-		left: 3px;
-		width: 18px;
-		height: 18px;
-		border-radius: 50%;
-		background: #fff;
-		box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
-		content: '';
-		transition: transform 120ms ease;
-	}
-
-	.switch-control input:checked + .switch-track {
-		background: #6b5ce7;
-	}
-
-	.switch-control input:checked + .switch-track::after {
-		transform: translateX(18px);
-	}
-
-	.switch-control input:focus-visible + .switch-track {
-		outline: 3px solid rgb(119 102 223 / 24%);
-		outline-offset: 2px;
-	}
-
-	.widget-badge-preview {
-		align-items: flex-start;
-	}
-
-	.widget-badge {
-		display: inline-flex;
-		min-height: 25px;
-		align-items: center;
-		padding: 0.25rem 0.6rem;
-		border-radius: 999px;
-		background: #eeeaff;
-		color: #5e50c8;
-		font-size: 0.68rem;
-		font-weight: 680;
-	}
-
-	.widget-alert-preview {
-		flex-direction: row;
-		align-items: flex-start;
-		justify-content: flex-start;
-		border: 1px solid #cde9d9;
-		border-radius: 9px;
-		background: #f2fbf5;
-	}
-
-	.alert-icon {
-		display: grid;
-		width: 24px;
-		height: 24px;
-		flex: 0 0 24px;
-		place-items: center;
-		border-radius: 50%;
-		background: #d8f1e2;
-		color: #27794b;
-		font-weight: 700;
-	}
-
-	.widget-alert-preview strong {
-		color: #315d43;
-		font-size: 0.75rem;
-	}
-
-	.widget-avatar-preview {
-		flex-direction: row;
-		align-items: center;
-		justify-content: flex-start;
-	}
-
-	.widget-avatar {
-		display: grid;
-		width: 54px;
-		height: 54px;
-		flex: 0 0 54px;
-		place-items: center;
-		border-radius: 50%;
-		background: linear-gradient(135deg, #dcd5ff, #a89af2);
-		color: #453b96;
-		font-size: 0.95rem;
-		font-weight: 750;
-	}
-
-	.widget-card-preview {
-		align-items: flex-start;
-		border: 1px solid #e8e8ef;
-		border-radius: 10px;
-		box-shadow: 0 5px 16px rgb(34 34 56 / 0.07);
-	}
-
-	.widget-card-mark {
-		color: #7667dd;
-		font-size: 1.2rem;
-	}
-
-	.widget-card-preview h2 {
-		margin: 0;
-		color: #36384d;
-		font-size: 0.95rem;
-		font-weight: 700;
-	}
-
-	.widget-card-preview button {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.45rem;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: #6253ca;
-		font: inherit;
-		font-size: 0.7rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.hero-preview {
-		position: relative;
-		min-height: 290px;
-		padding: clamp(2rem, 6vw, 4.2rem);
-		overflow: hidden;
-		background: linear-gradient(115deg, #f3efff 0%, #f5f2ff 52%, #e8e4ff 100%);
-	}
-
-	.preview-kicker {
-		display: block;
-		margin-bottom: 0.8rem;
-		color: #8174c6;
-		font-size: 0.55rem;
-		font-weight: 750;
-		letter-spacing: 0.14em;
-	}
-
-	.hero-preview h2,
-	.features-preview h2,
-	.text-preview h2,
-	.image-preview h2,
-	.button-preview h2 {
-		position: relative;
-		z-index: 1;
-		max-width: 500px;
-		margin: 0 0 0.75rem;
-		font-size: clamp(1.45rem, 3vw, 2.45rem);
-		font-weight: 690;
-		letter-spacing: -0.055em;
-		line-height: 1.08;
-	}
-
-	.hero-preview p,
-	.features-preview > p,
-	.text-preview p,
-	.image-preview p,
-	.button-preview p {
-		position: relative;
-		z-index: 1;
-		max-width: 400px;
-		margin: 0;
-		color: #73748b;
-		font-size: 0.8rem;
-		line-height: 1.65;
-	}
-
-	.mock-cta {
-		position: relative;
-		z-index: 1;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.65rem;
-		margin-top: 1.25rem;
-		padding: 0.7rem 0.95rem;
-		border-radius: 7px;
-		background: #6554d8;
-		color: white;
-		font-size: 0.68rem;
-		font-weight: 650;
-	}
-
-	.hero-orbit {
-		position: absolute;
-		right: 8%;
-		bottom: 5%;
-		display: grid;
-		width: 140px;
-		height: 140px;
-		place-items: center;
-		border: 1px solid rgb(126 110 221 / 0.2);
-		border-radius: 50%;
-		color: #9586e7;
-		font-size: 3rem;
-	}
-
-	.hero-orbit::before,
-	.hero-orbit::after {
-		position: absolute;
-		inset: 13px;
-		border: 1px solid rgb(126 110 221 / 0.15);
-		border-radius: 50%;
-		content: '';
-	}
-
-	.hero-orbit::after {
-		inset: 30px;
-	}
-
-	.hero-orbit i {
-		position: absolute;
-		top: 13px;
-		right: 25px;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: #e1a782;
-	}
-
-	.features-preview,
-	.text-preview {
-		padding: clamp(1.8rem, 5vw, 3.2rem);
-	}
-
-	.features-preview h2,
-	.text-preview h2,
-	.image-preview h2,
-	.button-preview h2 {
-		font-size: clamp(1.2rem, 2.5vw, 1.8rem);
-	}
-
-	.feature-cards {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.65rem;
-		margin-top: 1.5rem;
-	}
-
-	.feature-cards > div {
-		display: grid;
-		min-height: 95px;
-		align-content: start;
-		gap: 0.35rem;
-		padding: 0.8rem;
-		border: 1px solid #eeeef2;
-		border-radius: 8px;
-		background: #fdfdfe;
-	}
-
-	.feature-cards span {
-		color: #8072dc;
-		font-size: 0.9rem;
-	}
-
-	.feature-cards strong {
-		font-size: 0.62rem;
-		font-weight: 680;
-	}
-
-	.feature-cards small {
-		color: #8d8e9e;
-		font-size: 0.55rem;
-	}
-
-	.quote-preview {
-		display: grid;
-		min-height: 180px;
-		align-content: center;
-		justify-items: center;
-		padding: 2rem;
-		background: #fbfaf8;
-		text-align: center;
-	}
-
-	.quote-mark {
-		height: 26px;
-		color: #b3a5e8;
-		font-family: Georgia, serif;
-		font-size: 3rem;
-		line-height: 1;
-	}
-
-	.quote-preview h2 {
-		margin: 0.4rem 0;
-		font-family: Georgia, serif;
-		font-size: clamp(1.15rem, 2.3vw, 1.7rem);
-		font-weight: 500;
-		letter-spacing: -0.035em;
-	}
-
-	.quote-preview p {
-		max-width: 440px;
-		margin: 0 auto;
-		color: #7e7d89;
-		font-size: 0.7rem;
-		line-height: 1.6;
-	}
-
-	.quote-author {
-		margin-top: 0.75rem;
-		color: #858494;
-		font-size: 0.6rem;
-		font-weight: 650;
-	}
-
-	.button-preview {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		padding: 2rem clamp(1.8rem, 5vw, 3.2rem);
-		background: #27263c;
-		color: white;
-	}
-
-	.button-preview .preview-kicker {
-		color: #b1a7ef;
-	}
-
-	.button-preview h2 {
-		margin-bottom: 0.45rem;
-		color: white;
-	}
-
-	.button-preview p {
-		color: #c3c0d0;
-	}
-
-	.button-preview .mock-cta {
-		flex-shrink: 0;
-		background: white;
-		color: #39344e;
-	}
-
-	.image-preview {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		align-items: center;
-		gap: 1.8rem;
-		padding: clamp(1.3rem, 4vw, 2.5rem);
-		background: #f7f4ff;
-	}
-
-	.canvas-block.theme-lavender .hero-preview {
-		background: linear-gradient(115deg, #f3efff 0%, #f5f2ff 52%, #e8e4ff 100%);
-	}
-
-	.canvas-block.theme-light .hero-preview {
-		background: linear-gradient(115deg, #fff 0%, #fbfbfd 58%, #f3f2f7 100%);
-	}
-
-	.canvas-block.theme-dark .hero-preview {
-		background: linear-gradient(115deg, #29273d 0%, #34314e 58%, #464064 100%);
-	}
-
-	.canvas-block.theme-lavender .features-preview,
-	.canvas-block.theme-lavender .text-preview,
-	.canvas-block.theme-lavender .quote-preview,
-	.canvas-block.theme-lavender .image-preview {
-		background: #f5f2ff;
-	}
-
-	.canvas-block.theme-light .features-preview,
-	.canvas-block.theme-light .text-preview,
-	.canvas-block.theme-light .quote-preview,
-	.canvas-block.theme-light .image-preview {
-		background: #fff;
-	}
-
-	.canvas-block.theme-dark .features-preview,
-	.canvas-block.theme-dark .text-preview,
-	.canvas-block.theme-dark .quote-preview,
-	.canvas-block.theme-dark .image-preview {
-		background: #29273d;
-		color: #fff;
-	}
-
-	.canvas-block.theme-dark .hero-preview h2,
-	.canvas-block.theme-dark .features-preview h2,
-	.canvas-block.theme-dark .text-preview h2,
-	.canvas-block.theme-dark .quote-preview h2,
-	.canvas-block.theme-dark .image-preview h2 {
-		color: #fff;
-	}
-
-	.canvas-block.theme-dark .hero-preview p,
-	.canvas-block.theme-dark .features-preview > p,
-	.canvas-block.theme-dark .text-preview p,
-	.canvas-block.theme-dark .quote-preview p,
-	.canvas-block.theme-dark .image-preview p {
-		color: #c6c3d6;
-	}
-
-	.image-art {
-		position: relative;
-		min-height: 145px;
-		overflow: hidden;
-		border-radius: 8px;
-		background: linear-gradient(150deg, #dbd3fa, #efe4e7 65%, #f2d5bd);
-	}
-
-	.image-art .sun {
-		position: absolute;
-		top: 18%;
-		right: 22%;
-		width: 35px;
-		height: 35px;
-		border-radius: 50%;
-		background: #ffd59b;
-		box-shadow: 0 0 30px rgb(255 213 155 / 60%);
-	}
-
-	.hill {
-		position: absolute;
-		right: -10%;
-		bottom: -48%;
-		width: 120%;
-		height: 100%;
-		transform: rotate(-12deg);
-		border-radius: 50% 50% 0 0;
-		background: #a59bd7;
-	}
-
-	.hill-back {
-		right: 32%;
-		bottom: -55%;
-		background: #c5b7df;
-	}
-
-	.hill-front {
-		bottom: -70%;
-		background: #7772b4;
-	}
-
-	.image-art > span {
-		position: absolute;
-		top: 20%;
-		left: 18%;
-		color: white;
-		font-size: 1rem;
-	}
-
-	.image-preview h2 {
-		margin-bottom: 0.5rem;
 	}
 
 	.block-type-tag {
@@ -3140,60 +2427,6 @@
 			min-height: 480px;
 		}
 
-		.hero-preview {
-			min-height: 250px;
-			padding: 2rem 1.3rem;
-		}
-
-		.hero-orbit {
-			right: -38px;
-			bottom: -38px;
-			width: 110px;
-			height: 110px;
-		}
-
-		.features-preview,
-		.text-preview {
-			padding: 1.5rem 1.2rem;
-		}
-
-		.feature-cards {
-			gap: 0.35rem;
-		}
-
-		.feature-cards > div {
-			min-height: 90px;
-			padding: 0.55rem;
-		}
-
-		.feature-cards strong {
-			font-size: 0.56rem;
-		}
-
-		.feature-cards small {
-			font-size: 0.5rem;
-		}
-
-		.button-preview {
-			align-items: flex-start;
-			flex-direction: column;
-			padding: 1.5rem 1.2rem;
-		}
-
-		.button-preview .mock-cta {
-			margin-top: 0.1rem;
-		}
-
-		.image-preview {
-			grid-template-columns: 1fr;
-			gap: 1rem;
-			padding: 1.1rem;
-		}
-
-		.image-art {
-			min-height: 120px;
-		}
-
 		.inspector-panel {
 			padding: 1.1rem;
 		}
@@ -3260,26 +2493,6 @@
 		align-items: center;
 		font-size: 0.8rem;
 		margin-top: 0.5rem;
-	}
-
-	.widget-link-preview {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-
-	.widget-link {
-		color: #1f6f5c;
-		font-weight: 600;
-		text-decoration: underline;
-		display: inline-flex;
-		gap: 0.3rem;
-	}
-
-	.widget-link-preview p {
-		margin: 0;
-		font-size: 0.8rem;
-		opacity: 0.7;
 	}
 
 	.page-canvas {

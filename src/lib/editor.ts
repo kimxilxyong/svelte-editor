@@ -229,3 +229,27 @@ export function parseEditorSite(value: unknown): EditorSite | null {
 
 	return { pages };
 }
+
+// Component file names (without .svelte) in src/lib/components/editor/ for each block kind.
+export const componentNames: Record<BlockKind, string> = {
+	hero: 'Hero',
+	text: 'TextSection',
+	button: 'ButtonSection',
+	features: 'Features',
+	image: 'ImageSection',
+	quote: 'Quote',
+	'widget-button': 'WidgetButton',
+	'widget-text-field': 'WidgetTextField',
+	'widget-textarea': 'WidgetTextarea',
+	'widget-checkbox': 'WidgetCheckbox',
+	'widget-radio': 'WidgetRadio',
+	'widget-switch': 'WidgetSwitch',
+	'widget-select': 'WidgetSelect',
+	'widget-slider': 'WidgetSlider',
+	'widget-badge': 'WidgetBadge',
+	'widget-alert': 'WidgetAlert',
+	'widget-progress': 'WidgetProgress',
+	'widget-avatar': 'WidgetAvatar',
+	'widget-card': 'WidgetCard',
+	'widget-link': 'WidgetLink'
+};

@@ -12,6 +12,9 @@
 	let status = $state('Checking SQLite…');
 	let dirty = $state(false);
 	let slugBeforeEdit = '';
+	let projectRoot = $state('');
+	let projectMessage = $state('');
+	let projectDetails = $state<string[]>([]);
 
 	let selected = $derived(pages.find((page) => page.id === selectedId) ?? pages[0]);
 	let overviewHeight = $derived(
@@ -21,6 +24,7 @@
 	);
 
 	onMount(() => {
+		projectRoot = localStorage.getItem('editor-project-root') ?? '';
 		void load();
 	});
 
@@ -83,6 +87,66 @@
 			await request('POST', { action: 'save', site: { pages: $state.snapshot(pages) } });
 			dirty = false;
 			status = 'Saved to SQLite';
+		});
+	}
+
+	type FileNote = { file: string; reason: string };
+
+	async function projectRequest(
+		payload:
+			{ action: 'export'; root: string; site: EditorSite } | { action: 'import'; root: string }
+	) {
+		const response = await fetch('/editor/api/project', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+		const result = await response.json();
+		if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
+		return result;
+	}
+
+	async function exportProject() {
+		const root = projectRoot.trim();
+		localStorage.setItem('editor-project-root', root);
+		await run('Exporting…', async () => {
+			const result: { written: string[]; skipped: FileNote[] } = await projectRequest({
+				action: 'export',
+				root,
+				site: { pages: $state.snapshot(pages) }
+			});
+			projectMessage = `Exported ${result.written.length} files${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
+			projectDetails = [
+				...result.written.map((file) => `wrote ${file}`),
+				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
+			];
+			status = projectMessage;
+		});
+	}
+
+	async function importProject() {
+		const root = projectRoot.trim();
+		localStorage.setItem('editor-project-root', root);
+		await run('Importing…', async () => {
+			const result: { pages: EditorPage[]; skipped: FileNote[] } = await projectRequest({
+				action: 'import',
+				root
+			});
+			const merged = [...pages];
+			for (const page of result.pages) {
+				const index = merged.findIndex((item) => item.slug === page.slug);
+				if (index >= 0) merged[index] = { ...page, id: merged[index].id };
+				else if (merged.length < 20) merged.push(page);
+			}
+			pages = merged;
+			if (!pages.some((page) => page.id === selectedId)) selectedId = pages[0]?.id ?? '';
+			if (result.pages.length > 0) touch();
+			projectMessage = `Imported ${result.pages.length} pages${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
+			projectDetails = [
+				...result.pages.map((page) => `read /${page.slug}`),
+				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
+			];
+			status = projectMessage;
 		});
 	}
 
@@ -348,6 +412,41 @@
 					</div>
 				</div>
 			{/if}
+
+			<div class="inspector-content project-section">
+				<span class="field-label">SvelteKit project folder</span>
+				<p class="panel-hint">
+					Export writes <code>src/routes/&lt;route&gt;/+page.svelte</code> and
+					<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
+					exported.
+				</p>
+				<label class="field-label" for="project-root">Absolute path</label>
+				<input
+					id="project-root"
+					class="field-control"
+					placeholder="/home/me/my-app"
+					maxlength="500"
+					bind:value={projectRoot}
+				/>
+				<div class="actions">
+					<button
+						type="button"
+						disabled={busy || !projectRoot.trim() || pages.length === 0}
+						onclick={exportProject}
+					>
+						Export
+					</button>
+					<button type="button" disabled={busy || !projectRoot.trim()} onclick={importProject}>
+						Import
+					</button>
+				</div>
+				{#if projectMessage}
+					<p class="panel-hint" role="status">{projectMessage}</p>
+					<ul class="project-details">
+						{#each projectDetails as line (line)}<li>{line}</li>{/each}
+					</ul>
+				{/if}
+			</div>
 		</aside>
 	</div>
 </div>
@@ -716,6 +815,25 @@
 		color: #999aab;
 		font-size: 0.66rem;
 		text-align: center;
+	}
+
+	.project-section {
+		margin-top: 1.4rem;
+		padding-top: 0.4rem;
+		border-top: 1px solid var(--line);
+	}
+
+	.project-section .actions {
+		margin-top: 0.7rem;
+	}
+
+	.project-details {
+		margin: 0;
+		padding-left: 1rem;
+		color: var(--muted);
+		font-size: 0.62rem;
+		line-height: 1.6;
+		overflow-wrap: anywhere;
 	}
 
 	@media (max-width: 1050px) {

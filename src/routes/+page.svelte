@@ -4,7 +4,7 @@
 	 *
 	 * Serves as the central administration cockpit for website projects:
 	 * - Multi-page management: Add, duplicate, delete, and configure pages and slugs.
-	 * - SQLite persistence: Create tables and save/load entire `EditorSite` models.
+	 * - SQLite persistence: Save creates the tables on first use and saves/loads entire `EditorSite` models.
 	 * - Canvas settings: Configure page widths (mobile/tablet/desktop) and minimum heights.
 	 * - SvelteKit project sync:
 	 *   - Browse server filesystem via `DirectoryPickerModal`.
@@ -17,6 +17,7 @@
 	import { resolve } from '$app/paths';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
 	import AppNav from '../lib/components/AppNav.svelte';
+	import BuilderHeader from '../lib/components/BuilderHeader.svelte';
 	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
 	import {
 		canvasLimits,
@@ -69,7 +70,7 @@
 	function apply(result: ApiResponse) {
 		databaseReady = result.created === true;
 		if (!databaseReady) {
-			status = 'Create tables to enable saving';
+			status = 'Not saved yet · Save creates the database';
 			return;
 		}
 		if (result.site) {
@@ -98,15 +99,13 @@
 		await run('Checking SQLite…', async () => apply(await request('GET')));
 	}
 
-	async function createTables() {
-		await run('Creating SQLite tables…', async () => {
-			await request('POST', { action: 'create-tables' });
-			apply(await request('GET'));
-		});
-	}
-
 	async function save() {
 		await run('Saving site…', async () => {
+			// First save on a fresh database: create the schema transparently.
+			if (!databaseReady) {
+				await request('POST', { action: 'create-tables' });
+				databaseReady = true;
+			}
 			await request('POST', { action: 'save', site: { pages: $state.snapshot(pages) } });
 			dirty = false;
 			status = 'Saved to SQLite';
@@ -280,32 +279,7 @@
 
 <div class="editor-shell">
 	<AppNav {pages} unsavedChanges={dirty} />
-	<header class="builder-header">
-		<div class="project-name">
-			<div class="brand-mark" aria-hidden="true">✳</div>
-			<div>
-				<p class="eyebrow">PAGE BUILDER</p>
-				<h1>Untitled website</h1>
-			</div>
-			<span class="save-status" role="status" aria-live="polite" aria-busy={busy}>
-				<span aria-hidden="true" class:unsaved={dirty}></span>
-				{status}
-			</span>
-		</div>
-		<div class="header-actions">
-			<button type="button" class="table-button" disabled={busy} onclick={createTables}>
-				Create tables
-			</button>
-			<button
-				type="button"
-				class="save-button"
-				disabled={!databaseReady || busy || !dirty}
-				onclick={save}
-			>
-				Save pages
-			</button>
-		</div>
-	</header>
+	<BuilderHeader {status} {busy} unsaved={dirty} canSave={dirty || !databaseReady} onsave={save} />
 
 	<div class="workspace">
 		<aside class="palette-panel" aria-label="Pages">
@@ -526,90 +500,6 @@
 			sans-serif;
 	}
 
-	.builder-header {
-		display: flex;
-		min-height: 76px;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		padding: 0 1.5rem;
-		border-bottom: 1px solid var(--line);
-		background: #fff;
-	}
-
-	.project-name {
-		gap: 0.8rem;
-	}
-
-	.brand-mark {
-		display: grid;
-		width: 38px;
-		height: 38px;
-		place-items: center;
-		border-radius: 12px;
-		background: #eeeaff;
-		color: var(--purple);
-		font-size: 1.4rem;
-	}
-
-	.eyebrow {
-		margin: 0 0 0.15rem;
-		color: #9999ab;
-		font-size: 0.61rem;
-		font-weight: 750;
-		letter-spacing: 0.13em;
-	}
-
-	.project-name h1 {
-		margin: 0;
-		font-size: 0.94rem;
-		font-weight: 680;
-		letter-spacing: -0.02em;
-	}
-
-	.save-status {
-		gap: 0.4rem;
-		margin-left: 0.35rem;
-		color: #8d8fa1;
-		font-size: 0.7rem;
-		max-width: 220px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.save-status span.unsaved {
-		background: #e4a746;
-	}
-
-	.header-actions {
-		gap: 0.7rem;
-	}
-
-	.table-button {
-		background: #fff;
-		color: #4b456f;
-	}
-
-	.save-button {
-		min-height: 36px;
-		padding: 0 0.75rem;
-		border: 1px solid #e6e3f5;
-		border-radius: 8px;
-		font-size: 0.74rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.table-button:hover:not(:disabled) {
-		border-color: #c9c1ff;
-		background: #faf9ff;
-	}
-
-	.save-button:hover:not(:disabled) {
-		background: #5949d2;
-	}
-
 	.workspace {
 		display: grid;
 		min-height: calc(100vh - 7.75rem);
@@ -727,15 +617,11 @@
 		box-shadow: 0 0 0 3px rgb(119 102 223 / 12%);
 	}
 
-	.project-name,
-	.header-actions,
-	.save-status,
 	.canvas-label {
 		display: flex;
 		align-items: center;
 	}
 
-	.save-status span,
 	.live-dot {
 		width: 7px;
 		height: 7px;
@@ -743,14 +629,11 @@
 		background: #69c89d;
 	}
 
-	.table-button:disabled,
-	.save-button:disabled,
 	.actions button:disabled {
 		cursor: not-allowed;
 		opacity: 0.5;
 	}
 
-	h1,
 	h2,
 	p {
 		margin-top: 0;
@@ -926,11 +809,6 @@
 	@media (max-width: 700px) {
 		.workspace {
 			grid-template-columns: 1fr;
-		}
-
-		.builder-header {
-			flex-wrap: wrap;
-			padding: 0.5rem 0.8rem;
 		}
 	}
 </style>

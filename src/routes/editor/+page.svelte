@@ -49,7 +49,7 @@
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import AppNav from '../../lib/components/AppNav.svelte';
-	import CanvasSizePicker from '../../lib/components/CanvasSizePicker.svelte';
+	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
 	import {
 		defaultCanvasSize,
 		isValidLinkHref,
@@ -412,7 +412,7 @@
 	function applyDatabaseState(result: EditorApiResponse) {
 		databaseReady = result.created === true;
 		if (!databaseReady) {
-			databaseStatus = 'Create tables to enable saving';
+			databaseStatus = 'Not saved yet · Save creates the database';
 			return;
 		}
 
@@ -442,22 +442,8 @@
 		}
 	}
 
-	async function createDatabaseTables() {
-		databaseBusy = true;
-		databaseStatus = 'Creating SQLite tables…';
-		try {
-			await requestApi('POST', { action: 'create-tables' });
-			applyDatabaseState(await requestApi('GET'));
-		} catch (error) {
-			databaseStatus =
-				error instanceof Error ? error.message : 'Unable to create the SQLite tables.';
-		} finally {
-			databaseBusy = false;
-		}
-	}
-
 	async function savePageToDatabase() {
-		if (!databaseReady || databaseBusy) return;
+		if (databaseBusy) return;
 
 		if (pages.some((page) => page.blocks.some((block) => !isValidLinkHref(block.href)))) {
 			databaseStatus = 'A link address is invalid. Use /page or https://…';
@@ -470,6 +456,11 @@
 		databaseStatus = 'Saving site to SQLite…';
 
 		try {
+			// First save on a fresh database: create the schema transparently.
+			if (!databaseReady) {
+				await requestApi('POST', { action: 'create-tables' });
+				databaseReady = true;
+			}
 			await requestApi('POST', { action: 'save', site: siteSnapshot });
 			hasUnsavedChanges = revision !== savedRevision;
 			databaseStatus = hasUnsavedChanges ? 'More changes still need saving' : 'Saved to SQLite';
@@ -871,84 +862,19 @@
 
 <div class="editor-shell">
 	<AppNav {pages} activePageId={currentPageId} unsavedChanges={hasUnsavedChanges} />
-	<header class="builder-header">
-		<div class="project-name">
-			<div class="brand-mark" aria-hidden="true">✳</div>
-			<div>
-				<p class="eyebrow">PAGE BUILDER</p>
-				<h1>Untitled website</h1>
-			</div>
-			<span class="save-status" role="status" aria-live="polite" aria-busy={databaseBusy}>
-				<span aria-hidden="true" class:unsaved={hasUnsavedChanges}></span>
-				{databaseStatus}
-			</span>
-		</div>
-		<div class="header-actions">
-			<div class="persistence-actions">
-				<button
-					type="button"
-					class="table-button"
-					disabled={databaseBusy}
-					onclick={createDatabaseTables}
-				>
-					Create tables
-				</button>
-				<button
-					type="button"
-					class="save-button"
-					disabled={!databaseReady || databaseBusy || !hasUnsavedChanges}
-					onclick={savePageToDatabase}
-				>
-					Save page
-				</button>
-			</div>
-			<div class="viewport-switch" role="group" aria-label="History">
-				<button
-					type="button"
-					aria-label="Undo"
-					title="Undo (Ctrl+Z)"
-					disabled={!canUndo}
-					onclick={undo}
-				>
-					<svg viewBox="0 0 20 20" aria-hidden="true"
-						><path d="M7 5 3.5 8.5 7 12M4 8.5h8a4 4 0 0 1 0 8H9" /></svg
-					>
-				</button>
-				<button
-					type="button"
-					aria-label="Redo"
-					title="Redo (Ctrl+Shift+Z)"
-					disabled={!canRedo}
-					onclick={redo}
-				>
-					<svg viewBox="0 0 20 20" aria-hidden="true"
-						><path d="m13 5 3.5 3.5L13 12m3.5-3.5h-8a4 4 0 0 0 0 8H11" /></svg
-					>
-				</button>
-			</div>
-			<div class="canvas-size-control">
-				<CanvasSizePicker
-					bind:width={currentPage.width}
-					bind:height={currentPage.height}
-					onchange={markUnsaved}
-				/>
-			</div>
-			<button class="preview-button" type="button" onclick={() => (isPreview = !isPreview)}>
-				{#if isPreview}
-					Back to editor
-				{:else}
-					<svg viewBox="0 0 20 20" aria-hidden="true"
-						><path d="M2.5 10s2.7-5 7.5-5 7.5 5 7.5 5-2.7 5-7.5 5-7.5-5-7.5-5Z" /><circle
-							cx="10"
-							cy="10"
-							r="2"
-						/></svg
-					>
-					Preview
-				{/if}
-			</button>
-		</div>
-	</header>
+	<BuilderHeader
+		status={databaseStatus}
+		busy={databaseBusy}
+		unsaved={hasUnsavedChanges}
+		canSave={hasUnsavedChanges || !databaseReady}
+		previewing={isPreview}
+		onsave={savePageToDatabase}
+		{canUndo}
+		{canRedo}
+		onundo={undo}
+		onredo={redo}
+		onpreview={() => (isPreview = !isPreview)}
+	/>
 
 	<div class="workspace" class:preview-mode={isPreview}>
 		{#if !isPreview}
@@ -1612,81 +1538,18 @@
 			sans-serif;
 	}
 
-	.builder-header {
-		display: flex;
-		min-height: 76px;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		padding: 0 1.5rem;
-		border-bottom: 1px solid var(--line);
-		background: #fff;
-	}
-
-	.project-name,
-	.header-actions,
-	.save-status,
-	.canvas-size-control {
-		min-width: 0;
-		width: 15rem;
-	}
-
-	.viewport-switch,
 	.canvas-label,
 	.canvas-actions {
 		display: flex;
 		align-items: center;
 	}
 
-	.project-name {
-		gap: 0.8rem;
-	}
-
-	.brand-mark {
-		display: grid;
-		width: 38px;
-		height: 38px;
-		place-items: center;
-		border-radius: 12px;
-		background: #eeeaff;
-		color: var(--purple);
-		font-size: 1.4rem;
-	}
-
-	.eyebrow {
-		margin: 0 0 0.15rem;
-		color: #9999ab;
-		font-size: 0.61rem;
-		font-weight: 750;
-		letter-spacing: 0.13em;
-	}
-
-	h1,
 	h2,
 	h3,
 	p {
 		margin-top: 0;
 	}
 
-	.project-name h1 {
-		margin: 0;
-		font-size: 0.94rem;
-		font-weight: 680;
-		letter-spacing: -0.02em;
-	}
-
-	.save-status {
-		gap: 0.4rem;
-		margin-left: 0.35rem;
-		color: #8d8fa1;
-		font-size: 0.7rem;
-		max-width: 220px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.save-status span,
 	.live-dot {
 		width: 7px;
 		height: 7px;
@@ -1694,64 +1557,6 @@
 		background: #69c89d;
 	}
 
-	.save-status span.unsaved {
-		background: #e4a746;
-	}
-
-	.header-actions {
-		gap: 0.7rem;
-	}
-
-	.persistence-actions {
-		display: flex;
-		gap: 0.35rem;
-	}
-
-	.table-button,
-	.save-button {
-		min-height: 36px;
-		padding: 0 0.75rem;
-		border: 1px solid #e6e3f5;
-		border-radius: 8px;
-		font-size: 0.74rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.table-button {
-		background: #fff;
-		color: #4b456f;
-	}
-
-	.save-button {
-		border-color: var(--purple);
-		background: var(--purple);
-		color: #fff;
-	}
-
-	.table-button:hover:not(:disabled) {
-		border-color: #c9c1ff;
-		background: #faf9ff;
-	}
-
-	.save-button:hover:not(:disabled) {
-		background: #5949d2;
-	}
-
-	.table-button:disabled,
-	.save-button:disabled {
-		cursor: not-allowed;
-		opacity: 0.5;
-	}
-
-	.viewport-switch {
-		gap: 0.15rem;
-		padding: 0.2rem;
-		border: 1px solid var(--line);
-		border-radius: 9px;
-	}
-
-	.viewport-switch button,
 	.icon-button {
 		display: grid;
 		width: 32px;
@@ -1764,8 +1569,6 @@
 		cursor: pointer;
 	}
 
-	.viewport-switch svg,
-	.preview-button svg,
 	.icon-button svg {
 		width: 18px;
 		height: 18px;
@@ -1774,27 +1577,6 @@
 		stroke-linecap: round;
 		stroke-linejoin: round;
 		stroke-width: 1.5;
-	}
-
-	.preview-button {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.45rem;
-		min-height: 38px;
-		padding: 0 0.95rem;
-		border: 1px solid #e6e3f5;
-		border-radius: 8px;
-		background: white;
-		color: #4b456f;
-		font-size: 0.78rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.preview-button:hover {
-		border-color: #c9c1ff;
-		background: #faf9ff;
 	}
 
 	.workspace {
@@ -2490,53 +2272,6 @@
 			min-height: calc(100vh - 3rem);
 		}
 
-		.builder-header {
-			flex-wrap: wrap;
-			min-height: 68px;
-			padding: 0.5rem 0.8rem;
-		}
-
-		.project-name {
-			gap: 0.55rem;
-		}
-
-		.brand-mark {
-			width: 32px;
-			height: 32px;
-		}
-
-		.save-status {
-			display: none;
-		}
-
-		.header-actions {
-			width: 100%;
-			justify-content: flex-end;
-			gap: 0.35rem;
-			padding-bottom: 0.3rem;
-		}
-
-		.persistence-actions {
-			margin-right: auto;
-		}
-
-		.table-button,
-		.save-button {
-			min-height: 34px;
-			padding: 0 0.55rem;
-			font-size: 0.66rem;
-		}
-
-		.save-status {
-			max-width: 125px;
-		}
-
-		.preview-button {
-			min-height: 34px;
-			padding: 0 0.65rem;
-			font-size: 0.7rem;
-		}
-
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
@@ -2595,6 +2330,7 @@
 			transition-duration: 0.01ms !important;
 		}
 	}
+
 	.route-error {
 		color: #b3261e;
 		font-size: 0.75rem;

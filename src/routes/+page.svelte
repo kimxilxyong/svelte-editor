@@ -9,7 +9,9 @@
 	 * - SvelteKit project sync:
 	 *   - Browse server filesystem via `DirectoryPickerModal`.
 	 *   - Two-way export & import of native `.svelte` components and route pages.
-	 * - Visual preview: Live scaled thumbnail view of page layout and blocks.
+	 * - Visual overview: the selected page rendered with the real components via `PageView`
+	 *   (same content as the editor, reloaded from SQLite on every visit), plus an interactive
+	 *   Preview mode with working internal links.
 	 * - Direct navigation to the visual WYSIWYG editor (`/editor?page=<id>`).
 	 */
 
@@ -18,10 +20,13 @@
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
 	import AppNav from '../lib/components/AppNav.svelte';
 	import BuilderHeader from '../lib/components/BuilderHeader.svelte';
+	import PageView from '../lib/components/PageView.svelte';
+	import { nav } from '../lib/navigation.svelte.js';
 	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
 	import {
 		canvasLimits,
 		defaultCanvasSize,
+		type BuilderBlock,
 		type EditorPage,
 		type EditorSite
 	} from '../lib/editor.js';
@@ -39,13 +44,10 @@
 	let projectMessage = $state('');
 	let projectDetails = $state<string[]>([]);
 	let showPickerModal = $state(false);
+	let isPreview = $state(false);
+	let routeError = $state('');
 
 	let selected = $derived(pages.find((page) => page.id === selectedId) ?? pages[0]);
-	let overviewHeight = $derived(
-		selected
-			? Math.max(selected.height, ...selected.blocks.map((block) => block.y + block.height + 40))
-			: 0
-	);
 
 	onMount(() => {
 		projectRoot = localStorage.getItem('editor-project-root') ?? '';
@@ -58,6 +60,7 @@
 	): Promise<ApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
+			cache: 'no-store',
 			...(payload
 				? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }
 				: {})
@@ -75,7 +78,8 @@
 		}
 		if (result.site) {
 			pages = result.site.pages;
-			selectedId = pages[0].id;
+			// Show the page that was just edited in the editor, so recent changes are visible.
+			selectedId = pages.find((p) => p.id === nav.lastEditorPageId)?.id ?? pages[0].id;
 			dirty = false;
 			status = 'Saved site loaded from SQLite';
 		} else {
@@ -270,6 +274,25 @@
 		selected[field] = Math.round(Math.max(min, Math.min(max, Number(selected[field]) || min)));
 		touch();
 	}
+
+	function togglePreview() {
+		isPreview = !isPreview;
+		routeError = '';
+	}
+
+	// In Preview, internal links jump to the matching page like they would on the live site.
+	function followLink(event: MouseEvent, block: BuilderBlock) {
+		if (!block.href.startsWith('/')) return;
+		event.preventDefault();
+		const slug = block.href.slice(1).split(/[?#]/)[0];
+		const target = slug === '' ? pages[0] : pages.find((page) => page.slug === slug);
+		if (target) {
+			selectedId = target.id;
+			routeError = '';
+		} else {
+			routeError = `No page found at ${block.href}`;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -279,199 +302,198 @@
 
 <div class="editor-shell">
 	<AppNav {pages} unsavedChanges={dirty} />
-	<BuilderHeader {status} {busy} unsaved={dirty} canSave={dirty || !databaseReady} onsave={save} />
+	<BuilderHeader
+		{status}
+		{busy}
+		unsaved={dirty}
+		canSave={dirty || !databaseReady}
+		onsave={save}
+		previewing={isPreview}
+		onpreview={selected ? togglePreview : undefined}
+	/>
 
-	<div class="workspace">
-		<aside class="palette-panel" aria-label="Pages">
-			<div class="panel-heading">
-				<div>
-					<p class="eyebrow">YOUR SITE</p>
-					<h2>Pages</h2>
+	<div class="workspace" class:preview-mode={isPreview}>
+		{#if !isPreview}
+			<aside class="palette-panel" aria-label="Pages">
+				<div class="panel-heading">
+					<div>
+						<p class="eyebrow">YOUR SITE</p>
+						<h2>Pages</h2>
+					</div>
+					<span class="count-pill">{pages.length}</span>
 				</div>
-				<span class="count-pill">{pages.length}</span>
-			</div>
-			<p class="panel-hint">Select a page to edit its route and canvas size.</p>
-			<ul class="page-list" aria-label="Pages">
-				{#each pages as page (page.id)}
-					<li>
-						<button
-							type="button"
-							class="page-item"
-							class:active={selected && page.id === selected.id}
-							aria-current={selected && page.id === selected.id ? 'page' : undefined}
-							onclick={() => (selectedId = page.id)}
-						>
-							<strong>{page.name}</strong>
-							<small>/{page.slug} · {page.width}px · {page.blocks.length} items</small>
-						</button>
-					</li>
-				{/each}
-			</ul>
-			<div class="actions">
-				<button type="button" disabled={pages.length >= 20 || !selected} onclick={addPage}>
-					Add
-				</button>
-				<button type="button" disabled={pages.length >= 20 || !selected} onclick={duplicatePage}>
-					Duplicate
-				</button>
-				<button type="button" class="danger" disabled={pages.length <= 1} onclick={deletePage}>
-					Delete
-				</button>
-			</div>
-		</aside>
+				<p class="panel-hint">Select a page to edit its route and canvas size.</p>
+				<ul class="page-list" aria-label="Pages">
+					{#each pages as page (page.id)}
+						<li>
+							<button
+								type="button"
+								class="page-item"
+								class:active={selected && page.id === selected.id}
+								aria-current={selected && page.id === selected.id ? 'page' : undefined}
+								onclick={() => (selectedId = page.id)}
+							>
+								<strong>{page.name}</strong>
+								<small>/{page.slug} · {page.width}px · {page.blocks.length} items</small>
+							</button>
+						</li>
+					{/each}
+				</ul>
+				<div class="actions">
+					<button type="button" disabled={pages.length >= 20 || !selected} onclick={addPage}>
+						Add
+					</button>
+					<button type="button" disabled={pages.length >= 20 || !selected} onclick={duplicatePage}>
+						Duplicate
+					</button>
+					<button type="button" class="danger" disabled={pages.length <= 1} onclick={deletePage}>
+						Delete
+					</button>
+				</div>
+			</aside>
+		{/if}
 
 		<section class="canvas-panel" aria-label="Page overview">
 			<div class="canvas-toolbar">
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>
-					<span>Page overview</span>
+					<span>{isPreview ? 'Live preview' : 'Page overview'}</span>
 					{#if selected}<span class="canvas-path">/{selected.slug}</span>{/if}
 				</div>
-				{#if selected}
+				{#if selected && !isPreview}
 					<a class="edit-link" href="{resolve('/editor')}?page={selected.id}">Edit this page →</a>
 				{/if}
 			</div>
 			<div class="canvas-stage">
 				{#if selected}
-					<div
-						class="mini-page"
-						style:width="{Math.min(selected.width, 640)}px"
-						style:aspect-ratio="{selected.width} / {overviewHeight}"
-						role="img"
-						aria-label="Layout of {selected.name}"
-					>
-						{#each selected.blocks as block (block.id)}
-							<span
-								class="mini-block"
-								style:left="{block.x}%"
-								style:top="{(block.y / overviewHeight) * 100}%"
-								style:width="{(block.width / selected.width) * 100}%"
-								style:height="{(block.height / overviewHeight) * 100}%"
-							></span>
-						{/each}
-					</div>
+					<PageView page={selected} interactive={isPreview} onlink={followLink} />
 				{/if}
 			</div>
-			<p class="canvas-footnote">{selected ? `${selected.width} × ${selected.height} px` : ''}</p>
+			<p class="canvas-footnote">
+				{selected ? `${selected.width} × ${selected.height} px` : ''}
+				{#if routeError}<span class="route-error" role="alert"> · {routeError}</span>{/if}
+			</p>
 		</section>
 
-		<aside class="inspector-panel" aria-label="Page settings">
-			<div class="panel-heading">
-				<div>
-					<p class="eyebrow">MAKE IT YOURS</p>
-					<h2>Page settings</h2>
+		{#if !isPreview}
+			<aside class="inspector-panel" aria-label="Page settings">
+				<div class="panel-heading">
+					<div>
+						<p class="eyebrow">MAKE IT YOURS</p>
+						<h2>Page settings</h2>
+					</div>
 				</div>
-			</div>
-			{#if selected}
-				<div class="inspector-content">
-					<label class="field-label" for="page-name">Name</label>
-					<input
-						id="page-name"
-						class="field-control"
-						maxlength="40"
-						bind:value={selected.name}
-						oninput={touch}
-						onchange={commitName}
-					/>
-					<label class="field-label" for="page-slug">Route</label>
-					<div class="slug">
-						<span aria-hidden="true">/</span>
+				{#if selected}
+					<div class="inspector-content">
+						<label class="field-label" for="page-name">Name</label>
 						<input
-							id="page-slug"
+							id="page-name"
 							class="field-control"
 							maxlength="40"
-							bind:value={selected.slug}
-							onfocus={() => (slugBeforeEdit = selected.slug)}
-							onchange={commitSlug}
+							bind:value={selected.name}
+							oninput={touch}
+							onchange={commitName}
 						/>
-					</div>
-					<label class="field-label" for="canvas-size">Canvas size</label>
-					<CanvasSizePicker
-						id="canvas-size"
-						bind:width={selected.width}
-						bind:height={selected.height}
-						onchange={touch}
-					/>
-					<div class="position-fields">
-						<div>
-							<label class="field-label" for="canvas-width">Width (px)</label>
+						<label class="field-label" for="page-slug">Route</label>
+						<div class="slug">
+							<span aria-hidden="true">/</span>
 							<input
-								id="canvas-width"
+								id="page-slug"
 								class="field-control"
-								type="number"
-								min={canvasLimits.minWidth}
-								max={canvasLimits.maxWidth}
-								step="10"
-								bind:value={selected.width}
-								onchange={() => clampSize('width')}
+								maxlength="40"
+								bind:value={selected.slug}
+								onfocus={() => (slugBeforeEdit = selected.slug)}
+								onchange={commitSlug}
 							/>
 						</div>
-						<div>
-							<label class="field-label" for="canvas-height">Min height (px)</label>
-							<input
-								id="canvas-height"
-								class="field-control"
-								type="number"
-								min={canvasLimits.minHeight}
-								max={canvasLimits.maxHeight}
-								step="10"
-								bind:value={selected.height}
-								onchange={() => clampSize('height')}
-							/>
+						<label class="field-label" for="canvas-size">Canvas size</label>
+						<CanvasSizePicker
+							id="canvas-size"
+							bind:width={selected.width}
+							bind:height={selected.height}
+							onchange={touch}
+						/>
+						<div class="position-fields">
+							<div>
+								<label class="field-label" for="canvas-width">Width (px)</label>
+								<input
+									id="canvas-width"
+									class="field-control"
+									type="number"
+									min={canvasLimits.minWidth}
+									max={canvasLimits.maxWidth}
+									step="10"
+									bind:value={selected.width}
+									onchange={() => clampSize('width')}
+								/>
+							</div>
+							<div>
+								<label class="field-label" for="canvas-height">Min height (px)</label>
+								<input
+									id="canvas-height"
+									class="field-control"
+									type="number"
+									min={canvasLimits.minHeight}
+									max={canvasLimits.maxHeight}
+									step="10"
+									bind:value={selected.height}
+									onchange={() => clampSize('height')}
+								/>
+							</div>
 						</div>
 					</div>
-				</div>
-			{/if}
-
-			<div class="inspector-content project-section">
-				<span class="field-label">SvelteKit project folder</span>
-				<p class="panel-hint">
-					Export writes <code>src/routes/&lt;route&gt;/+page.svelte</code> and
-					<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
-					exported.
-				</p>
-				<label class="field-label" for="project-root">Project path</label>
-				<div class="project-input-row">
-					<input
-						id="project-root"
-						class="field-control"
-						placeholder="/home/me/my-app"
-						maxlength="500"
-						bind:value={projectRoot}
-					/>
-					<button type="button" class="browse-button" onclick={() => (showPickerModal = true)}>
-						Browse…
-					</button>
-				</div>
-				<DirectoryPickerModal
-					open={showPickerModal}
-					initialPath={projectRoot}
-					onselect={(path) => {
-						projectRoot = path;
-						localStorage.setItem('editor-project-root', path);
-					}}
-					onclose={() => (showPickerModal = false)}
-				/>
-				<div class="actions">
-					<button
-						type="button"
-						disabled={busy || !projectRoot.trim() || pages.length === 0}
-						onclick={exportProject}
-					>
-						Export
-					</button>
-					<button type="button" disabled={busy || !projectRoot.trim()} onclick={importProject}>
-						Import
-					</button>
-				</div>
-				{#if projectMessage}
-					<p class="panel-hint" role="status">{projectMessage}</p>
-					<ul class="project-details">
-						{#each projectDetails as line (line)}<li>{line}</li>{/each}
-					</ul>
 				{/if}
-			</div>
-		</aside>
+
+				<div class="inspector-content project-section">
+					<span class="field-label">SvelteKit project folder</span>
+					<p class="panel-hint">
+						Export writes <code>src/routes/&lt;route&gt;/+page.svelte</code> and
+						<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
+						exported.
+					</p>
+					<label class="field-label" for="project-root">Project path</label>
+					<div class="project-input-row">
+						<input
+							id="project-root"
+							class="field-control"
+							placeholder="/home/me/my-app"
+							maxlength="500"
+							bind:value={projectRoot}
+						/>
+						<button type="button" class="browse-button" onclick={() => (showPickerModal = true)}>
+							Browse…
+						</button>
+					</div>
+					<DirectoryPickerModal
+						open={showPickerModal}
+						initialPath={projectRoot}
+						onselect={(path) => {
+							projectRoot = path;
+							localStorage.setItem('editor-project-root', path);
+						}}
+						onclose={() => (showPickerModal = false)}
+					/>
+					<div class="actions">
+						<button
+							type="button"
+							disabled={busy || !projectRoot.trim() || pages.length === 0}
+							onclick={exportProject}
+						>
+							Export
+						</button>
+						<button type="button" disabled={busy || !projectRoot.trim()} onclick={importProject}>
+							Import
+						</button>
+					</div>
+					{#if projectMessage}
+						<p class="panel-hint" role="status">{projectMessage}</p>
+						<ul class="project-details">
+							{#each projectDetails as line (line)}<li>{line}</li>{/each}
+						</ul>
+					{/if}
+				</div>
+			</aside>
+		{/if}
 	</div>
 </div>
 
@@ -516,6 +538,8 @@
 	}
 
 	.inspector-panel {
+		padding: 1.5rem 1.1rem;
+		border-left: 1px solid var(--line);
 		background: #fff;
 	}
 
@@ -726,21 +750,12 @@
 		background-size: 14px 14px;
 	}
 
-	.mini-page {
-		position: relative;
-		max-width: 100%;
-		flex: 0 0 auto;
-		border: 1px solid #e8e8ed;
-		border-radius: 8px;
-		background: #fff;
-		box-shadow: 0 8px 26px rgb(34 34 56 / 0.09);
+	.workspace.preview-mode {
+		grid-template-columns: minmax(0, 1fr);
 	}
 
-	.mini-block {
-		position: absolute;
-		border: 1px solid #b9b0f5;
-		border-radius: 3px;
-		background: #f0edff;
+	.route-error {
+		color: #c0392b;
 	}
 
 	.canvas-footnote {

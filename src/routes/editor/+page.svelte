@@ -24,31 +24,12 @@
 	 */
 
 	import { onMount } from 'svelte';
-	import Hero from '../../lib/components/editor/Hero.svelte';
-	import TextSection from '../../lib/components/editor/TextSection.svelte';
-	import ButtonSection from '../../lib/components/editor/ButtonSection.svelte';
-	import Features from '../../lib/components/editor/Features.svelte';
-	import ImageSection from '../../lib/components/editor/ImageSection.svelte';
-	import Quote from '../../lib/components/editor/Quote.svelte';
-	import WidgetButton from '../../lib/components/editor/WidgetButton.svelte';
-	import WidgetTextField from '../../lib/components/editor/WidgetTextField.svelte';
-	import WidgetTextarea from '../../lib/components/editor/WidgetTextarea.svelte';
-	import WidgetCheckbox from '../../lib/components/editor/WidgetCheckbox.svelte';
-	import WidgetRadio from '../../lib/components/editor/WidgetRadio.svelte';
-	import WidgetSwitch from '../../lib/components/editor/WidgetSwitch.svelte';
-	import WidgetSelect from '../../lib/components/editor/WidgetSelect.svelte';
-	import WidgetSlider from '../../lib/components/editor/WidgetSlider.svelte';
-	import WidgetBadge from '../../lib/components/editor/WidgetBadge.svelte';
-	import WidgetAlert from '../../lib/components/editor/WidgetAlert.svelte';
-	import WidgetProgress from '../../lib/components/editor/WidgetProgress.svelte';
-	import WidgetAvatar from '../../lib/components/editor/WidgetAvatar.svelte';
-	import WidgetCard from '../../lib/components/editor/WidgetCard.svelte';
-	import WidgetLink from '../../lib/components/editor/WidgetLink.svelte';
 	import { page as routePage } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import AppNav from '../../lib/components/AppNav.svelte';
+	import BlockContent from '../../lib/components/BlockContent.svelte';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
 	import {
 		defaultCanvasSize,
@@ -393,6 +374,7 @@
 	): Promise<EditorApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
+			cache: 'no-store',
 			...(payload
 				? {
 						headers: { 'content-type': 'application/json' },
@@ -1017,7 +999,7 @@
 							</p>
 						</div>
 					{:else}
-						{#each blocks as block (block.id)}
+						{#each blocks as block, index (block.id)}
 							<article
 								class="canvas-block positioned {block.kind} theme-{block.theme}"
 								class:selected={!isPreview && selectedId === block.id}
@@ -1026,131 +1008,11 @@
 								style:width="{block.width}%"
 								style:height="{block.height}px"
 							>
-								{#if block.kind === 'hero'}
-									<Hero
-										title={block.title}
-										body={block.body}
-										action={block.action}
-										theme={block.theme}
-									/>
-								{:else if block.kind === 'text'}
-									<TextSection title={block.title} body={block.body} theme={block.theme} />
-								{:else if block.kind === 'button'}
-									<ButtonSection
-										title={block.title}
-										body={block.body}
-										action={block.action}
-										theme={block.theme}
-									/>
-								{:else if block.kind === 'features'}
-									<Features title={block.title} body={block.body} theme={block.theme} />
-								{:else if block.kind === 'image'}
-									<ImageSection title={block.title} body={block.body} theme={block.theme} />
-								{:else if block.kind === 'quote'}
-									<Quote
-										title={block.title}
-										body={block.body}
-										action={block.action}
-										theme={block.theme}
-									/>
-								{:else if block.kind === 'widget-button'}
-									<WidgetButton action={block.action} body={block.body} onchange={markUnsaved} />
-								{:else if block.kind === 'widget-text-field'}
-									<WidgetTextField
-										id={block.id}
-										title={block.title}
-										action={block.action}
-										body={block.body}
-										bind:value={block.value}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-textarea'}
-									<WidgetTextarea
-										id={block.id}
-										title={block.title}
-										action={block.action}
-										body={block.body}
-										bind:value={block.value}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-checkbox'}
-									<WidgetCheckbox
-										id={block.id}
-										title={block.title}
-										body={block.body}
-										bind:checked={block.checked}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-radio'}
-									<WidgetRadio
-										id={block.id}
-										title={block.title}
-										body={block.body}
-										bind:checked={block.checked}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-switch'}
-									<WidgetSwitch
-										id={block.id}
-										title={block.title}
-										body={block.body}
-										bind:checked={block.checked}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-select'}
-									<WidgetSelect
-										id={block.id}
-										title={block.title}
-										body={block.body}
-										bind:value={block.value}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-slider'}
-									<WidgetSlider
-										id={block.id}
-										title={block.title}
-										body={block.body}
-										bind:level={block.level}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-badge'}
-									<WidgetBadge title={block.title} body={block.body} />
-								{:else if block.kind === 'widget-alert'}
-									<WidgetAlert title={block.title} body={block.body} />
-								{:else if block.kind === 'widget-progress'}
-									<WidgetProgress title={block.title} body={block.body} bind:level={block.level} />
-								{:else if block.kind === 'widget-avatar'}
-									<WidgetAvatar title={block.title} body={block.body} />
-								{:else if block.kind === 'widget-card'}
-									<WidgetCard
-										title={block.title}
-										body={block.body}
-										action={block.action}
-										onchange={markUnsaved}
-									/>
-								{:else if block.kind === 'widget-link'}
-									<WidgetLink
-										title={block.title}
-										body={block.body}
-										href={block.href}
-										newTab={block.newTab}
-										onnavigate={(event) => handleLinkClick(event, block)}
-									/>
-								{:else if block.kind.startsWith('custom:')}
-									<div class="custom-block-preview">
-										<div class="custom-badge-row">
-											<span class="custom-pill">✳ {block.kind.slice(7)}</span>
-										</div>
-										<h4>{block.title || block.kind.slice(7)}</h4>
-										{#if block.body}<p>{block.body}</p>{/if}
-										{#if block.customProps && Object.keys(block.customProps).length > 0}
-											<div class="custom-props-preview">
-												{#each Object.entries(block.customProps) as [k, v] (k)}
-													<span class="custom-prop-tag"><code>{k}</code>: {String(v)}</span>
-												{/each}
-											</div>
-										{/if}
-									</div>{/if}
+								<BlockContent
+									bind:block={blocks[index]}
+									onchange={markUnsaved}
+									onlink={handleLinkClick}
+								/>
 								{#if !isPreview}
 									<span class="block-type-tag">{componentInfo[block.kind].label}</span>
 									<button
@@ -2388,59 +2250,5 @@
 
 	.canvas-stage {
 		justify-content: flex-start;
-	}
-
-	.custom-block-preview {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		padding: 1rem;
-		box-sizing: border-box;
-		background: #fff;
-		border-radius: 8px;
-		border: 1px dashed #c9c1ff;
-	}
-
-	.custom-badge-row {
-		margin-bottom: 0.4rem;
-	}
-
-	.custom-pill {
-		display: inline-block;
-		padding: 0.15rem 0.45rem;
-		border-radius: 4px;
-		background: #eeeaff;
-		color: var(--purple);
-		font-size: 0.65rem;
-		font-weight: 700;
-	}
-
-	.custom-block-preview h4 {
-		margin: 0 0 0.25rem;
-		font-size: 0.95rem;
-		font-weight: 700;
-		color: var(--ink);
-	}
-
-	.custom-block-preview p {
-		margin: 0 0 0.5rem;
-		font-size: 0.75rem;
-		color: var(--muted);
-	}
-
-	.custom-props-preview {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.3rem;
-		margin-top: auto;
-	}
-
-	.custom-prop-tag {
-		font-size: 0.65rem;
-		background: #f7f7fa;
-		padding: 0.15rem 0.35rem;
-		border-radius: 4px;
-		border: 1px solid #e8e8ed;
-		color: #4b456f;
 	}
 </style>

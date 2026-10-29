@@ -25,3 +25,8 @@ vite.config.ts.timestamp-*
 test-results
 # SQLite
 *.db
+*.db-shm
+*.db-wal
+
+# Database backend configuration and local state
+.data/

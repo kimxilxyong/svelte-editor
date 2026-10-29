@@ -99,6 +99,22 @@ describe('navigation trail', () => {
 		]);
 	});
 
+	it('describes the authentication and admin routes', () => {
+		expect(describePath('/login')).toEqual({ label: 'Sign in', section: 'auth' });
+		expect(describePath('/login?next=%2Feditor').label).toBe('Sign in');
+		expect(describePath('/register').label).toBe('Register');
+		expect(describePath('/setup').label).toBe('Setup');
+		expect(describePath('/account')).toEqual({ label: 'Account', section: 'account' });
+		expect(describePath('/admin')).toEqual({ label: 'Admin', section: 'admin' });
+		expect(describePath('/admin/')).toEqual({ label: 'Admin', section: 'admin' });
+		expect(describePath('/admin/users')).toEqual({ label: 'Users', section: 'admin' });
+		expect(describePath('/admin/other')).toEqual({ label: 'Other', section: 'admin' });
+		expect(breadcrumbsFor('/admin/users')).toEqual([
+			{ label: 'Pages', path: '/' },
+			{ label: 'Users', path: null }
+		]);
+	});
+
 	it('splits and builds paths', () => {
 		expect(splitPath('/editor?page=a%20b')).toEqual({ pathname: '/editor', pageId: 'a b' });
 		expect(toPath({ pathname: '/editor', search: '?page=a' })).toBe('/editor?page=a');

@@ -17,6 +17,7 @@
 
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { page as routePage } from '$app/state';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
 	import AppNav from '../lib/components/AppNav.svelte';
 	import BuilderHeader from '../lib/components/BuilderHeader.svelte';
@@ -33,11 +34,19 @@
 
 	type ApiResponse = { created?: boolean; site?: EditorSite | null; error?: string };
 
+	/**
+	 * Set for `guest` users, who may view but not change the site (the server rejects their writes
+	 * as well; this only explains and disables the Save button). Read from the root layout data.
+	 */
+	const readOnlyNotice = $derived(
+		routePage.data.user?.role === 'guest' ? 'Read-only: your role cannot save' : undefined
+	);
+
 	let pages = $state<EditorPage[]>([]);
 	let selectedId = $state('');
 	let databaseReady = $state(false);
 	let busy = $state(true);
-	let status = $state('Checking SQLite…');
+	let status = $state('Checking database…');
 	let dirty = $state(false);
 	let slugBeforeEdit = '';
 	let projectRoot = $state('');
@@ -81,9 +90,9 @@
 			// Show the page that was just edited in the editor, so recent changes are visible.
 			selectedId = pages.find((p) => p.id === nav.lastEditorPageId)?.id ?? pages[0].id;
 			dirty = false;
-			status = 'Saved site loaded from SQLite';
+			status = 'Saved site loaded from the database';
 		} else {
-			status = 'SQLite ready · site not saved';
+			status = 'Database ready · site not saved';
 		}
 	}
 
@@ -100,10 +109,11 @@
 	}
 
 	async function load() {
-		await run('Checking SQLite…', async () => apply(await request('GET')));
+		await run('Checking database…', async () => apply(await request('GET')));
 	}
 
 	async function save() {
+		if (readOnlyNotice) return;
 		await run('Saving site…', async () => {
 			// First save on a fresh database: create the schema transparently.
 			if (!databaseReady) {
@@ -112,7 +122,7 @@
 			}
 			await request('POST', { action: 'save', site: { pages: $state.snapshot(pages) } });
 			dirty = false;
-			status = 'Saved to SQLite';
+			status = 'Saved to the database';
 		});
 	}
 
@@ -307,6 +317,7 @@
 		{busy}
 		unsaved={dirty}
 		canSave={dirty || !databaseReady}
+		{readOnlyNotice}
 		onsave={save}
 		previewing={isPreview}
 		onpreview={selected ? togglePreview : undefined}

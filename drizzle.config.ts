@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Drizzle-kit schema tooling remains SQLite-only. Runtime persistence uses the
+ * portable SqlClient adapters.
+ */
 import { defineConfig } from 'drizzle-kit';
 
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not set');

@@ -22,6 +22,7 @@
 	 * @prop {string} [eyebrow='PAGE BUILDER'] - Small caps label above the title (the component editor uses 'COMPONENT EDITOR').
 	 * @prop {string} [title='Untitled website'] - Site title shown next to the eyebrow.
 	 * @prop {string} [saveLabel='Save'] - Text of the save button.
+	 * @prop {string} [readOnlyNotice] - When set, the viewer may not save (e.g. role `guest`): Save is disabled and the text is shown as a tooltip and a small visible "Read-only" badge next to it.
 	 * @prop {() => void} [onsave] - Save clicked.
 	 * @prop {() => void} [onundo] - Undo clicked. When omitted the button is disabled.
 	 * @prop {() => void} [onredo] - Redo clicked. When omitted the button is disabled.
@@ -41,6 +42,7 @@
 		eyebrow = 'PAGE BUILDER',
 		title = 'Untitled website',
 		saveLabel = 'Save',
+		readOnlyNotice,
 		onsave,
 		onundo,
 		onredo,
@@ -56,6 +58,7 @@
 		eyebrow?: string;
 		title?: string;
 		saveLabel?: string;
+		readOnlyNotice?: string;
 		onsave?: () => void;
 		onundo?: () => void;
 		onredo?: () => void;
@@ -77,10 +80,15 @@
 	</div>
 
 	<div class="header-actions">
+		{#if readOnlyNotice}
+			<!-- A disabled <button> shows no tooltip in some browsers, so the notice is also visible text. -->
+			<span class="read-only" title={readOnlyNotice}>Read-only</span>
+		{/if}
 		<button
 			type="button"
 			class="save-button"
-			disabled={!canSave || busy || !onsave}
+			disabled={!canSave || busy || !onsave || !!readOnlyNotice}
+			title={readOnlyNotice}
 			onclick={() => onsave?.()}
 		>
 			{saveLabel}
@@ -133,6 +141,16 @@
 </header>
 
 <style>
+	.read-only {
+		padding: 0.2rem 0.55rem;
+		border-radius: 999px;
+		background: #f1f1f5;
+		color: #898ba0;
+		font-size: 0.68rem;
+		font-weight: 700;
+		cursor: help;
+	}
+
 	.builder-header {
 		display: flex;
 		min-height: 76px;

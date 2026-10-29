@@ -1,3 +1,8 @@
-// since there's no dynamic data here, we can prerender
-// it so that it gets served as a static asset in production
-export const prerender = true;
+/**
+ * @fileoverview Home page options.
+ *
+ * Deliberately **not** prerendered: prerendered pages are static files that bypass
+ * `hooks.server.ts`, so the sign-in requirement for `/` could not be enforced. Only the public
+ * `/about` page is prerendered.
+ */
+export {};

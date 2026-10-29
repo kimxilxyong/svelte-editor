@@ -42,7 +42,7 @@ export interface PathDescription {
 	/** Short label, for example `Pages` or `Editor · Home`. */
 	label: string;
 	/** Coarse area of the app, used for icons and grouping. */
-	section: 'pages' | 'editor' | 'components' | 'other';
+	section: 'pages' | 'editor' | 'components' | 'auth' | 'account' | 'admin' | 'other';
 }
 
 /** One breadcrumb segment. `path` is `null` for the current (non-clickable) segment. */
@@ -66,6 +66,20 @@ export const editorPath = '/editor';
 
 /** Path of the Svelte source (component) editor. */
 export const componentEditorPath = '/component-editor';
+
+/**
+ * Fixed labels of the authentication / administration routes (exact pathname match).
+ * `/admin/users` is deliberately listed explicitly: the generic fallback below would
+ * label it `Users` anyway, but the admin pages rely on this table as the contract.
+ */
+const authPathLabels: Record<string, PathDescription> = {
+	'/login': { label: 'Sign in', section: 'auth' },
+	'/register': { label: 'Register', section: 'auth' },
+	'/setup': { label: 'Setup', section: 'auth' },
+	'/account': { label: 'Account', section: 'account' },
+	'/admin': { label: 'Admin', section: 'admin' },
+	'/admin/users': { label: 'Users', section: 'admin' }
+};
 
 /** An empty trail, used before the first navigation was observed. */
 export const emptyTrail: TrailState = { entries: [], index: -1 };
@@ -186,8 +200,16 @@ export function describePath(
 		return { label: name ? `Editor · ${name}` : 'Editor', section: 'editor' };
 	}
 	if (pathname === componentEditorPath) return { label: 'Component editor', section: 'components' };
+	// A trailing slash must not change the label (`/admin/` is the admin page too).
+	const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+	const known = authPathLabels[normalized];
+	if (known) return { ...known };
 	const last = pathname.split('/').filter(Boolean).at(-1) ?? pathname;
-	return { label: last.charAt(0).toUpperCase() + last.slice(1), section: 'other' };
+	return {
+		label: last.charAt(0).toUpperCase() + last.slice(1),
+		// Any other `/admin/...` page still belongs to the admin section.
+		section: normalized.startsWith('/admin/') ? 'admin' : 'other'
+	};
 }
 
 /**

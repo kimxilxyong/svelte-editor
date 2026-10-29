@@ -9,7 +9,7 @@
 	 * | ----------------- | ---------------------------------------------------------------- |
 	 * | Where am I?       | Breadcrumb (`Pages › Editor · Home`) and the highlighted tab     |
 	 * | Where was I?      | Back button label ("Back to …") and the History menu            |
-	 * | Where can I go?   | Tabs (Pages / Editor), the "Open page" switcher, History forward |
+	 * | Where can I go?   | Tabs (Pages / Editor / Components / Admin), the "Open page" switcher, History forward |
 	 * | Go back one step  | Back button – identical to the browser Back button               |
 	 *
 	 * ## Browser history integration
@@ -17,6 +17,13 @@
 	 * browser history entry. Back/Forward call `history.back()` / `history.forward()`; the trail
 	 * shown here is kept in sync by the root layout (`afterNavigate`), so browser buttons, the
 	 * keyboard and these app buttons always agree.
+	 *
+	 * ## Role-aware tabs
+	 * The signed-in user's role is read from the root layout data (`page.data.user`, see
+	 * `+layout.server.ts`) – no prop needed. A tab is rendered only when the central access policy
+	 * (`requiredRoleFor` via `canAccess`) lets that role open its route, so e.g. "Admin" is visible
+	 * for admins only and "Components" for power users and above. This is a convenience: the server
+	 * hook remains the enforcement point.
 	 *
 	 * ## Unsaved changes
 	 * The host route passes `unsavedChanges`; the root layout then asks for confirmation before
@@ -42,6 +49,7 @@
 		toPath,
 		componentEditorPath
 	} from '../navigation-trail.js';
+	import { canAccess } from '../auth/access.js';
 	import { goBack, goForward, goToEntry, nav, rememberPages } from '../navigation.svelte.js';
 
 	interface Props {
@@ -60,6 +68,14 @@
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onPages = $derived(splitPath(currentPath).pathname === '/');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
+	const onAdmin = $derived(splitPath(currentPath).pathname.startsWith('/admin'));
+
+	/** Role of the signed-in user (`null` while anonymous); drives which tabs are shown. */
+	const role = $derived(routePage.data.user?.role ?? null);
+	const showPages = $derived(canAccess(role, '/'));
+	const showEditor = $derived(canAccess(role, '/editor'));
+	const showComponents = $derived(canAccess(role, componentEditorPath));
+	const showAdmin = $derived(canAccess(role, '/admin'));
 
 	/** Page the "Editor" tab opens: the active one, else the last edited one, else the first. */
 	const editorTargetId = $derived.by(() => {
@@ -153,25 +169,42 @@
 	</ol>
 
 	<ul class="tabs" aria-label="Go to">
-		<li>
-			<a href={resolve('/')} class:active={onPages} aria-current={onPages ? 'page' : undefined}>
-				Pages
-			</a>
-		</li>
-		<li>
-			<a href={editorHref} class:active={onEditor} aria-current={onEditor ? 'page' : undefined}>
-				Editor
-			</a>
-		</li>
-		<li>
-			<a
-				href={resolve('/component-editor')}
-				class:active={onComponents}
-				aria-current={onComponents ? 'page' : undefined}
-			>
-				Components
-			</a>
-		</li>
+		{#if showPages}
+			<li>
+				<a href={resolve('/')} class:active={onPages} aria-current={onPages ? 'page' : undefined}>
+					Pages
+				</a>
+			</li>
+		{/if}
+		{#if showEditor}
+			<li>
+				<a href={editorHref} class:active={onEditor} aria-current={onEditor ? 'page' : undefined}>
+					Editor
+				</a>
+			</li>
+		{/if}
+		{#if showComponents}
+			<li>
+				<a
+					href={resolve('/component-editor')}
+					class:active={onComponents}
+					aria-current={onComponents ? 'page' : undefined}
+				>
+					Components
+				</a>
+			</li>
+		{/if}
+		{#if showAdmin}
+			<li>
+				<a
+					href={resolve('/admin')}
+					class:active={onAdmin}
+					aria-current={onAdmin ? 'page' : undefined}
+				>
+					Admin
+				</a>
+			</li>
+		{/if}
 	</ul>
 
 	<label class="switcher">

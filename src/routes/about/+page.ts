@@ -4,6 +4,6 @@ import { dev } from '$app/env';
 // it in dev so that we get hot module replacement
 export const csr = dev;
 
-// since there's no dynamic data here, we can prerender
-// it so that it gets served as a static asset in production
-export const prerender = true;
+// Deliberately NOT prerendered: the root layout load exposes `locals.user` to the header. A
+// prerendered page would bake in `user: null` at build time and show signed-in visitors as
+// signed out. `/about` is public through the access policy in `lib/auth/roles.ts`.

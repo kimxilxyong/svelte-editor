@@ -323,7 +323,15 @@
 	let isPreview = $state(false);
 	let databaseReady = $state(false);
 	let databaseBusy = $state(true);
-	let databaseStatus = $state('Checking SQLite…');
+	let databaseStatus = $state('Checking database…');
+	/**
+	 * Set for `guest` users, who may view but not change the site (the server rejects their writes
+	 * as well; this only explains and disables the Save button). Read from the root layout data.
+	 */
+	const readOnlyNotice = $derived(
+		routePage.data.user?.role === 'guest' ? 'Read-only: your role cannot save' : undefined
+	);
+
 	let hasUnsavedChanges = $state(true);
 	let revision = $state(0);
 	let routeError = $state<string | null>(null);
@@ -385,7 +393,7 @@
 		const result = (await response.json()) as EditorApiResponse;
 
 		if (!response.ok) {
-			throw new Error(result.error ?? `SQLite request failed (${response.status}).`);
+			throw new Error(result.error ?? `Database request failed (${response.status}).`);
 		}
 
 		return result;
@@ -405,10 +413,10 @@
 			selectedId = currentPage.blocks[0]?.id ?? null;
 			resetHistory();
 			hasUnsavedChanges = false;
-			databaseStatus = 'Saved site loaded from SQLite';
+			databaseStatus = 'Saved site loaded from the database';
 		} else {
 			hasUnsavedChanges = true;
-			databaseStatus = 'SQLite ready · page not saved';
+			databaseStatus = 'Database ready · page not saved';
 		}
 	}
 
@@ -418,14 +426,14 @@
 			applyDatabaseState(await requestApi('GET'));
 		} catch (error) {
 			databaseStatus =
-				error instanceof Error ? error.message : 'Unable to load the page from SQLite.';
+				error instanceof Error ? error.message : 'Unable to load the page from the database.';
 		} finally {
 			databaseBusy = false;
 		}
 	}
 
 	async function savePageToDatabase() {
-		if (databaseBusy) return;
+		if (databaseBusy || readOnlyNotice) return;
 
 		if (pages.some((page) => page.blocks.some((block) => !isValidLinkHref(block.href)))) {
 			databaseStatus = 'A link address is invalid. Use /page or https://…';
@@ -435,7 +443,7 @@
 		const savedRevision = revision;
 		const siteSnapshot: EditorSite = { pages: $state.snapshot(pages) };
 		databaseBusy = true;
-		databaseStatus = 'Saving site to SQLite…';
+		databaseStatus = 'Saving site to the database…';
 
 		try {
 			// First save on a fresh database: create the schema transparently.
@@ -445,7 +453,9 @@
 			}
 			await requestApi('POST', { action: 'save', site: siteSnapshot });
 			hasUnsavedChanges = revision !== savedRevision;
-			databaseStatus = hasUnsavedChanges ? 'More changes still need saving' : 'Saved to SQLite';
+			databaseStatus = hasUnsavedChanges
+				? 'More changes still need saving'
+				: 'Saved to the database';
 		} catch (error) {
 			databaseStatus = error instanceof Error ? error.message : 'Unable to save the page.';
 		} finally {
@@ -849,6 +859,7 @@
 		busy={databaseBusy}
 		unsaved={hasUnsavedChanges}
 		canSave={hasUnsavedChanges || !databaseReady}
+		{readOnlyNotice}
 		previewing={isPreview}
 		onsave={savePageToDatabase}
 		{canUndo}

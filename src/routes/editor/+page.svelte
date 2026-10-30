@@ -28,9 +28,9 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
-	import AppNav from '../../lib/components/AppNav.svelte';
 	import BlockContent from '../../lib/components/BlockContent.svelte';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
+	import { useNavContext } from '../../lib/navigation.svelte.js';
 	import {
 		defaultCanvasSize,
 		isValidLinkHref,
@@ -333,6 +333,8 @@
 	);
 
 	let hasUnsavedChanges = $state(true);
+	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
+	useNavContext(() => ({ pages, activePageId: currentPageId, unsavedChanges: hasUnsavedChanges }));
 	let revision = $state(0);
 	let routeError = $state<string | null>(null);
 	let undoStack = $state.raw<string[]>([]);
@@ -853,7 +855,6 @@
 </svelte:head>
 
 <div class="editor-shell">
-	<AppNav {pages} activePageId={currentPageId} unsavedChanges={hasUnsavedChanges} />
 	<BuilderHeader
 		status={databaseStatus}
 		busy={databaseBusy}

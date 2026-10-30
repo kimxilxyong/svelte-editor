@@ -98,3 +98,10 @@ After completing your work, provide:
 1. Summary of changes made
 2. Any issues found and fixed by the autofixer
 3. Recommendations for further improvements (if any)
+
+## App Shell: Navigation & Shared Form Controls
+
+- **One navigation bar** – `src/lib/components/AppNav.svelte` is mounted exactly once in `src/routes/+layout.svelte` and appears on every route (builder pages, `/admin`, `/account`, sign-in pages). It contains brand link, Back/Forward, breadcrumbs, role-filtered tabs (Pages / Editor / Components / Admin / About), the "Open page" switcher, the History menu and `UserMenu.svelte`. Do **not** add per-route headers or a second top bar; the old SVG-styled `routes/Header.svelte` was removed.
+- **Route context instead of props** – because the bar lives in the layout, a route publishes its context with `useNavContext(() => ({ pages, activePageId, unsavedChanges }))` from `src/lib/navigation.svelte.ts` (call once during component init; it resets on destroy). The layout's `beforeNavigate` reads `nav.unsavedChanges` for the leave confirmation. Routes without pages (admin, about, login) simply publish nothing and the switcher is hidden.
+- **JavaScript is required on every route** (the bar is interactive), so no route may set `csr = false`.
+- **Password inputs** – every password field uses `src/lib/components/PasswordInput.svelte` (pale-yellow field + eye reveal button, forwards native input attributes, `bind:value` / `bind:revealed`). Do not use a raw `<input type="password">`; wrappers such as `admin/PasswordField.svelte` (adds "Generate") and `auth/NewPasswordFields.svelte` (new + confirm, shared reveal) build on it. Its selectors are deliberately doubled (`.pw-input.pw-input`, `.eye.eye`) so host stylesheets such as `.auth-card button` cannot restyle it.

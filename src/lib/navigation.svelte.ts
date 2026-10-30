@@ -7,7 +7,9 @@
  *    {@link trackNavigation}; persisted in `sessionStorage` so a reload keeps the trail.
  * 2. **Page names** – remembers `page id → name` so history entries and breadcrumbs of the
  *    editor can show `Editor · About` instead of a raw id.
- * 3. **Unsaved-changes flag** – the active route reports whether leaving would lose edits;
+ * 3. **Route context** – the active route publishes its pages / active page / unsaved flag with
+ *    {@link useNavContext} so the single `AppNav` in the root layout can render them.
+ * 4. **Unsaved-changes flag** – the active route reports whether leaving would lose edits;
  *    the root layout reads it in `beforeNavigate` to ask for confirmation.
  *
  * ## Why one module-level object?
@@ -56,9 +58,53 @@ export const nav = $state({
 	pageNames: {} as Record<string, string>,
 	/** Id of the page most recently opened in the editor (target of the "Editor" tab). */
 	lastEditorPageId: null as string | null,
+	/** Pages offered by the "Open page" switcher (set by routes that manage pages). */
+	pages: [] as { id: string; name: string }[],
+	/** Page currently selected in the active route (editor); `null` elsewhere. */
+	activePageId: null as string | null,
 	/** `true` while the active route holds edits that were not saved. */
 	unsavedChanges: false
 });
+
+/** What a route tells the shared navigation about itself. All fields are optional. */
+export interface NavContext {
+	/** Pages of the site (switcher + labels). Omit on routes without pages. */
+	pages?: readonly { id: string; name: string }[];
+	/** Page currently selected in the route. */
+	activePageId?: string | null;
+	/** Whether leaving the route would discard edits. */
+	unsavedChanges?: boolean;
+}
+
+/**
+ * Publishes the active route's navigation context to the shared `AppNav` (mounted once in the
+ * root layout). Call it **once during component initialisation** of a route; the getter is
+ * re-evaluated reactively, so pass a function that reads your `$state` / `$derived` values.
+ * When the route is destroyed the context is reset, so it never leaks into the next route.
+ *
+ * @param getContext - Returns the current {@link NavContext}.
+ *
+ * @example
+ * useNavContext(() => ({ pages, activePageId: currentPageId, unsavedChanges: dirty }));
+ */
+export function useNavContext(getContext: () => NavContext) {
+	$effect(() => {
+		const context = getContext();
+		// Work on a local copy: reading `nav.pages` back here would make the effect depend on the
+		// state it writes (infinite update loop).
+		const pages = [...(context.pages ?? [])];
+		nav.pages = pages;
+		nav.activePageId = context.activePageId ?? null;
+		nav.unsavedChanges = context.unsavedChanges ?? false;
+		rememberPages(pages);
+	});
+	// No dependencies: this teardown runs once, when the route component is destroyed.
+	$effect(() => () => {
+		nav.pages = [];
+		nav.activePageId = null;
+		nav.unsavedChanges = false;
+	});
+}
 
 /**
  * Feeds a completed navigation into the trail. Call from `afterNavigate` in the root layout.

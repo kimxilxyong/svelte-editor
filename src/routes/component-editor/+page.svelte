@@ -7,7 +7,7 @@
 	 * (HTML + Svelte template) and **Style** (CSS) editors, with an optional **Module script**.
 	 *
 	 * ## Layout (same shell as the pages and editor routes)
-	 * - Header: `AppNav` + `BuilderHeader` (Save, Undo and Redo of the focused section editor).
+	 * - Header: the shared top navigation (`AppNav`, mounted in the root layout) + `BuilderHeader` (Save, Undo and Redo of the focused section editor).
 	 * - Left: project folder (browse), component file list, "New component".
 	 * - Centre: the section editors (or a read-only "Full file" view of the assembled source).
 	 * - Right: problems from the Svelte compiler (click to jump) and the detected props.
@@ -30,8 +30,8 @@
 	 */
 	import { onMount } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
-	import AppNav from '../../lib/components/AppNav.svelte';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
+	import { useNavContext } from '../../lib/navigation.svelte.js';
 	import DirectoryPickerModal from '../../lib/components/DirectoryPickerModal.svelte';
 	import CodeEditor, {
 		type CodeEditorApi,
@@ -102,6 +102,8 @@
 
 	const joined = $derived(joinSvelteSource(sections));
 	const dirty = $derived(selectedPath !== null && joined.source !== baseline);
+	// Feeds the shared top navigation (unsaved-changes guard).
+	useNavContext(() => ({ unsavedChanges: dirty }));
 	const visibleFiles = $derived(
 		files.filter((file) => file.path.toLowerCase().includes(filter.trim().toLowerCase()))
 	);
@@ -326,7 +328,6 @@
 {/snippet}
 
 <div class="editor-shell">
-	<AppNav unsavedChanges={dirty} />
 	<BuilderHeader
 		eyebrow="COMPONENT EDITOR"
 		title={selectedPath ?? 'No file open'}

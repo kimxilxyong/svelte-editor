@@ -42,6 +42,7 @@
 		sslModeOptions,
 		type PostgresUrlParts
 	} from '../../admin/postgres-url.js';
+	import PasswordInput from '../PasswordInput.svelte';
 
 	interface Props {
 		backend: BackendSummary;
@@ -63,7 +64,7 @@
 	);
 	let postgresUrl = $state('');
 	let pgParts = $state<PostgresUrlParts>(emptyPostgresParts());
-	let showPgPassword = $state(false);
+	let pgPasswordRevealed = $state(false);
 	let dataMode = $state<DataMode>(untrack(() => form?.values.dataMode ?? 'copy'));
 	let confirmReplace = $state(false);
 	let confirmText = $state('');
@@ -120,6 +121,7 @@
 				// The credential must not linger in the browser once it has been used.
 				postgresUrl = '';
 				pgParts = emptyPostgresParts();
+				pgPasswordRevealed = false;
 				confirmReplace = false;
 				confirmText = '';
 			}
@@ -253,25 +255,15 @@
 					</label>
 					<div class="field">
 						<label class="field-label" for="pg-password">Password</label>
-						<span class="inline">
-							<input
-								id="pg-password"
-								class="field-control"
-								type={showPgPassword ? 'text' : 'password'}
-								bind:value={pgParts.password}
-								oninput={onPartsInput}
-								autocomplete="new-password"
-								spellcheck="false"
-							/>
-							<button
-								class="btn"
-								type="button"
-								aria-label={showPgPassword ? 'Hide password' : 'Show password'}
-								onclick={() => (showPgPassword = !showPgPassword)}
-							>
-								{showPgPassword ? 'Hide' : 'Show'}
-							</button>
-						</span>
+						<!-- No `name`: the builder password is not submitted, only the assembled URL is. -->
+						<PasswordInput
+							id="pg-password"
+							bind:value={pgParts.password}
+							bind:revealed={pgPasswordRevealed}
+							oninput={onPartsInput}
+							autocomplete="new-password"
+							spellcheck="false"
+						/>
 					</div>
 					<label class="field">
 						<span class="field-label">Encryption (TLS)</span>
@@ -408,15 +400,5 @@
 		grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
 		gap: 0.75rem 1rem;
 		margin-top: 0.75rem;
-	}
-
-	.inline {
-		display: flex;
-		gap: 0.4rem;
-	}
-
-	.inline .field-control {
-		flex: 1;
-		min-width: 0;
 	}
 </style>

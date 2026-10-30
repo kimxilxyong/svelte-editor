@@ -2,8 +2,8 @@
 	/**
 	 * @component PasswordField
 	 *
-	 * Password input for admin-set passwords (create user / reset password) with a show/hide
-	 * toggle and a "Generate" button that fills a random password (Web Crypto) and reveals it so
+	 * Password input for admin-set passwords (create user / reset password). It wraps the shared
+	 * `PasswordInput` (yellow field with an eye toggle) and adds a "Generate" button that fills a random password (Web Crypto) and reveals it so
 	 * the admin can pass it on. The value is only ever submitted with the form; it is never stored
 	 * in client state beyond the input and is not echoed back by the server.
 	 *
@@ -14,6 +14,7 @@
 	 * @example
 	 * <PasswordField bind:value={password} label="New password" />
 	 */
+	import PasswordInput from '../PasswordInput.svelte';
 	import { generatePassword } from '../../admin/format.js';
 	import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../../auth/validation.js';
 
@@ -38,12 +39,11 @@
 <div class="field">
 	<label class="field-label" for="{uid}-input">{label}</label>
 	<div class="pw-row">
-		<input
+		<PasswordInput
 			id="{uid}-input"
-			class="field-control"
 			{name}
-			type={reveal ? 'text' : 'password'}
 			bind:value
+			bind:revealed={reveal}
 			required
 			minlength={PASSWORD_MIN_LENGTH}
 			maxlength={PASSWORD_MAX_LENGTH}
@@ -51,14 +51,6 @@
 			spellcheck="false"
 			aria-describedby="{uid}-help"
 		/>
-		<button
-			type="button"
-			class="btn small"
-			onclick={() => (reveal = !reveal)}
-			aria-pressed={reveal}
-		>
-			{reveal ? 'Hide' : 'Show'}
-		</button>
 		<button type="button" class="btn small" onclick={fillGenerated}>Generate</button>
 	</div>
 	<p id="{uid}-help" class="hint">
@@ -73,8 +65,7 @@
 		gap: 0.4rem;
 	}
 
-	.pw-row input {
-		min-width: 0;
+	.pw-row :global(.password-input) {
 		flex: 1;
 	}
 </style>

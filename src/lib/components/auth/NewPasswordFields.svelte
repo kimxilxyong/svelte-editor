@@ -24,6 +24,9 @@
 	 * @prop {string} [idPrefix='pw'] - Prefix for element ids (several instances can share a page).
 	 * @prop {string} [label='Password'] - Label of the first field.
 	 *
+	 * Both fields use the shared `PasswordInput` (yellow field + eye); the eye of either field
+	 * toggles both.
+	 *
 	 * @example
 	 * <NewPasswordFields bind:password bind:confirm bind:valid={passwordOk} {email} {name} />
 	 */
@@ -32,6 +35,7 @@
 		PASSWORD_MIN_LENGTH,
 		validatePassword
 	} from '../../auth/validation.js';
+	import PasswordInput from '../PasswordInput.svelte';
 
 	interface Props {
 		password?: string;
@@ -54,6 +58,8 @@
 		label = 'Password'
 	}: Props = $props();
 
+	/** One eye reveals or hides both fields together, so the user can compare what was typed. */
+	let revealed = $state(false);
 	let passwordTouched = $state(false);
 	let confirmTouched = $state(false);
 
@@ -71,10 +77,10 @@
 
 <div class="field">
 	<label for="{idPrefix}-new">{label}</label>
-	<input
+	<PasswordInput
 		id="{idPrefix}-new"
 		name="password"
-		type="password"
+		bind:revealed
 		autocomplete="new-password"
 		required
 		minlength={PASSWORD_MIN_LENGTH}
@@ -94,10 +100,10 @@
 
 <div class="field">
 	<label for="{idPrefix}-confirm">Confirm password</label>
-	<input
+	<PasswordInput
 		id="{idPrefix}-confirm"
 		name="confirm"
-		type="password"
+		bind:revealed
 		autocomplete="new-password"
 		required
 		bind:value={confirm}

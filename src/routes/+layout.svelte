@@ -1,7 +1,8 @@
 <script lang="ts">
 	/**
-	 * @fileoverview Root layout. Besides the page chrome it owns the two app-wide navigation
-	 * hooks, because the layout is never re-created between routes:
+	 * @fileoverview Root layout. It mounts the single app-wide navigation bar (`AppNav`, which
+	 * includes the user menu) above every route and owns the two navigation hooks, because the
+	 * layout is never re-created between routes:
 	 * - `afterNavigate` feeds every completed navigation into the trail (see `navigation.svelte.ts`).
 	 * - `beforeNavigate` asks for confirmation when the active route reports unsaved changes
 	 *   and the navigation would leave that route (page switches inside the editor are fine).
@@ -9,7 +10,7 @@
 	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import DemoLinks from './demo/DemoLinks.svelte';
 	import type { LayoutProps } from './$types';
-	import Header from './Header.svelte';
+	import AppNav from '../lib/components/AppNav.svelte';
 	import { nav, trackNavigation } from '../lib/navigation.svelte.js';
 	import { toPath } from '../lib/navigation-trail.js';
 	import './layout.css';
@@ -40,7 +41,9 @@
 </script>
 
 <div class="app">
-	<Header />
+	<header>
+		<AppNav />
+	</header>
 
 	<main>
 		{@render children()}
@@ -48,12 +51,11 @@
 
 	<footer>
 		<p>
-			visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to learn about SvelteKit
+			visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to learn about SvelteKit ·
+			<a href="https://github.com/sveltejs/kit">GitHub</a>
 		</p>
 	</footer>
 </div>
-
-<DemoLinks />
 
 <style>
 	.app {

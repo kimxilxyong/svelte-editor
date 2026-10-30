@@ -19,10 +19,9 @@
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
-	import AppNav from '../lib/components/AppNav.svelte';
 	import BuilderHeader from '../lib/components/BuilderHeader.svelte';
 	import PageView from '../lib/components/PageView.svelte';
-	import { nav } from '../lib/navigation.svelte.js';
+	import { nav, useNavContext } from '../lib/navigation.svelte.js';
 	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
 	import {
 		canvasLimits,
@@ -48,6 +47,8 @@
 	let busy = $state(true);
 	let status = $state('Checking database…');
 	let dirty = $state(false);
+	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
+	useNavContext(() => ({ pages, unsavedChanges: dirty }));
 	let slugBeforeEdit = '';
 	let projectRoot = $state('');
 	let projectMessage = $state('');
@@ -311,7 +312,6 @@
 </svelte:head>
 
 <div class="editor-shell">
-	<AppNav {pages} unsavedChanges={dirty} />
 	<BuilderHeader
 		{status}
 		{busy}

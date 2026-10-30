@@ -2,15 +2,18 @@
 	/**
 	 * @component AppNav
 	 *
-	 * Application navigation strip shown at the top of both builder routes (`/` page list and
-	 * `/editor` single-page editor). It answers four questions at any time:
+	 * The **one and only top navigation** of the application. It is mounted once in the root layout
+	 * (`routes/+layout.svelte`), so every route – including `/admin`, `/account` and the sign-in
+	 * pages – shows exactly the same bar. (It replaced the former SVG-styled `Header.svelte` plus
+	 * the per-route `AppNav`.)
 	 *
 	 * | Question          | UI element                                                       |
 	 * | ----------------- | ---------------------------------------------------------------- |
 	 * | Where am I?       | Breadcrumb (`Pages › Editor · Home`) and the highlighted tab     |
 	 * | Where was I?      | Back button label ("Back to …") and the History menu            |
-	 * | Where can I go?   | Tabs (Pages / Editor / Components / Admin), the "Open page" switcher, History forward |
+	 * | Where can I go?   | Tabs (Pages / Editor / Components / Admin / About), the "Open page" switcher, History forward |
 	 * | Go back one step  | Back button – identical to the browser Back button               |
+	 * | Who am I?         | `UserMenu` (account, sign out) at the right end                  |
 	 *
 	 * ## Browser history integration
 	 * All navigation uses real SvelteKit navigation (`<a href>` / `goto`), so every step is a
@@ -20,26 +23,27 @@
 	 *
 	 * ## Role-aware tabs
 	 * The signed-in user's role is read from the root layout data (`page.data.user`, see
-	 * `+layout.server.ts`) – no prop needed. A tab is rendered only when the central access policy
-	 * (`requiredRoleFor` via `canAccess`) lets that role open its route, so e.g. "Admin" is visible
-	 * for admins only and "Components" for power users and above. This is a convenience: the server
-	 * hook remains the enforcement point.
+	 * `+layout.server.ts`). A tab is rendered only when the central access policy (`canAccess`)
+	 * lets that role open its route, so e.g. "Admin" is visible for admins only and "Components"
+	 * for power users and above; anonymous visitors see "About" and "Sign in". This is a
+	 * convenience: the server hook remains the enforcement point.
 	 *
-	 * ## Unsaved changes
-	 * The host route passes `unsavedChanges`; the root layout then asks for confirmation before
-	 * leaving the route (see `+layout.svelte`).
-	 *
-	 * @prop {{ id: string; name: string }[]} [pages=[]] - Pages of the site, used for the switcher and labels (empty on routes without pages, e.g. the component editor).
-	 * @prop {string | null} [activePageId=null] - Page currently selected in the host route (editor).
-	 * @prop {boolean} [unsavedChanges=false] - Whether leaving the route would discard edits.
+	 * ## Route context (no props)
+	 * Because the bar lives in the layout, routes cannot pass props. Routes with pages call
+	 * `useNavContext(() => ({ pages, activePageId, unsavedChanges }))` from `navigation.svelte.ts`;
+	 * this component reads `nav.pages`, `nav.activePageId` and `nav.unsavedChanges`. On routes that
+	 * do not publish anything (admin, about, login …) the "Open page" switcher is simply hidden.
+	 * The unsaved flag is consumed by the layout's `beforeNavigate` confirmation.
 	 *
 	 * @example
-	 * <AppNav {pages} activePageId={currentPageId} unsavedChanges={hasUnsavedChanges} />
+	 * <!-- +layout.svelte -->
+	 * <AppNav />
 	 */
 	import { browser } from '$app/env';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
+	import logo from '#lib/images/svelte-logo.svg';
 	import {
 		backTarget,
 		breadcrumbsFor,
@@ -50,25 +54,23 @@
 		componentEditorPath
 	} from '../navigation-trail.js';
 	import { canAccess } from '../auth/access.js';
-	import { goBack, goForward, goToEntry, nav, rememberPages } from '../navigation.svelte.js';
+	import { goBack, goForward, goToEntry, nav } from '../navigation.svelte.js';
+	import UserMenu from './UserMenu.svelte';
 
-	interface Props {
-		pages?: { id: string; name: string }[];
-		activePageId?: string | null;
-		unsavedChanges?: boolean;
-	}
-
-	let { pages = [], activePageId = null, unsavedChanges = false }: Props = $props();
+	/** Context published by the active route (see `useNavContext`). */
+	const pages = $derived(nav.pages);
+	const activePageId = $derived(nav.activePageId);
 
 	let historyOpen = $state(false);
 
-	// `url.search` is unavailable while prerendering (both routes are prerendered), so the
-	// query string is only included in the browser. Server HTML therefore shows the bare path.
+	// `url.search` is unavailable while prerendering, so the query string is only included in the
+	// browser. Server HTML therefore shows the bare path.
 	const currentPath = $derived(browser ? toPath(routePage.url) : routePage.url.pathname);
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onPages = $derived(splitPath(currentPath).pathname === '/');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
 	const onAdmin = $derived(splitPath(currentPath).pathname.startsWith('/admin'));
+	const onAbout = $derived(splitPath(currentPath).pathname === '/about');
 
 	/** Role of the signed-in user (`null` while anonymous); drives which tabs are shown. */
 	const role = $derived(routePage.data.user?.role ?? null);
@@ -89,8 +91,16 @@
 	);
 	const switcherValue = $derived(onEditor ? (activePageId ?? '') : '');
 
-	const crumbs = $derived(breadcrumbsFor(currentPath, nav.pageNames));
-	const back = $derived(backTarget(nav.trail, currentPath));
+	// Without access to the page list (anonymous on /login, /setup …) the "Pages" root would only
+	// bounce back to the sign-in page, so the breadcrumb shows just the current location and the
+	// Back button never offers the "Pages" fallback.
+	const crumbs = $derived(
+		showPages
+			? breadcrumbsFor(currentPath, nav.pageNames)
+			: [{ label: describePath(currentPath, nav.pageNames).label, path: null }]
+	);
+	const rawBack = $derived(backTarget(nav.trail, currentPath));
+	const back = $derived(rawBack?.kind === 'parent' && !showPages ? null : rawBack);
 	const backLabel = $derived(back ? describePath(back.path, nav.pageNames).label : null);
 	const forwardPath = $derived(forwardTarget(nav.trail));
 	const forwardLabel = $derived(
@@ -103,17 +113,6 @@
 			state: index === nav.trail.index ? 'current' : index < nav.trail.index ? 'visited' : 'forward'
 		}))
 	);
-
-	$effect(() => {
-		rememberPages(pages);
-	});
-
-	$effect(() => {
-		nav.unsavedChanges = unsavedChanges;
-		return () => {
-			nav.unsavedChanges = false;
-		};
-	});
 
 	/** Opens the chosen page in the editor (a new history entry, so Back returns here). */
 	function openPage(id: string) {
@@ -128,6 +127,10 @@
 </script>
 
 <nav class="app-nav" aria-label="Application navigation">
+	<a class="brand" href={resolve('/')} aria-label="Page Builder – home">
+		<img src={logo} alt="" />
+	</a>
+
 	<div class="nav-group" role="group" aria-label="History navigation">
 		<button
 			type="button"
@@ -205,21 +208,28 @@
 				</a>
 			</li>
 		{/if}
+		<li>
+			<a
+				href={resolve('/about')}
+				class:active={onAbout}
+				aria-current={onAbout ? 'page' : undefined}
+			>
+				About
+			</a>
+		</li>
 	</ul>
 
-	<label class="switcher">
-		<span>Open page</span>
-		<select
-			value={switcherValue}
-			disabled={pages.length === 0}
-			onchange={(event) => openPage(event.currentTarget.value)}
-		>
-			<option value="" disabled>Choose…</option>
-			{#each pages as item (item.id)}
-				<option value={item.id}>{item.name}</option>
-			{/each}
-		</select>
-	</label>
+	{#if pages.length > 0}
+		<label class="switcher">
+			<span>Open page</span>
+			<select value={switcherValue} onchange={(event) => openPage(event.currentTarget.value)}>
+				<option value="" disabled>Choose…</option>
+				{#each pages as item (item.id)}
+					<option value={item.id}>{item.name}</option>
+				{/each}
+			</select>
+		</label>
+	{/if}
 
 	<details class="trail" bind:open={historyOpen}>
 		<summary>History <span class="count">{entries.length}</span></summary>
@@ -249,6 +259,8 @@
 			{/each}
 		</ol>
 	</details>
+
+	<UserMenu />
 </nav>
 
 <style>
@@ -263,6 +275,30 @@
 		border-bottom: 1px solid var(--line, #e9e9f0);
 		background: #fbfbfd;
 		font-size: 0.76rem;
+	}
+
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		border-radius: 9px;
+	}
+
+	.brand:hover {
+		background: #eeeaff;
+	}
+
+	.brand:focus-visible {
+		outline: 2px solid var(--purple, #6b5ce7);
+		outline-offset: 2px;
+	}
+
+	.brand img {
+		width: 22px;
+		height: 22px;
+		object-fit: contain;
 	}
 
 	.nav-group {

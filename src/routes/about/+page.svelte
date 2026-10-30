@@ -14,8 +14,7 @@
 	<pre>npx sv create</pre>
 
 	<p>
-		The page you're looking at is purely static HTML, with no client-side interactivity needed.
-		Because of that, we don't need to load any JavaScript. Try viewing the page's source, or opening
-		the devtools network panel and reloading.
+		This is a page builder: design pages by drag and drop, store them in SQLite or PostgreSQL and
+		export them as native Svelte components of a real SvelteKit project.
 	</p>
 </div>

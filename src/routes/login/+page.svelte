@@ -20,6 +20,7 @@
 	import { resolve } from '$app/paths';
 	import type { PageProps } from './$types';
 	import AuthCard from '../../lib/components/auth/AuthCard.svelte';
+	import PasswordInput from '../../lib/components/PasswordInput.svelte';
 	import SignInOptions from '../../lib/components/auth/SignInOptions.svelte';
 
 	let { data, form }: PageProps = $props();
@@ -61,13 +62,7 @@
 
 		<div class="field">
 			<label for="login-password">Password</label>
-			<input
-				id="login-password"
-				name="password"
-				type="password"
-				autocomplete="current-password"
-				required
-			/>
+			<PasswordInput id="login-password" name="password" autocomplete="current-password" required />
 		</div>
 
 		<button type="submit" class="primary" disabled={submitting}>

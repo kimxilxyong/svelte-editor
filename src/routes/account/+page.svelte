@@ -30,6 +30,7 @@
 	import type { PageProps } from './$types';
 	import AuthCard from '../../lib/components/auth/AuthCard.svelte';
 	import NewPasswordFields from '../../lib/components/auth/NewPasswordFields.svelte';
+	import PasswordInput from '../../lib/components/PasswordInput.svelte';
 	import { roleInfo } from '../../lib/auth/roles.js';
 	import { providerLabels } from '../../lib/auth/types.js';
 	import { normalizeEmail, validateName } from '../../lib/auth/validation.js';
@@ -199,13 +200,7 @@
 			{#if account.hasPassword}
 				<div class="field">
 					<label for="acc-current">Current password</label>
-					<input
-						id="acc-current"
-						name="current"
-						type="password"
-						autocomplete="current-password"
-						required
-					/>
+					<PasswordInput id="acc-current" name="current" autocomplete="current-password" required />
 				</div>
 			{/if}
 			{#if !account.email}

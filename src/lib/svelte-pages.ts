@@ -24,9 +24,12 @@ import {
 	componentNames,
 	getComponentName,
 	parseBuilderBlocks,
+	compositeKind,
 	type BlockKind,
 	type BuilderBlock,
-	type EditorPage
+	type EditorComposite,
+	type EditorPage,
+	type WidgetKind
 } from './editor.js';
 
 /**
@@ -52,18 +55,10 @@ type PropName =
 	| 'newTab'
 	| 'items';
 
-const sectionProps: PropName[] = ['title', 'body', 'theme'];
-
 /**
- * Prop attribute whitelist mapping for each built-in block kind.
+ * Prop attribute whitelist mapping for each built-in widget kind.
  */
-const kindProps: Record<BlockKind, PropName[]> = {
-	hero: ['title', 'body', 'action', 'theme'],
-	text: sectionProps,
-	button: ['title', 'body', 'action', 'theme'],
-	features: sectionProps,
-	image: sectionProps,
-	quote: ['title', 'body', 'action', 'theme'],
+const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-button': ['body', 'action'],
 	'widget-text-field': ['title', 'body', 'action', 'value'],
 	'widget-textarea': ['title', 'body', 'action', 'value'],
@@ -141,27 +136,12 @@ export function renderPageSource(page: EditorPage): string {
 		.map((name) => `\timport ${name} from '${componentImportBase}/${name}.svelte';`)
 		.join('\n');
 	const blocks = page.blocks
-		.map((block) => {
-			const name = getComponentName(block.kind);
-			let propsStr = '';
-			if (block.kind.startsWith('custom:')) {
-				const rendered: string[] = [];
-				if (block.title) rendered.push(`title="${escapeAttribute(block.title)}"`);
-				if (block.body) rendered.push(`body="${escapeAttribute(block.body)}"`);
-				if (block.action) rendered.push(`action="${escapeAttribute(block.action)}"`);
-				if (block.customProps) {
-					for (const [k, v] of Object.entries(block.customProps)) {
-						if (typeof v === 'string') rendered.push(`${k}="${escapeAttribute(v)}"`);
-						else rendered.push(`${k}={${v}}`);
-					}
-				}
-				propsStr = rendered.join(' ');
-			} else {
-				const allowed = kindProps[block.kind as keyof typeof kindProps] || [];
-				propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
-			}
-			return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="left: ${block.x}px; top: ${block.y}px; width: ${block.width}px; height: ${block.height}px"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
-		})
+		.map((block) =>
+			renderBlockElement(
+				block,
+				`left: ${block.x}px; top: ${block.y}px; width: ${block.width}px; height: ${block.height}px`
+			)
+		)
 		.join('\n');
 
 	return `${generatedMarker}
@@ -193,6 +173,97 @@ ${blocks}
 		overflow: hidden;
 		background: var(--site-bg, #fff);
 		color: var(--site-fg, inherit);
+	}
+
+	.editor-block {
+		position: absolute;
+		box-sizing: border-box;
+	}
+</style>
+`;
+}
+
+/**
+ * Renders one absolutely positioned block wrapper containing its component.
+ *
+ * @param block - Block to render (widget, composite or custom component).
+ * @param geometry - Inline CSS declarations for left/top/width/height (px for pages, % for composites).
+ */
+function renderBlockElement(block: BuilderBlock, geometry: string): string {
+	const name = getComponentName(block.kind);
+	let propsStr = '';
+	// Composites carry no per-instance props (propsStr stays empty): their file describes them.
+	if (block.kind.startsWith('composite:')) {
+		// no props
+	} else if (block.kind.startsWith('custom:')) {
+		const rendered: string[] = [];
+		if (block.title) rendered.push(`title="${escapeAttribute(block.title)}"`);
+		if (block.body) rendered.push(`body="${escapeAttribute(block.body)}"`);
+		if (block.action) rendered.push(`action="${escapeAttribute(block.action)}"`);
+		if (block.customProps) {
+			for (const [k, v] of Object.entries(block.customProps)) {
+				if (typeof v === 'string') rendered.push(`${k}="${escapeAttribute(v)}"`);
+				else rendered.push(`${k}={${v}}`);
+			}
+		}
+		propsStr = rendered.join(' ');
+	} else {
+		const allowed = kindProps[block.kind as WidgetKind] || [];
+		propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
+	}
+	return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="${geometry}"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
+}
+
+/** Rounds to two decimals so percentage geometry stays readable in generated files. */
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/**
+ * Generates the `.svelte` source of a composite component.
+ *
+ * Children are positioned in percentages of the composite canvas, so an instance can be resized
+ * freely on a page. The natural size is kept in `data-width` / `data-height` for re-import.
+ *
+ * @param composite - Composite to serialize.
+ * @returns Formatted Svelte 5 component source, starting with {@link generatedMarker}.
+ * @example
+ * renderCompositeSource({ id: 'a', name: 'Hero', width: 720, height: 220, blocks: [] });
+ */
+export function renderCompositeSource(composite: EditorComposite): string {
+	const names = [
+		...new Set(
+			composite.blocks
+				.map((block) => getComponentName(block.kind))
+				.filter((name) => name !== composite.name)
+		)
+	];
+	const imports = names
+		.map((name) => `\timport ${name} from '${componentImportBase}/${name}.svelte';`)
+		.join('\n');
+	const blocks = composite.blocks
+		.map((block) =>
+			renderBlockElement(
+				block,
+				`left: ${round2((block.x / composite.width) * 100)}%; top: ${round2((block.y / composite.height) * 100)}%; width: ${round2((block.width / composite.width) * 100)}%; height: ${round2((block.height / composite.height) * 100)}%`
+			)
+		)
+		.join('\n');
+
+	return `${generatedMarker}
+${imports ? `<script lang="ts">\n${imports}\n</script>\n` : ''}
+<div
+	class="editor-composite"
+	data-editor-composite="${escapeAttribute(composite.name)}"
+	data-width="${composite.width}"
+	data-height="${composite.height}"
+>
+${blocks}
+</div>
+
+<style>
+	.editor-composite {
+		position: relative;
+		width: 100%;
+		height: 100%;
 	}
 
 	.editor-block {
@@ -270,31 +341,21 @@ function findPageElement(nodes: AstNode[]): AstNode | undefined {
 }
 
 /**
- * Reconstructs an EditorPage instance from an exported `+page.svelte` source file.
+ * Reads the positioned block wrappers of a page or composite container.
  *
- * Returns `null` if the source is not an editor-generated page, contains syntax errors,
- * or fails validation constraints.
- *
- * @param source - File contents of `+page.svelte`.
- * @param slug - Route slug associated with this file.
- * @returns Parsed EditorPage model or `null`.
+ * @param container - The `data-editor-page` / `data-editor-composite` element.
+ * @param compositeNames - Names of known composites; matching components become `composite:` blocks.
+ * @param scaleX - Multiplier converting the wrapper's horizontal values to pixels (1 for pages;
+ *   canvas width / 100 for composites, whose geometry is stored in percent).
+ * @param scaleY - Same for vertical values.
  */
-export function parsePageSource(source: string, slug: string): EditorPage | null {
-	let root: { fragment: { nodes: AstNode[] } };
-	try {
-		root = parse(source, { modern: true }) as unknown as typeof root;
-	} catch {
-		return null;
-	}
-
-	const pageElement = findPageElement(root.fragment.nodes);
-	if (!pageElement?.attributes) return null;
-
-	const attrs = new Map(pageElement.attributes.map((a) => [a.name, attributeValue(a)]));
-	const name = attrs.get('data-editor-page');
-	const style = readStyle(String(attrs.get('style') ?? ''));
-	if (typeof name !== 'string' || !style.width || !style['min-height']) return null;
-
+function readBlocks(
+	container: AstNode,
+	compositeNames: ReadonlySet<string>,
+	scaleX: number,
+	scaleY: number
+): Record<string, unknown>[] {
+	const pageElement = container;
 	const blocks: Record<string, unknown>[] = [];
 	for (const wrapper of elementNodes(pageElement.fragment?.nodes ?? [])) {
 		const wrapperStyle = readStyle(
@@ -310,9 +371,12 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 		if (!component) continue;
 
 		const isStandard = kindByComponent.has(component.name!);
+		const isComposite = compositeNames.has(component.name!);
 		const kind: BlockKind = isStandard
 			? kindByComponent.get(component.name!)!
-			: (`custom:${component.name!}` as BlockKind);
+			: isComposite
+				? compositeKind(component.name!)
+				: (`custom:${component.name!}` as BlockKind);
 
 		const props: Record<string, unknown> = {};
 		const customProps: Record<string, string | number | boolean> = {};
@@ -325,7 +389,7 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 					kindProps[kind as keyof typeof kindProps]?.includes(attribute.name as PropName)
 				) {
 					props[attribute.name] = value;
-				} else if (!isStandard) {
+				} else if (!isStandard && !isComposite) {
 					if (['title', 'body', 'action'].includes(attribute.name) && typeof value === 'string') {
 						props[attribute.name] = value;
 					} else if (
@@ -346,15 +410,50 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 			body: '',
 			action: '',
 			theme: 'light',
-			x: wrapperStyle.left,
-			y: wrapperStyle.top,
-			width: wrapperStyle.width,
-			height: wrapperStyle.height,
+			x: round2(wrapperStyle.left * scaleX),
+			y: round2(wrapperStyle.top * scaleY),
+			width: round2(wrapperStyle.width * scaleX),
+			height: round2(wrapperStyle.height * scaleY),
 			...props,
 			...(Object.keys(customProps).length > 0 ? { customProps } : {})
 		});
 	}
 
+	return blocks;
+}
+
+/**
+ * Reconstructs an EditorPage instance from an exported `+page.svelte` source file.
+ *
+ * Returns `null` if the source is not an editor-generated page, contains syntax errors,
+ * or fails validation constraints.
+ *
+ * @param source - File contents of `+page.svelte`.
+ * @param slug - Route slug associated with this file.
+ * @param compositeNames - Names of known composites; their components import as `composite:` blocks.
+ * @returns Parsed EditorPage model or `null`.
+ */
+export function parsePageSource(
+	source: string,
+	slug: string,
+	compositeNames: ReadonlySet<string> = new Set()
+): EditorPage | null {
+	let root: { fragment: { nodes: AstNode[] } };
+	try {
+		root = parse(source, { modern: true }) as unknown as typeof root;
+	} catch {
+		return null;
+	}
+
+	const pageElement = findPageElement(root.fragment.nodes);
+	if (!pageElement?.attributes) return null;
+
+	const attrs = new Map(pageElement.attributes.map((a) => [a.name, attributeValue(a)]));
+	const name = attrs.get('data-editor-page');
+	const style = readStyle(String(attrs.get('style') ?? ''));
+	if (typeof name !== 'string' || !style.width || !style['min-height']) return null;
+
+	const blocks = readBlocks(pageElement, compositeNames, 1, 1);
 	const parsedBlocks = parseBuilderBlocks(blocks);
 	if (!parsedBlocks) return null;
 
@@ -366,4 +465,51 @@ export function parsePageSource(source: string, slug: string): EditorPage | null
 		height: style['min-height'],
 		blocks: parsedBlocks
 	};
+}
+
+/** Finds the container element carrying the `data-editor-composite` attribute. */
+function findCompositeElement(nodes: AstNode[]): AstNode | undefined {
+	for (const node of nodes) {
+		if (
+			node.type === 'RegularElement' &&
+			node.attributes?.some((a) => a.name === 'data-editor-composite')
+		) {
+			return node;
+		}
+		const nested = node.fragment ? findCompositeElement(node.fragment.nodes) : undefined;
+		if (nested) return nested;
+	}
+	return undefined;
+}
+
+/**
+ * Reconstructs an EditorComposite from a generated composite `.svelte` file.
+ *
+ * @param source - File contents of `<Name>.svelte`.
+ * @param compositeNames - Names of all known composites (so nested composites resolve).
+ * @returns The composite (with a fresh id), or `null` when the file is not a generated composite,
+ *   does not parse, or fails validation.
+ */
+export function parseCompositeSource(
+	source: string,
+	compositeNames: ReadonlySet<string> = new Set()
+): EditorComposite | null {
+	let root: { fragment: { nodes: AstNode[] } };
+	try {
+		root = parse(source, { modern: true }) as unknown as typeof root;
+	} catch {
+		return null;
+	}
+
+	const element = findCompositeElement(root.fragment.nodes);
+	if (!element?.attributes) return null;
+	const attrs = new Map(element.attributes.map((a) => [a.name, attributeValue(a)]));
+	const name = attrs.get('data-editor-composite');
+	const width = Number(attrs.get('data-width'));
+	const height = Number(attrs.get('data-height'));
+	if (typeof name !== 'string' || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+
+	const blocks = parseBuilderBlocks(readBlocks(element, compositeNames, width / 100, height / 100));
+	if (!blocks) return null;
+	return { id: globalThis.crypto.randomUUID(), name, width, height, blocks };
 }

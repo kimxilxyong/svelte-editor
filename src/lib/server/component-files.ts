@@ -24,7 +24,7 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { checkSvelteSource } from '../svelte-diagnostics.js';
-import type { SourceDiagnostic } from '../svelte-sections.js';
+import type { SourceDiagnostic } from '../svelte-parts.js';
 import { ProjectError, resolveProject } from './project.js';
 
 /** Maximum number of files returned by {@link listComponentFiles}. */

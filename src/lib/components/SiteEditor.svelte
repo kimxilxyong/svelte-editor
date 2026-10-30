@@ -1,11 +1,20 @@
 <script lang="ts">
 	/**
-	 * @fileoverview Visual Drag-and-Drop Page Builder & WYSIWYG Editor (`/editor`).
+	 * @fileoverview Visual Drag-and-Drop canvas editor shared by `/editor` (pages) and
+	 * `/composites` (Composite Components).
+	 *
+	 * The `mode` prop selects what is edited. In `pages` mode the documents are the site's pages;
+	 * in `composites` mode they are the reusable Composite Components (named groups of widgets),
+	 * mapped to the page-shaped `EditorPage` (slug = name) so the same canvas, history and
+	 * inspector code serves both. The kind not being edited is stashed and merged back on save, so
+	 * every save writes the whole `EditorSite`. Composites render through `provideComposites`
+	 * (see `composite-context.ts`); placing a composite inside another is cycle-checked here and
+	 * on the server.
 	 *
 	 * Architecture & Features:
 	 * 1. Palette:
-	 *    - Categorized tabs: "Sections" (full-width layouts), "Widgets" (atomic GUI widgets),
-	 *      and "Custom" (dynamically imported project components).
+	 *    - Categorized tabs: "Composites" (reusable widget groups), "Widgets" (atomic GUI
+	 *      widgets), and "Custom" (dynamically imported project components).
 	 *    - Pure drag-and-drop placement with canvas-relative percentage coordinates.
 	 * 2. Canvas Stage:
 	 *    - Canvas size picker with common resolutions (default Full HD 1920×1080).
@@ -25,32 +34,43 @@
 	 *    - Seamless load and save of `EditorSite` models with `/editor/api`.
 	 */
 
+	/**
+	 * @component SiteEditor
+	 * @prop {'pages' | 'composites'} [mode='pages'] - Which documents the canvas edits. Fixed for
+	 *   the lifetime of the component (the routes mount one editor per mode).
+	 */
 	import { onMount } from 'svelte';
 	import { page as routePage } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
-	import BlockContent from '../../lib/components/BlockContent.svelte';
-	import ThemeScope from '../../lib/components/editor/ThemeScope.svelte';
-	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
-	import { useNavContext } from '../../lib/navigation.svelte.js';
+	import BlockContent from './BlockContent.svelte';
+	import ThemeScope from './editor/ThemeScope.svelte';
+	import BuilderHeader from './BuilderHeader.svelte';
+	import { useNavContext } from '../navigation.svelte.js';
+	import { provideComposites } from '../composite-context.js';
+	import { seedComposites } from '../composite-seeds.js';
 	import {
 		blockLimits,
+		compositeLimits,
 		defaultCanvasSize,
 		isValidLinkHref,
 		type BuilderBlock,
 		type BlockKind,
 		type EditorPage,
 		type EditorSite,
-		type SectionKind,
+		type EditorComposite,
+		compositeKind,
+		isValidCompositeKind,
+		findCompositeCycle,
 		type WidgetKind
-	} from '../../lib/editor.js';
+	} from '../editor.js';
 	import {
 		filterWidgets,
 		widgetCatalog,
 		widgetCategories,
 		type WidgetCategory
-	} from '../../lib/widget-catalog.js';
+	} from '../widget-catalog.js';
 
 	/** Compass direction of the selection-frame handle being dragged (corners and edges). */
 	type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -61,20 +81,19 @@
 		success?: boolean;
 		error?: string;
 	};
-	type PaletteTab = 'sections' | 'widgets' | 'custom';
+	type PaletteTab = 'composites' | 'widgets' | 'custom';
 
-	const sectionInfo: Record<SectionKind, { label: string; detail: string; mark: string }> = {
-		hero: { label: 'Hero section', detail: 'A bold opening for your page', mark: '✳' },
-		text: { label: 'Text block', detail: 'Share a little more detail', mark: 'T' },
-		button: { label: 'Call to action', detail: 'Give visitors a next step', mark: '↗' },
-		features: { label: 'Feature cards', detail: 'Showcase what makes you great', mark: '▦' },
-		image: { label: 'Image section', detail: 'A visual moment for your story', mark: '▧' },
-		quote: { label: 'Testimonial', detail: 'Let a happy customer speak', mark: '“' }
-	};
+	/** `pages`: edits site pages. `composites`: edits composite components on the same canvas. */
+	let { mode = 'pages' }: { mode?: 'pages' | 'composites' } = $props();
+	const composing = untrack(() => mode === 'composites');
+	/** Route that hosts this editor and the query parameter selecting the open document. */
+	const basePath = composing ? '/composites' : '/editor';
+	const paramName = composing ? 'composite' : 'page';
+	const docLabel = composing ? 'composite' : 'page';
+
 	// Flowbite widget palette data (label, category, defaults) lives in the shared catalog.
 	const widgetInfo: Record<WidgetKind, { label: string; detail: string; mark: string }> =
 		widgetCatalog;
-	const sectionKinds = Object.keys(sectionInfo) as SectionKind[];
 	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
 	/** Widgets whose action field is the label of a button. */
 	const actionWidgetKinds: BlockKind[] = [];
@@ -96,19 +115,35 @@
 			.filter((group) => group.kinds.length > 0)
 	);
 	const visibleWidgetCount = $derived(widgetGroups.reduce((n, g) => n + g.kinds.length, 0));
-	const rawComponentInfo: Record<string, { label: string; detail: string; mark: string }> = {
-		...sectionInfo,
-		...widgetInfo
-	};
-	const componentInfo = new Proxy(rawComponentInfo, {
+	type ComponentInfo = { label: string; detail: string; mark: string };
+	/** Label, hint and glyph of any block kind: widgets from the catalog, composites and imports by name. */
+	const componentInfo = new Proxy(widgetInfo as Record<string, ComponentInfo>, {
 		get(target, prop: string) {
 			if (typeof prop === 'string' && prop in target) return target[prop];
+			if (typeof prop === 'string' && prop.startsWith('composite:')) {
+				return { label: prop.slice(10), detail: 'Composite component', mark: '◧' };
+			}
 			if (typeof prop === 'string' && prop.startsWith('custom:')) {
-				return { label: prop.slice(7), detail: 'Custom component', mark: '✳' };
+				return { label: prop.slice(7), detail: 'Imported component', mark: '✳' };
 			}
 			return { label: String(prop), detail: 'Component', mark: '✳' };
 		}
-	}) as Record<BlockKind, { label: string; detail: string; mark: string }>;
+	}) as Record<BlockKind, ComponentInfo>;
+
+	type BlockDefaults = Omit<
+		BuilderBlock,
+		| 'id'
+		| 'positioned'
+		| 'x'
+		| 'y'
+		| 'width'
+		| 'height'
+		| 'value'
+		| 'checked'
+		| 'level'
+		| 'href'
+		| 'newTab'
+	>;
 
 	/** Block content for every widget kind, derived from the catalog. */
 	const widgetDefaults = Object.fromEntries(
@@ -119,156 +154,71 @@
 				{ kind, title, body, action, theme: theme ?? 'light', ...(items ? { items } : {}) }
 			];
 		})
-	) as Record<
-		WidgetKind,
-		Omit<
-			BuilderBlock,
-			| 'id'
-			| 'positioned'
-			| 'x'
-			| 'y'
-			| 'width'
-			| 'height'
-			| 'value'
-			| 'checked'
-			| 'level'
-			| 'href'
-			| 'newTab'
-		>
-	>;
+	) as Record<WidgetKind, BlockDefaults>;
 
-	const defaults: Record<
-		BlockKind,
-		Omit<
-			BuilderBlock,
-			| 'id'
-			| 'positioned'
-			| 'x'
-			| 'y'
-			| 'width'
-			| 'height'
-			| 'value'
-			| 'checked'
-			| 'level'
-			| 'href'
-			| 'newTab'
-		>
-	> = {
-		hero: {
-			kind: 'hero',
-			title: 'Make room for your next big idea.',
-			body: 'A thoughtful space to share what you do and why it matters.',
-			action: 'Explore what we do',
-			theme: 'lavender'
-		},
-		text: {
-			kind: 'text',
-			title: 'A little about us',
-			body: 'We believe the best work starts with curiosity, good people, and the freedom to try something new.',
-			action: '',
-			theme: 'light'
-		},
-		button: {
-			kind: 'button',
-			title: 'Ready when you are',
-			body: 'Take the first step. We’ll take it from here.',
-			action: 'Get started',
-			theme: 'dark'
-		},
-		features: {
-			kind: 'features',
-			title: 'The details make the difference',
-			body: 'Simple tools, considered design, and a team that cares.',
-			action: '',
-			theme: 'light'
-		},
-		image: {
-			kind: 'image',
-			title: 'A brighter way to build',
-			body: 'Made for the moments that move you forward.',
-			action: '',
-			theme: 'lavender'
-		},
-		quote: {
-			kind: 'quote',
-			title: '“It just feels like us.”',
-			body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
-			action: 'Maya Chen · Studio founder',
-			theme: 'light'
-		},
-		...widgetDefaults
-	};
-
+	/** The sample page shown before anything is saved: composite instances of the starters. */
 	const initialPage: EditorPage = {
 		id: 'home',
 		name: 'Home',
 		slug: 'home',
 		width: defaultCanvasSize.width,
 		height: defaultCanvasSize.height,
-		blocks: [
-			{
-				id: 'sample-hero',
-				kind: 'hero',
-				title: 'Make room for your next big idea.',
-				body: 'A thoughtful space to share what you do and why it matters.',
-				action: 'Explore what we do',
-				theme: 'lavender',
-				positioned: true,
-				x: 24,
-				y: 24,
-				width: 720,
-				height: 220,
-				value: '',
-				checked: false,
-				level: 60,
-				href: '',
-				newTab: false
-			},
-			{
-				id: 'sample-features',
-				kind: 'features',
-				title: 'The details make the difference',
-				body: 'Simple tools, considered design, and a team that cares.',
-				action: '',
-				theme: 'light',
-				positioned: true,
-				x: 24,
-				y: 264,
-				width: 720,
-				height: 260,
-				value: '',
-				checked: false,
-				level: 60,
-				href: '',
-				newTab: false
-			},
-			{
-				id: 'sample-quote',
-				kind: 'quote',
-				title: '“It just feels like us.”',
-				body: 'The whole process felt easy, and the result is something we’re genuinely proud to share.',
-				action: 'Maya Chen · Studio founder',
-				theme: 'light',
-				positioned: true,
-				x: 24,
-				y: 544,
-				width: 720,
-				height: 200,
-				value: '',
-				checked: false,
-				level: 60,
-				href: '',
-				newTab: false
-			}
-		]
+		blocks: (
+			[
+				['sample-hero', 'Hero', 24, 720, 220],
+				['sample-features', 'FeatureCards', 264, 720, 260],
+				['sample-quote', 'Testimonial', 544, 720, 200]
+			] as const
+		).map(([id, name, y, width, height]) => ({
+			id,
+			kind: compositeKind(name),
+			title: '',
+			body: '',
+			action: '',
+			theme: 'light' as const,
+			positioned: true,
+			x: 24,
+			y,
+			width,
+			height,
+			value: '',
+			checked: false,
+			level: 60,
+			href: '',
+			newTab: false
+		}))
 	};
 
-	let pages = $state<EditorPage[]>([initialPage]);
-	let currentPageId = $state('home');
+	/** Composites are edited as page-shaped documents (the slug mirrors the name). */
+	const toDoc = (composite: EditorComposite): EditorPage => ({
+		...composite,
+		slug: composite.name
+	});
+	const toComposite = (doc: EditorPage): EditorComposite => ({
+		id: doc.id,
+		name: doc.name,
+		width: doc.width,
+		height: doc.height,
+		blocks: doc.blocks
+	});
+
+	/**
+	 * The documents being edited: the site's pages, or (in composite mode) its composites. The
+	 * other kind is kept untouched in `stashed*` and merged back when saving, so one save always
+	 * writes the complete site.
+	 */
+	let pages = $state<EditorPage[]>(composing ? seedComposites().map(toDoc) : [initialPage]);
+	let stashedPages = $state.raw<EditorPage[]>(composing ? [initialPage] : []);
+	let stashedComposites = $state.raw<EditorComposite[]>(composing ? [] : seedComposites());
+	/** Composites that `composite:<Name>` blocks render from (live while editing one). */
+	const composites = $derived(composing ? pages.map(toComposite) : stashedComposites);
+	provideComposites(() => composites);
+
+	let currentPageId = $state(composing ? 'seed-hero' : 'home');
 	let currentPage = $derived(pages.find((page) => page.id === currentPageId) ?? pages[0]);
 	let blocks = $derived(currentPage.blocks);
-	let selectedId = $state<string | null>('sample-hero');
-	let paletteTab = $state<PaletteTab>('sections');
+	let selectedId = $state<string | null>(composing ? 'seed-hero-0' : 'sample-hero');
+	let paletteTab = $state<PaletteTab>(composing ? 'widgets' : 'composites');
 	let isPreview = $state(false);
 	let databaseReady = $state(false);
 	let databaseBusy = $state(true);
@@ -283,7 +233,11 @@
 
 	let hasUnsavedChanges = $state(true);
 	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
-	useNavContext(() => ({ pages, activePageId: currentPageId, unsavedChanges: hasUnsavedChanges }));
+	useNavContext(() => ({
+		pages: composing ? [] : pages,
+		activePageId: composing ? null : currentPageId,
+		unsavedChanges: hasUnsavedChanges
+	}));
 	let revision = $state(0);
 	let routeError = $state<string | null>(null);
 	let undoStack = $state.raw<string[]>([]);
@@ -366,9 +320,18 @@
 		}
 
 		if (result.site) {
-			pages = result.site.pages;
+			if (composing) {
+				stashedPages = result.site.pages;
+				// A site without composites yet: offer the starters so there is something to edit.
+				const loaded = result.site.composites.length ? result.site.composites : seedComposites();
+				pages = loaded.map(toDoc);
+			} else {
+				pages = result.site.pages;
+				stashedComposites = result.site.composites;
+			}
 			currentPageId =
-				pages.find((item) => item.id === routePage.url.searchParams.get('page'))?.id ?? pages[0].id;
+				pages.find((item) => item.id === routePage.url.searchParams.get(paramName))?.id ??
+				pages[0].id;
 			selectedId = currentPage.blocks[0]?.id ?? null;
 			resetHistory();
 			hasUnsavedChanges = false;
@@ -400,7 +363,15 @@
 		}
 
 		const savedRevision = revision;
-		const siteSnapshot: EditorSite = { pages: $state.snapshot(pages) };
+		const edited = $state.snapshot(pages);
+		const siteSnapshot: EditorSite = composing
+			? { pages: [...stashedPages], composites: edited.map(toComposite) }
+			: { pages: edited, composites: [...stashedComposites] };
+		const cycle = findCompositeCycle(siteSnapshot.composites);
+		if (cycle) {
+			databaseStatus = `Composite "${cycle}" contains itself. Remove the loop to save.`;
+			return;
+		}
 		databaseBusy = true;
 		databaseStatus = 'Saving site to the database…';
 
@@ -488,8 +459,8 @@
 	 */
 	function selectPage(id: string) {
 		applyPageSelection(id);
-		if (routePage.url.searchParams.get('page') !== id) {
-			void goto(resolve(`/editor?page=${encodeURIComponent(id)}`), { reset: false });
+		if (routePage.url.searchParams.get(paramName) !== id) {
+			void goto(resolve(`${basePath}?${paramName}=${encodeURIComponent(id)}`), { reset: false });
 		}
 	}
 
@@ -502,7 +473,7 @@
 	// URL → state: browser Back/Forward (or a typed URL) changes `?page=`. Only the URL is
 	// tracked so that adding pages or editing never resets the selection.
 	$effect(() => {
-		const urlPageId = routePage.url.searchParams.get('page');
+		const urlPageId = routePage.url.searchParams.get(paramName);
 		untrack(() => {
 			const id = urlPageId ?? pages[0]?.id;
 			if (id && id !== currentPageId && pages.some((item) => item.id === id)) {
@@ -511,9 +482,12 @@
 		});
 	});
 
+	/** Pages that links may point to (in composite mode these come from the stashed site pages). */
+	const linkPages = $derived(composing ? stashedPages : pages);
+
 	function resolveInternalPage(href: string) {
 		const slug = href.slice(1).split(/[?#]/)[0];
-		return slug === '' ? pages[0] : pages.find((page) => page.slug === slug);
+		return slug === '' ? linkPages[0] : linkPages.find((page) => page.slug === slug);
 	}
 
 	function handleLinkClick(event: MouseEvent, block: BuilderBlock) {
@@ -525,8 +499,91 @@
 
 		event.preventDefault();
 		const target = resolveInternalPage(block.href);
-		if (target) selectPage(target.id);
+		if (target && !composing) selectPage(target.id);
 		else routeError = `No page found at ${block.href}`;
+	}
+
+	/** Composites that may be placed on the open document (never itself or one that contains it). */
+	const placeableComposites = $derived.by(() => {
+		if (!composing) return composites;
+		const open = currentPage.name;
+		return composites.filter((item) => {
+			if (item.name === open) return false;
+			const trial = composites.map((c) =>
+				c.name === open ? { ...c, blocks: [...c.blocks, { kind: compositeKind(item.name) }] } : c
+			) as EditorComposite[];
+			return !findCompositeCycle(trial);
+		});
+	});
+
+	/** Creates a new empty composite (composite mode only) and opens it. */
+	function addComposite() {
+		const name = window.prompt('Name of the new composite component (e.g. PricingTable):')?.trim();
+		if (!name) return;
+		const problem = compositeNameProblem(name);
+		if (problem) {
+			routeError = problem;
+			return;
+		}
+		const doc: EditorPage = {
+			id: globalThis.crypto.randomUUID(),
+			name,
+			slug: name,
+			width: 960,
+			height: 360,
+			blocks: []
+		};
+		pages.push(doc);
+		markUnsaved();
+		selectPage(doc.id);
+	}
+
+	/** Renames the open composite; instances elsewhere follow on the next save. */
+	function renameComposite() {
+		const name = window.prompt('New name:', currentPage.name)?.trim();
+		if (!name || name === currentPage.name) return;
+		const problem = compositeNameProblem(name, currentPage.id);
+		if (problem) {
+			routeError = problem;
+			return;
+		}
+		const previous = compositeKind(currentPage.name);
+		const next = compositeKind(name);
+		for (const doc of pages)
+			for (const block of doc.blocks) if (block.kind === previous) block.kind = next;
+		for (const doc of stashedPages)
+			for (const block of doc.blocks) if (block.kind === previous) block.kind = next;
+		stashedPages = JSON.parse(JSON.stringify(stashedPages));
+		currentPage.name = name;
+		currentPage.slug = name;
+		markUnsaved();
+	}
+
+	/** Deletes the open composite after confirmation; blocks that used it keep a placeholder. */
+	function deleteComposite() {
+		if (pages.length < 2) {
+			routeError = 'Keep at least one composite, or create another first.';
+			return;
+		}
+		if (
+			!window.confirm(`Delete composite "${currentPage.name}"? Pages using it show a placeholder.`)
+		)
+			return;
+		const index = pages.findIndex((doc) => doc.id === currentPageId);
+		pages.splice(index, 1);
+		selectPage(pages[Math.max(0, index - 1)].id);
+		markUnsaved();
+	}
+
+	/** Why `name` cannot be used for a composite, or `null` when it is fine. */
+	function compositeNameProblem(name: string, ignoreId?: string): string | null {
+		if (!isValidCompositeKind(compositeKind(name))) {
+			return 'Use a PascalCase name: letters and digits, starting with a capital letter.';
+		}
+		if (pages.some((doc) => doc.id !== ignoreId && doc.name === name)) {
+			return `A composite named "${name}" already exists.`;
+		}
+		return null;
 	}
 
 	function duplicateSelected() {
@@ -589,24 +646,29 @@
 	}
 
 	function createBlock(kind: BlockKind): BuilderBlock {
-		const base = (defaults as Record<string, any>)[kind] || {
+		const base: BlockDefaults = (widgetDefaults as Record<string, BlockDefaults>)[kind] ?? {
 			kind,
-			title: kind.startsWith('custom:') ? kind.slice(7) : 'Custom Component',
+			title: kind.startsWith('custom:') ? kind.slice(7) : '',
 			body: '',
 			action: '',
 			theme: 'light'
 		};
 		const catalogDefaults =
 			kind in widgetCatalog ? widgetCatalog[kind as WidgetKind].defaults : undefined;
+		// A composite instance starts at the composite's own size, scaled down to fit the canvas.
+		const source = kind.startsWith('composite:')
+			? composites.find((item) => compositeKind(item.name) === kind)
+			: undefined;
+		const fit = source ? Math.min(1, (currentPage.width - 48) / source.width) : 1;
 		return {
 			...base,
 			id: globalThis.crypto.randomUUID(),
 			positioned: true,
 			x: 24,
 			y: 24,
-			width: catalogDefaults?.width ?? 720,
-			height: catalogDefaults?.height ?? 240,
-			value: kind === 'widget-select' ? defaults[kind].action : '',
+			width: source ? Math.round(source.width * fit) : (catalogDefaults?.width ?? 720),
+			height: source ? Math.round(source.height * fit) : (catalogDefaults?.height ?? 240),
+			value: kind === 'widget-select' ? widgetDefaults['widget-select'].action : '',
 			checked: false,
 			level: catalogDefaults?.level ?? 60,
 			href: kind === 'widget-link' ? '/home' : '',
@@ -805,6 +867,18 @@
 		if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
 	}
 
+	/**
+	 * Whether a dragged kind may be placed. `componentInfo` is a Proxy that answers for any name, so
+	 * `Object.hasOwn` on it only sees widgets; check each kind family explicitly instead.
+	 */
+	function isKnownKind(kind: string): kind is BlockKind {
+		if (Object.hasOwn(widgetCatalog, kind)) return true;
+		if (kind.startsWith('composite:')) {
+			return composites.some((item) => compositeKind(item.name) === kind);
+		}
+		return kind.startsWith('custom:') && (customKinds as string[]).includes(kind);
+	}
+
 	function readPayload(event: DragEvent): DragPayload | null {
 		const value = event.dataTransfer?.getData('application/x-page-builder');
 		if (!value) return null;
@@ -818,9 +892,9 @@
 				payload.source === 'palette' &&
 				'kind' in payload &&
 				typeof payload.kind === 'string' &&
-				Object.hasOwn(componentInfo, payload.kind)
+				isKnownKind(payload.kind)
 			) {
-				return { source: 'palette', kind: payload.kind as BlockKind };
+				return { source: 'palette', kind: payload.kind };
 			}
 		} catch {
 			return null;
@@ -888,14 +962,18 @@
 			<aside class="palette-panel" aria-label="Component palette">
 				<div class="panel-heading">
 					<div>
-						<p class="eyebrow">BUILD YOUR PAGE</p>
+						<p class="eyebrow">{composing ? 'BUILD A COMPOSITE' : 'BUILD YOUR PAGE'}</p>
 						<h2>
-							{paletteTab === 'sections' ? 'Composite Components' : 'Flowbite widgets'}
+							{paletteTab === 'composites'
+								? 'Composite Components'
+								: paletteTab === 'widgets'
+									? 'Flowbite widgets'
+									: 'Imported components'}
 						</h2>
 					</div>
 					<span class="count-pill">
-						{paletteTab === 'sections'
-							? sectionKinds.length
+						{paletteTab === 'composites'
+							? placeableComposites.length
 							: paletteTab === 'widgets'
 								? visibleWidgetCount
 								: customKinds.length}
@@ -904,14 +982,14 @@
 				<div class="palette-tabs" role="tablist" aria-label="Palette categories">
 					<button
 						type="button"
-						id="sections-tab"
+						id="composites-tab"
 						role="tab"
-						aria-selected={paletteTab === 'sections'}
+						aria-selected={paletteTab === 'composites'}
 						aria-controls="palette-items"
-						class:tab-active={paletteTab === 'sections'}
-						onclick={() => (paletteTab = 'sections')}
+						class:tab-active={paletteTab === 'composites'}
+						onclick={() => (paletteTab = 'composites')}
 					>
-						Components
+						Composites
 					</button>
 					<button
 						type="button"
@@ -939,9 +1017,9 @@
 					{/if}
 				</div>
 				<p class="panel-hint">
-					{paletteTab === 'sections'
-						? 'Drag a section onto your page to place it.'
-						: 'Drag a widget onto your page to place it.'}
+					{paletteTab === 'composites'
+						? `Drag a composite component onto your ${docLabel} to place it.`
+						: `Drag a component onto your ${docLabel} to place it.`}
 				</p>
 
 				{#if paletteTab === 'widgets'}
@@ -995,7 +1073,7 @@
 						{/each}
 					{:else}
 						<div class="component-list" role="list" aria-label="Draggable components">
-							{#each paletteTab === 'sections' ? sectionKinds : customKinds as kind (kind)}
+							{#each paletteTab === 'composites' ? placeableComposites.map( (item) => compositeKind(item.name) ) : customKinds as kind (kind)}
 								<div
 									class="palette-item"
 									draggable="true"
@@ -1023,19 +1101,21 @@
 			</aside>
 		{/if}
 
-		<section class="canvas-panel" aria-label="Page canvas">
+		<section class="canvas-panel" aria-label="{composing ? 'Composite' : 'Page'} canvas">
 			<div class="canvas-toolbar">
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>
-					<span>{isPreview ? 'Live preview' : 'Page canvas'}</span>
+					<span>{isPreview ? 'Live preview' : composing ? 'Composite canvas' : 'Page canvas'}</span>
 					<label class="page-switch">
-						<span class="sr-only">Page</span>
+						<span class="sr-only">{composing ? 'Composite' : 'Page'}</span>
 						<select
 							value={currentPage.id}
 							onchange={(event) => selectPage(event.currentTarget.value)}
 						>
 							{#each pages as page (page.id)}
-								<option value={page.id}>{page.name} · /{page.slug}</option>
+								<option value={page.id}
+									>{composing ? page.name : `${page.name} · /${page.slug}`}</option
+								>
 							{/each}
 						</select>
 					</label>
@@ -1044,6 +1124,31 @@
 				{#if !isPreview}
 					<div class="canvas-actions">
 						<span>{blockCount} {blockCount === 1 ? 'item' : 'items'}</span>
+						{#if composing}
+							<label class="size-field">
+								Width
+								<input
+									type="number"
+									min={compositeLimits.minWidth}
+									max={compositeLimits.maxWidth}
+									bind:value={currentPage.width}
+									oninput={markUnsaved}
+								/>
+							</label>
+							<label class="size-field">
+								Height
+								<input
+									type="number"
+									min={compositeLimits.minHeight}
+									max={compositeLimits.maxHeight}
+									bind:value={currentPage.height}
+									oninput={markUnsaved}
+								/>
+							</label>
+							<button type="button" class="text-button" onclick={addComposite}>New</button>
+							<button type="button" class="text-button" onclick={renameComposite}>Rename</button>
+							<button type="button" class="text-button" onclick={deleteComposite}>Delete</button>
+						{/if}
 						<button
 							type="button"
 							class="text-button"
@@ -1072,9 +1177,9 @@
 						{#if blocks.length === 0}
 							<div class="empty-canvas">
 								<div class="empty-icon" aria-hidden="true">✳</div>
-								<h2>Your page starts here</h2>
+								<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>
 								<p>
-									Drag a component from the panel onto the canvas to start building something great.
+									Drag widgets from the panel onto the canvas to start building something great.
 								</p>
 							</div>
 						{:else}
@@ -1150,7 +1255,7 @@
 							<button
 								class="icon-button"
 								type="button"
-								aria-label="Duplicate selected section"
+								aria-label="Duplicate selected block"
 								title="Duplicate (Ctrl+D)"
 								onclick={duplicateSelected}
 							>
@@ -1163,7 +1268,7 @@
 							<button
 								class="icon-button delete-button"
 								type="button"
-								aria-label="Delete selected section"
+								aria-label="Delete selected block"
 								onclick={deleteSelected}
 							>
 								<svg viewBox="0 0 20 20" aria-hidden="true"
@@ -1179,8 +1284,20 @@
 							<span class="component-mark" aria-hidden="true"
 								>{componentInfo[selectedBlock.kind].mark}</span
 							>
-							<div><strong>{selectedLabel}</strong><small>Selected section</small></div>
+							<div><strong>{selectedLabel}</strong><small>Selected block</small></div>
 						</div>
+						{#if selectedBlock.kind.startsWith('composite:')}
+							{@const target = composites.find(
+								(item) => compositeKind(item.name) === selectedBlock?.kind
+							)}
+							{#if target}
+								<a
+									class="text-button edit-composite"
+									href={resolve(`/composites?composite=${encodeURIComponent(target.id)}`)}
+									>Edit composite “{target.name}”</a
+								>
+							{/if}
+						{/if}
 						<span class="field-label">Layer</span>
 						<div class="layer-buttons">
 							<button type="button" onclick={() => reorderSelected('back')}>To back</button>
@@ -1333,7 +1450,7 @@
 								oninput={markUnsaved}
 							/>
 							<datalist id="page-routes">
-								{#each pages as page (page.id)}<option value="/{page.slug}">{page.name}</option
+								{#each linkPages as page (page.id)}<option value="/{page.slug}">{page.name}</option
 									>{/each}
 							</datalist>
 							{#if !isValidLinkHref(selectedBlock.href)}
@@ -1344,13 +1461,11 @@
 								Open external links in a new tab
 							</label>
 						{/if}
-						{#if ['hero', 'button', 'quote', 'widget-button', 'widget-text-field', 'widget-textarea', 'widget-card', ...actionWidgetKinds].includes(selectedBlock.kind)}
+						{#if ['widget-button', 'widget-text-field', 'widget-textarea', 'widget-card', ...actionWidgetKinds].includes(selectedBlock.kind)}
 							<label class="field-label" for="block-action">
-								{selectedBlock.kind === 'quote'
-									? 'Attribution'
-									: ['widget-text-field', 'widget-textarea'].includes(selectedBlock.kind)
-										? 'Placeholder'
-										: 'Button label'}
+								{['widget-text-field', 'widget-textarea'].includes(selectedBlock.kind)
+									? 'Placeholder'
+									: 'Button label'}
 							</label>
 							<input
 								id="block-action"
@@ -1412,8 +1527,8 @@
 						{/if}
 
 						<div class="field-divider"></div>
-						<span class="field-label">Section style</span>
-						<div class="theme-options" role="group" aria-label="Section style">
+						<span class="field-label">Theme</span>
+						<div class="theme-options" role="group" aria-label="Theme">
 							<button
 								type="button"
 								class:theme-active={selectedBlock.theme === 'light'}
@@ -1453,7 +1568,7 @@
 					<div class="inspector-empty">
 						<div aria-hidden="true">✧</div>
 						<h3>Nothing selected</h3>
-						<p>Select a section on your page to edit its content and style.</p>
+						<p>Select a block on your canvas to edit its content and style.</p>
 					</div>
 				{/if}
 			</aside>
@@ -1900,7 +2015,7 @@
 		box-shadow: 0 5px 18px rgb(34 34 56 / 0.12);
 	}
 
-	/* Widgets sit directly on the themed page; only sections get a card look. */
+	/* Widgets sit directly on the themed page; only composites and imported components get a card look. */
 	.canvas-block.positioned[class*='widget-'] {
 		border-radius: 0;
 		background: transparent;
@@ -2014,10 +2129,6 @@
 		left: 0;
 		margin-top: -6px;
 		cursor: ew-resize;
-	}
-
-	.canvas-block.hero {
-		min-height: 290px;
 	}
 
 	.block-type-tag {
@@ -2414,5 +2525,24 @@
 
 	.canvas-stage {
 		justify-content: flex-start;
+	}
+
+	.size-field {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.78rem;
+	}
+
+	.size-field input {
+		width: 4.5rem;
+		padding: 0.2rem 0.35rem;
+		border: 1px solid #d9d4ec;
+		border-radius: 6px;
+	}
+
+	.edit-composite {
+		display: inline-block;
+		margin-bottom: 0.75rem;
 	}
 </style>

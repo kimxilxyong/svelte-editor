@@ -27,6 +27,7 @@
 		canvasLimits,
 		defaultCanvasSize,
 		type BuilderBlock,
+		type EditorComposite,
 		type EditorPage,
 		type EditorSite
 	} from '../lib/editor.js';
@@ -42,6 +43,8 @@
 	);
 
 	let pages = $state<EditorPage[]>([]);
+	// Kept so saving/exporting from this view never drops the composites edited on /composites.
+	let composites = $state<EditorComposite[]>([]);
 	let selectedId = $state('');
 	let databaseReady = $state(false);
 	let busy = $state(true);
@@ -88,6 +91,7 @@
 		}
 		if (result.site) {
 			pages = result.site.pages;
+			composites = result.site.composites;
 			// Show the page that was just edited in the editor, so recent changes are visible.
 			selectedId = pages.find((p) => p.id === nav.lastEditorPageId)?.id ?? pages[0].id;
 			dirty = false;
@@ -121,7 +125,10 @@
 				await request('POST', { action: 'create-tables' });
 				databaseReady = true;
 			}
-			await request('POST', { action: 'save', site: { pages: $state.snapshot(pages) } });
+			await request('POST', {
+				action: 'save',
+				site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
+			});
 			dirty = false;
 			status = 'Saved to the database';
 		});
@@ -151,7 +158,7 @@
 				await projectRequest({
 					action: 'export',
 					root,
-					site: { pages: $state.snapshot(pages) }
+					site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
 				});
 			projectMessage = `Exported ${result.written.length} files${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
 			projectDetails = [
@@ -169,6 +176,7 @@
 		await run('Importing…', async () => {
 			const result: {
 				pages: EditorPage[];
+				composites?: EditorComposite[];
 				components: { name: string; fileName: string; props: unknown[] }[];
 				skipped: FileNote[];
 			} = await projectRequest({
@@ -182,10 +190,23 @@
 				else if (merged.length < 20) merged.push(page);
 			}
 			pages = merged;
+			// Imported composites replace same-named ones; at most 50 are kept.
+			const mergedComposites = [...composites];
+			for (const composite of result.composites ?? []) {
+				const index = mergedComposites.findIndex((item) => item.name === composite.name);
+				if (index >= 0) mergedComposites[index] = { ...composite, id: mergedComposites[index].id };
+				else if (mergedComposites.length < 50) mergedComposites.push(composite);
+			}
+			composites = mergedComposites;
 			if (!pages.some((page) => page.id === selectedId)) selectedId = pages[0]?.id ?? '';
-			if (result.pages.length > 0 || (result.components && result.components.length > 0)) touch();
+			if (
+				result.pages.length > 0 ||
+				(result.composites?.length ?? 0) > 0 ||
+				(result.components && result.components.length > 0)
+			)
+				touch();
 			const compCount = result.components?.length ?? 0;
-			projectMessage = `Imported ${result.pages.length} pages, ${compCount} components${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
+			projectMessage = `Imported ${result.pages.length} pages, ${result.composites?.length ?? 0} composites, ${compCount} components${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
 			projectDetails = [
 				...(result.components?.map((c) => `component ${c.name} (${c.fileName})`) ?? []),
 				...result.pages.map((page) => `read /${page.slug}`),
@@ -381,6 +402,7 @@
 				{#if selected}
 					<PageView
 						page={selected}
+						{composites}
 						theme={routePage.data.siteTheme}
 						interactive={isPreview}
 						onlink={followLink}

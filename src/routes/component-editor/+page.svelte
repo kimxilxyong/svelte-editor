@@ -7,19 +7,19 @@
 	 * (HTML + Svelte template) and **Style** (CSS) editors, with an optional **Module script**.
 	 *
 	 * ## Layout (same shell as the pages and editor routes)
-	 * - Header: the shared top navigation (`AppNav`, mounted in the root layout) + `BuilderHeader` (Save, Undo and Redo of the focused section editor).
+	 * - Header: the shared top navigation (`AppNav`, mounted in the root layout) + `BuilderHeader` (Save, Undo and Redo of the focused part editor).
 	 * - Left: project folder (browse), component file list, "New component". The **Built-in
 	 *   widgets** tab instead lists the editor's own widgets/sections; saving stores an override in
 	 *   `.data/widgets` (see `widget-files.ts`) that the canvas and exports use ("Reset to default").
-	 * - Centre: the section editors (or a read-only "Full file" view of the assembled source).
+	 * - Centre: the part editors (or a read-only "Full file" view of the assembled source).
 	 * - Right: problems from the Svelte compiler (click to jump) and the detected props.
 	 *
 	 * ## Data flow
 	 * 1. `POST /component-editor/api` `list`/`read` fetch files below `src/lib/components`.
-	 * 2. `splitSvelteSource` turns the file into {@link SvelteSections}; each editor binds one field.
-	 * 3. `joinSvelteSource(sections)` re-assembles the file on every edit (`joined`); a debounced
+	 * 2. `splitSvelteSource` turns the file into {@link SvelteParts}; each editor binds one field.
+	 * 3. `joinSvelteSource(parts)` re-assembles the file on every edit (`joined`); a debounced
 	 *    effect runs `checkSvelteSource(joined.source)` and `distributeDiagnostics` maps the
-	 *    whole-file positions back into the section editors (`problems`).
+	 *    whole-file positions back into the part editors (`problems`).
 	 * 4. Save sends `joined.source`. The server re-checks; with compile errors nothing is written
 	 *    until the developer confirms **Save anyway** (`force`). Warnings never block.
 	 *
@@ -45,15 +45,15 @@
 	import { checkSvelteSource } from '../../lib/svelte-diagnostics.js';
 	import {
 		distributeDiagnostics,
-		emptySections,
+		emptyParts,
 		joinSvelteSource,
 		newComponentSource,
 		splitSvelteSource,
 		type ScriptLang,
-		type SectionDiagnostic,
-		type SectionId,
-		type SvelteSections
-	} from '../../lib/svelte-sections.js';
+		type PartDiagnostic,
+		type PartId,
+		type SvelteParts
+	} from '../../lib/svelte-parts.js';
 
 	/** Response of the list action. */
 	type ListResponse = {
@@ -63,17 +63,17 @@
 		error?: string;
 	};
 	/** A problem prepared for the right-hand list. */
-	type ProblemRow = SectionDiagnostic & { section: SectionId };
+	type ProblemRow = PartDiagnostic & { part: PartId };
 
 	const projectKey = 'editor-project-root';
 	const themeKey = 'component-editor-theme';
-	const sectionLabels: Record<SectionId, string> = {
+	const partLabels: Record<PartId, string> = {
 		moduleScript: 'Module script',
 		script: 'Script',
 		markup: 'Markup',
 		style: 'Style'
 	};
-	const emptyProblems = (): Record<SectionId, SectionDiagnostic[]> => ({
+	const emptyProblems = (): Record<PartId, PartDiagnostic[]> => ({
 		moduleScript: [],
 		script: [],
 		markup: [],
@@ -89,24 +89,24 @@
 	let filter = $state('');
 	let truncated = $state(false);
 	let selectedPath = $state<string | null>(null);
-	let sections = $state<SvelteSections>(emptySections('ts'));
+	let parts = $state<SvelteParts>(emptyParts('ts'));
 	/** Normalised text of the file as last loaded or saved; the baseline for `dirty`. */
 	let baseline = $state('');
 	let notes = $state<string[]>([]);
-	let problems = $state<Record<SectionId, SectionDiagnostic[]>>(emptyProblems());
+	let problems = $state<Record<PartId, PartDiagnostic[]>>(emptyProblems());
 	let status = $state('Choose a SvelteKit project folder to start.');
 	let busy = $state(false);
 	let theme = $state<'light' | 'dark'>('light');
 	let fullView = $state(false);
 	let confirmForce = $state(false);
-	let activeSection = $state<SectionId>('script');
+	let activePart = $state<PartId>('script');
 	let newName = $state('');
 	let newLang = $state<ScriptLang>('ts');
 	let creating = $state(false);
 	let showModule = $state(false);
-	let apis = $state<Partial<Record<SectionId, CodeEditorApi>>>({});
+	let apis = $state<Partial<Record<PartId, CodeEditorApi>>>({});
 
-	const joined = $derived(joinSvelteSource(sections));
+	const joined = $derived(joinSvelteSource(parts));
 	const dirty = $derived(selectedPath !== null && joined.source !== baseline);
 	// Feeds the shared top navigation (unsaved-changes guard).
 	useNavContext(() => ({ unsavedChanges: dirty }));
@@ -114,8 +114,8 @@
 		files.filter((file) => file.path.toLowerCase().includes(filter.trim().toLowerCase()))
 	);
 	const rows = $derived<ProblemRow[]>(
-		(Object.keys(problems) as SectionId[])
-			.flatMap((section) => problems[section].map((item) => ({ ...item, section })))
+		(Object.keys(problems) as PartId[])
+			.flatMap((part) => problems[part].map((item) => ({ ...item, part })))
 			.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1))
 	);
 	const errorCount = $derived(rows.filter((row) => row.severity === 'error').length);
@@ -128,7 +128,7 @@
 			return [];
 		}
 	});
-	const hasModule = $derived(sections.moduleScript.trim() !== '' || showModule);
+	const hasModule = $derived(parts.moduleScript.trim() !== '' || showModule);
 
 	onMount(() => {
 		projectRoot = localStorage.getItem(projectKey) ?? '';
@@ -222,7 +222,7 @@
 		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
 		mode = next;
 		selectedPath = null;
-		sections = emptySections('ts');
+		parts = emptyParts('ts');
 		baseline = '';
 		if (next === 'widgets') {
 			await loadWidgets();
@@ -289,9 +289,9 @@
 
 	function loadSource(path: string, content: string) {
 		const split = splitSvelteSource(content);
-		sections = split.sections;
+		parts = split.parts;
 		notes = split.notes;
-		baseline = joinSvelteSource(split.sections).source;
+		baseline = joinSvelteSource(split.parts).source;
 		selectedPath = path;
 		showModule = false;
 		confirmForce = false;
@@ -358,8 +358,8 @@
 
 	/** Switches the script language; the module script follows so both blocks stay consistent. */
 	function setLanguage(lang: ScriptLang) {
-		sections.scriptLang = lang;
-		sections.moduleLang = lang;
+		parts.scriptLang = lang;
+		parts.moduleLang = lang;
 	}
 
 	function setTheme(next: 'light' | 'dark') {
@@ -370,35 +370,35 @@
 	/** Moves the cursor of the right editor to a problem. */
 	function jump(row: ProblemRow) {
 		fullView = false;
-		apis[row.section]?.goTo(row.line, row.column);
+		apis[row.part]?.goTo(row.line, row.column);
 	}
 
 	const scriptLanguage = $derived<CodeLanguage>(
-		sections.scriptLang === 'ts' ? 'typescript' : 'javascript'
+		parts.scriptLang === 'ts' ? 'typescript' : 'javascript'
 	);
 	const moduleLanguage = $derived<CodeLanguage>(
-		sections.moduleLang === 'ts' ? 'typescript' : 'javascript'
+		parts.moduleLang === 'ts' ? 'typescript' : 'javascript'
 	);
 
-	/** Converts section diagnostics to the editor's shape (identical fields, explicit for typing). */
-	const forEditor = (section: SectionId): EditorDiagnostic[] => problems[section];
-	const countOf = (section: SectionId, severity: 'error' | 'warning') =>
-		problems[section].filter((item) => item.severity === severity).length;
+	/** Converts part diagnostics to the editor's shape (identical fields, explicit for typing). */
+	const forEditor = (part: PartId): EditorDiagnostic[] => problems[part];
+	const countOf = (part: PartId, severity: 'error' | 'warning') =>
+		problems[part].filter((item) => item.severity === severity).length;
 </script>
 
 <svelte:head>
 	<title>Component editor</title>
-	<meta name="description" content="Edit Svelte components section by section" />
+	<meta name="description" content="Edit Svelte components part by part" />
 </svelte:head>
 
-{#snippet badges(section: SectionId)}
-	{#if countOf(section, 'error') > 0}
-		<span class="badge error" title="Errors">{countOf(section, 'error')} ✕</span>
+{#snippet badges(part: PartId)}
+	{#if countOf(part, 'error') > 0}
+		<span class="badge error" title="Errors">{countOf(part, 'error')} ✕</span>
 	{/if}
-	{#if countOf(section, 'warning') > 0}
-		<span class="badge warning" title="Warnings">{countOf(section, 'warning')} ⚠</span>
+	{#if countOf(part, 'warning') > 0}
+		<span class="badge warning" title="Warnings">{countOf(part, 'warning')} ⚠</span>
 	{/if}
-	{#if problems[section].length === 0 && selectedPath}
+	{#if problems[part].length === 0 && selectedPath}
 		<span class="badge ok" title="No problems">✓</span>
 	{/if}
 {/snippet}
@@ -412,8 +412,8 @@
 		unsaved={dirty}
 		canSave={selectedPath !== null && dirty}
 		onsave={() => save()}
-		onundo={selectedPath ? () => apis[activeSection]?.undo() : undefined}
-		onredo={selectedPath ? () => apis[activeSection]?.redo() : undefined}
+		onundo={selectedPath ? () => apis[activePart]?.undo() : undefined}
+		onredo={selectedPath ? () => apis[activePart]?.redo() : undefined}
 		canUndo={selectedPath !== null}
 		canRedo={selectedPath !== null}
 	/>
@@ -574,7 +574,7 @@
 				<div class="toolbar">
 					<div class="segmented" role="group" aria-label="View">
 						<button type="button" class:on={!fullView} onclick={() => (fullView = false)}>
-							Sections
+							Parts
 						</button>
 						<button type="button" class:on={fullView} onclick={() => (fullView = true)}>
 							Full file
@@ -629,14 +629,14 @@
 							</header>
 							<div class="editor-slot">
 								<CodeEditor
-									bind:value={sections.moduleScript}
+									bind:value={parts.moduleScript}
 									bind:api={apis.moduleScript}
 									language={moduleLanguage}
 									{theme}
 									minHeight="4rem"
 									ariaLabel="Module script"
 									onsave={() => save()}
-									onfocus={() => (activeSection = 'moduleScript')}
+									onfocus={() => (activePart = 'moduleScript')}
 								/>
 							</div>
 						</div>
@@ -648,14 +648,14 @@
 							<div class="segmented small" role="group" aria-label="Script language">
 								<button
 									type="button"
-									class:on={sections.scriptLang === 'ts'}
+									class:on={parts.scriptLang === 'ts'}
 									onclick={() => setLanguage('ts')}
 								>
 									TS
 								</button>
 								<button
 									type="button"
-									class:on={sections.scriptLang === 'js'}
+									class:on={parts.scriptLang === 'js'}
 									onclick={() => setLanguage('js')}
 								>
 									JS
@@ -669,7 +669,7 @@
 						</header>
 						<div class="editor-slot">
 							<CodeEditor
-								bind:value={sections.script}
+								bind:value={parts.script}
 								bind:api={apis.script}
 								language={scriptLanguage}
 								{theme}
@@ -678,7 +678,7 @@
 								placeholder="// Component logic, e.g. let {'{ title }'} = $props();"
 								diagnostics={forEditor('script')}
 								onsave={() => save()}
-								onfocus={() => (activeSection = 'script')}
+								onfocus={() => (activePart = 'script')}
 							/>
 						</div>
 					</div>
@@ -689,7 +689,7 @@
 						</header>
 						<div class="editor-slot">
 							<CodeEditor
-								bind:value={sections.markup}
+								bind:value={parts.markup}
 								bind:api={apis.markup}
 								language="svelte"
 								{theme}
@@ -697,7 +697,7 @@
 								ariaLabel="Component markup"
 								diagnostics={forEditor('markup')}
 								onsave={() => save()}
-								onfocus={() => (activeSection = 'markup')}
+								onfocus={() => (activePart = 'markup')}
 							/>
 						</div>
 					</div>
@@ -708,7 +708,7 @@
 						</header>
 						<div class="editor-slot">
 							<CodeEditor
-								bind:value={sections.style}
+								bind:value={parts.style}
 								bind:api={apis.style}
 								language="css"
 								{theme}
@@ -716,7 +716,7 @@
 								ariaLabel="Component style"
 								diagnostics={forEditor('style')}
 								onsave={() => save()}
-								onfocus={() => (activeSection = 'style')}
+								onfocus={() => (activePart = 'style')}
 							/>
 						</div>
 					</div>
@@ -746,7 +746,7 @@
 						<li>
 							<button type="button" class={row.severity} onclick={() => jump(row)}>
 								<span class="where">
-									{sectionLabels[row.section]} · {row.line}:{row.column + 1}
+									{partLabels[row.part]} · {row.line}:{row.column + 1}
 								</span>
 								<span class="what">{row.message}</span>
 								{#if row.code}<code>{row.code}</code>{/if}

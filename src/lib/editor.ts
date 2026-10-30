@@ -3,16 +3,13 @@
  * resolution for the visual SvelteKit Page Editor.
  *
  * This module defines the domain entities used across the application:
- * - Block kinds (sections, atomic widgets, and user-defined custom components).
+ * - Block kinds (atomic widgets, composite components and imported custom components).
+ * - Composite components: reusable groups of widgets (and other composites) that are edited on a
+ *   visual canvas exactly like pages and exported as native `.svelte` components.
  * - Layout and positioning models (absolute pixel geometry).
  * - Site structure (`EditorSite` -> `EditorPage` -> `BuilderBlock`).
  * - Runtime validation and sanitization for block attributes, routes, and link targets.
  */
-
-/**
- * Standard layout section component types.
- */
-export type SectionKind = 'hero' | 'text' | 'button' | 'features' | 'image' | 'quote';
 
 /**
  * Atomic GUI widget component types.
@@ -34,14 +31,44 @@ export type WidgetKind =
 	| 'widget-link';
 
 /**
- * Dynamic custom component kind prefix, e.g., 'custom:NewsletterSignup'.
+ * Dynamic custom component kind prefix, e.g., 'custom:NewsletterSignup'. These are native
+ * `.svelte` components imported from a target project, not built on the canvas.
  */
 export type CustomKind = `custom:${string}`;
 
 /**
+ * Composite component kind, e.g. 'composite:Hero': an instance of an {@link EditorComposite}
+ * (one or more widgets edited on a visual canvas) with the same name.
+ */
+export type CompositeKind = `composite:${string}`;
+
+/**
  * Union of all valid component kinds accepted by the editor canvas and generator.
  */
-export type BlockKind = SectionKind | WidgetKind | CustomKind;
+export type BlockKind = WidgetKind | CompositeKind | CustomKind;
+
+/** PascalCase name pattern of a composite component (also its exported file name). */
+export const compositeNamePattern = /^[A-Z][A-Za-z0-9]{0,39}$/;
+
+/**
+ * Validates whether a string is a correctly formatted composite kind identifier.
+ *
+ * @param kind - The block kind string to validate.
+ * @returns `true` for `composite:<PascalCaseName>`.
+ */
+export function isValidCompositeKind(kind: string): boolean {
+	return kind.startsWith('composite:') && compositeNamePattern.test(kind.slice(10));
+}
+
+/**
+ * Builds the block kind that instantiates a composite.
+ *
+ * @param name - The composite's PascalCase name.
+ * @returns The `composite:<name>` kind.
+ */
+export function compositeKind(name: string): CompositeKind {
+	return `composite:${name}`;
+}
 
 /**
  * Validates whether a given string is a correctly formatted custom component kind identifier.
@@ -54,7 +81,7 @@ export function isValidCustomKind(kind: string): boolean {
 }
 
 /**
- * Visual styling theme applied to layout sections.
+ * Visual styling theme of a block.
  */
 export type Theme = 'light' | 'lavender' | 'dark';
 
@@ -70,7 +97,7 @@ export type Theme = 'light' | 'lavender' | 'dark';
 export type BuilderBlock = {
 	/** Unique identifier for the block instance (UUID). */
 	id: string;
-	/** Component kind identifier (section, widget, or custom). */
+	/** Component kind identifier (widget, composite or custom). */
 	kind: BlockKind;
 	/** Primary text label or heading. */
 	title: string;
@@ -78,7 +105,7 @@ export type BuilderBlock = {
 	body: string;
 	/** Action button label or kicker caption. */
 	action: string;
-	/** Visual color theme for section containers. */
+	/** Visual color theme of the block. */
 	theme: Theme;
 	/** Whether the block is positioned with coordinates (always true in current version). */
 	positioned: boolean;
@@ -129,21 +156,35 @@ export type EditorPage = {
 };
 
 /**
- * Root site model holding all pages in the user's project.
+ * A composite component: a reusable group of one or more widgets (or other composites) laid out
+ * on its own canvas. Geometry follows the same pixel conventions as {@link EditorPage}; when an
+ * instance is placed on a page the child blocks scale proportionally to the instance size.
+ */
+export type EditorComposite = {
+	/** Unique identifier (UUID or seed id). */
+	id: string;
+	/** PascalCase name; also the `.svelte` file name and the `composite:<name>` kind. */
+	name: string;
+	/** Canvas width in pixels (the natural size of a new instance). */
+	width: number;
+	/** Canvas height in pixels. */
+	height: number;
+	/** Blocks positioned on the composite canvas. */
+	blocks: BuilderBlock[];
+};
+
+/**
+ * Root site model holding all pages and composite components of the user's project.
  */
 export type EditorSite = {
 	/** Ordered list of pages in the site. */
 	pages: EditorPage[];
+	/** Composite components that page blocks of kind `composite:<name>` refer to. */
+	composites: EditorComposite[];
 };
 
-/** List of recognized built-in section and widget kinds. */
+/** List of recognized built-in widget kinds. */
 const blockKinds: BlockKind[] = [
-	'hero',
-	'text',
-	'button',
-	'features',
-	'image',
-	'quote',
 	'widget-button',
 	'widget-text-field',
 	'widget-textarea',
@@ -170,6 +211,17 @@ export const canvasLimits = {
 	minWidth: 320,
 	maxWidth: 3840,
 	minHeight: 300,
+	maxHeight: 5000
+};
+
+/**
+ * Allowed boundaries for a Composite Component's design size. Smaller than page canvases because
+ * a composite is a building block (e.g. a 200×60 call-to-action strip).
+ */
+export const compositeLimits = {
+	minWidth: 40,
+	maxWidth: 3840,
+	minHeight: 40,
 	maxHeight: 5000
 };
 
@@ -290,7 +342,9 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			block.id.length > 100 ||
 			ids.has(block.id) ||
 			typeof block.kind !== 'string' ||
-			(!blockKinds.includes(block.kind as BlockKind) && !isValidCustomKind(block.kind)) ||
+			(!blockKinds.includes(block.kind as BlockKind) &&
+				!isValidCustomKind(block.kind) &&
+				!isValidCompositeKind(block.kind)) ||
 			typeof block.title !== 'string' ||
 			block.title.length > 100 ||
 			typeof block.body !== 'string' ||
@@ -382,6 +436,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
  *
  * Ensures:
  * - 1 to 20 pages exist.
+ * - 0 to 50 composites (optional `composites` array) with unique PascalCase names that do not
+ *   shadow a widget component, and no composite refers to itself directly or indirectly.
  * - Slugs are non-empty, unique, and follow the kebab-case pattern `^[a-z0-9-]{1,40}$`.
  * - Viewport dimensions respect canvas limits.
  * - All nested blocks are valid.
@@ -439,30 +495,124 @@ export function parseEditorSite(value: unknown): EditorSite | null {
 		});
 	}
 
-	return { pages };
+	const composites = parseComposites((value as Record<string, unknown>).composites);
+	if (!composites) return null;
+
+	return { pages, composites };
+}
+
+/** Maximum number of composites per site. */
+const maxComposites = 50;
+
+/**
+ * Parses and validates the `composites` array of a site payload.
+ *
+ * @param value - Untrusted JSON; `undefined` is treated as "no composites".
+ * @returns Validated composites, or `null` when malformed, duplicated or cyclic.
+ */
+export function parseComposites(value: unknown): EditorComposite[] | null {
+	if (value === undefined) return [];
+	if (!Array.isArray(value) || value.length > maxComposites) return null;
+
+	const ids = new Set<string>();
+	const names = new Set<string>();
+	const reserved = new Set<string>([...Object.values(componentNames), 'ThemeScope']);
+	const composites: EditorComposite[] = [];
+
+	for (const item of value) {
+		if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
+		const composite = item as Record<string, unknown>;
+		const blocks = parseBuilderBlocks(composite.blocks);
+		if (
+			!blocks ||
+			typeof composite.id !== 'string' ||
+			composite.id.length === 0 ||
+			composite.id.length > 100 ||
+			ids.has(composite.id) ||
+			typeof composite.name !== 'string' ||
+			!compositeNamePattern.test(composite.name) ||
+			names.has(composite.name) ||
+			reserved.has(composite.name) ||
+			typeof composite.width !== 'number' ||
+			!Number.isFinite(composite.width) ||
+			composite.width < compositeLimits.minWidth ||
+			composite.width > compositeLimits.maxWidth ||
+			typeof composite.height !== 'number' ||
+			!Number.isFinite(composite.height) ||
+			composite.height < compositeLimits.minHeight ||
+			composite.height > compositeLimits.maxHeight
+		) {
+			return null;
+		}
+		ids.add(composite.id);
+		names.add(composite.name);
+		composites.push({
+			id: composite.id,
+			name: composite.name,
+			width: composite.width,
+			height: composite.height,
+			blocks
+		});
+	}
+
+	return findCompositeCycle(composites) ? null : composites;
+}
+
+/**
+ * Detects composites that (transitively) contain an instance of themselves, which would make
+ * rendering and export recurse forever.
+ *
+ * @param composites - All composites of a site.
+ * @returns The name of one composite on a cycle, or `undefined` when the graph is acyclic.
+ * @example
+ * findCompositeCycle([{ name: 'A', blocks: [{ kind: 'composite:A' }] }]); // 'A'
+ */
+export function findCompositeCycle(
+	composites: Pick<EditorComposite, 'name' | 'blocks'>[]
+): string | undefined {
+	const edges = new Map(
+		composites.map((composite) => [
+			composite.name,
+			composite.blocks.filter((b) => b.kind.startsWith('composite:')).map((b) => b.kind.slice(10))
+		])
+	);
+	const state = new Map<string, 'visiting' | 'done'>();
+	const visit = (name: string): string | undefined => {
+		if (state.get(name) === 'done') return undefined;
+		if (state.get(name) === 'visiting') return name;
+		state.set(name, 'visiting');
+		for (const next of edges.get(name) ?? []) {
+			if (edges.has(next)) {
+				const found = visit(next);
+				if (found) return found;
+			}
+		}
+		state.set(name, 'done');
+		return undefined;
+	};
+	for (const name of edges.keys()) {
+		const found = visit(name);
+		if (found) return found;
+	}
+	return undefined;
 }
 
 /**
  * Maps a block kind identifier to its corresponding native Svelte component PascalCase name.
  *
- * @param kind - Block kind identifier (e.g. 'hero', 'widget-button', 'custom:NewsletterSignup').
- * @returns The component name without file extension (e.g. 'Hero', 'WidgetButton', 'NewsletterSignup').
+ * @param kind - Block kind identifier (e.g. 'widget-button', 'composite:Hero', 'custom:NewsletterSignup').
+ * @returns The component name without file extension (e.g. 'WidgetButton', 'Hero', 'NewsletterSignup').
  */
 export function getComponentName(kind: BlockKind): string {
 	if (kind.startsWith('custom:')) return kind.slice(7);
+	if (kind.startsWith('composite:')) return kind.slice(10);
 	return (componentNames as Record<string, string>)[kind] || kind;
 }
 
 /**
- * Registry of PascalCase component file names for built-in sections and widgets.
+ * Registry of PascalCase component file names for built-in widgets.
  */
-export const componentNames: Record<SectionKind | WidgetKind, string> = {
-	hero: 'Hero',
-	text: 'TextSection',
-	button: 'ButtonSection',
-	features: 'Features',
-	image: 'ImageSection',
-	quote: 'Quote',
+export const componentNames: Record<WidgetKind, string> = {
 	'widget-button': 'WidgetButton',
 	'widget-text-field': 'WidgetTextField',
 	'widget-textarea': 'WidgetTextarea',

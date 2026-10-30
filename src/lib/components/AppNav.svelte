@@ -68,6 +68,7 @@
 	const currentPath = $derived(browser ? toPath(routePage.url) : routePage.url.pathname);
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onPages = $derived(splitPath(currentPath).pathname === '/');
+	const onComposites = $derived(splitPath(currentPath).pathname === '/composites');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
 	const onTheme = $derived(splitPath(currentPath).pathname === '/theme');
 	const onAdmin = $derived(splitPath(currentPath).pathname.startsWith('/admin'));
@@ -77,6 +78,7 @@
 	const role = $derived(routePage.data.user?.role ?? null);
 	const showPages = $derived(canAccess(role, '/'));
 	const showEditor = $derived(canAccess(role, '/editor'));
+	const showComposites = $derived(canAccess(role, '/composites'));
 	const showComponents = $derived(canAccess(role, componentEditorPath));
 	const showTheme = $derived(canAccess(role, '/theme'));
 	const showAdmin = $derived(canAccess(role, '/admin'));
@@ -188,6 +190,17 @@
 				</a>
 			</li>
 		{/if}
+		{#if showComposites}
+			<li>
+				<a
+					href={resolve('/composites')}
+					class:active={onComposites}
+					aria-current={onComposites ? 'page' : undefined}
+				>
+					Composites
+				</a>
+			</li>
+		{/if}
 		{#if showComponents}
 			<li>
 				<a
@@ -195,7 +208,7 @@
 					class:active={onComponents}
 					aria-current={onComponents ? 'page' : undefined}
 				>
-					Components
+					Code
 				</a>
 			</li>
 		{/if}

@@ -89,7 +89,7 @@ describe('navigation trail', () => {
 		expect(describePath('/editor').label).toBe('Editor');
 		expect(describePath('/about').label).toBe('About');
 		expect(describePath('/component-editor')).toEqual({
-			label: 'Component editor',
+			label: 'Code editor',
 			section: 'components'
 		});
 		expect(breadcrumbsFor('/', names)).toEqual([{ label: 'Pages', path: null }]);

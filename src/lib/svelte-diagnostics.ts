@@ -13,12 +13,12 @@
  * typing (debounced) and the server calls it again before writing a file, so the browser and the
  * API always agree on what "valid" means.
  *
- * Positions follow the editor conventions used by `svelte-sections.ts`: lines are 1-based,
+ * Positions follow the editor conventions used by `svelte-parts.ts`: lines are 1-based,
  * columns are 0-based and refer to the complete file text.
  */
 
 import { compile } from 'svelte/compiler';
-import type { SourceDiagnostic } from './svelte-sections.js';
+import type { SourceDiagnostic } from './svelte-parts.js';
 
 /** Result of {@link checkSvelteSource}. */
 export type CheckResult = {
@@ -62,7 +62,7 @@ function toDiagnostic(item: CompilerMessage, severity: 'error' | 'warning'): Sou
 /**
  * Checks a complete `.svelte` file for compile errors and warnings.
  *
- * @param source - Full file text (use `joinSvelteSource(sections).source`).
+ * @param source - Full file text (use `joinSvelteSource(parts).source`).
  * @param filename - Used by the compiler for messages and component naming. Defaults to
  *   `Component.svelte`.
  * @returns `ok` plus the list of diagnostics. Never throws.

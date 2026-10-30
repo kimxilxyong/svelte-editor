@@ -9,7 +9,7 @@
  * Interacts with:
  * - `editor.ts` – `WidgetKind` is the key type; the catalog must cover every kind (enforced by
  *   the type and by `widget-catalog.spec.ts`).
- * - `routes/editor/+page.svelte` – builds the palette, default block content and block creation.
+ * - `lib/components/SiteEditor.svelte` – builds the palette, default block content and block creation.
  */
 
 import type { BuilderBlock, WidgetKind } from './editor.js';

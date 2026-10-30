@@ -45,11 +45,11 @@ describe('parseSvelteComponent', () => {
 	});
 
 	it('parses built-in editor components', async () => {
-		const heroPath = path.resolve('src/lib/components/editor/Hero.svelte');
+		const heroPath = path.resolve('src/lib/components/editor/WidgetCard.svelte');
 		const heroSrc = await readFile(heroPath, 'utf8');
-		const meta = parseSvelteComponent(heroSrc, 'Hero.svelte');
+		const meta = parseSvelteComponent(heroSrc, 'WidgetCard.svelte');
 
-		expect(meta.name).toBe('Hero');
+		expect(meta.name).toBe('WidgetCard');
 		expect(meta.props.map((p) => p.name)).toContain('title');
 		expect(meta.props.map((p) => p.name)).toContain('body');
 	});

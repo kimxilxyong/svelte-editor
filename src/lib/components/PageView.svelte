@@ -2,7 +2,7 @@
 	/**
 	 * @component PageView
 	 *
-	 * Read-only rendering of a whole {@link EditorPage} using the real section/widget components,
+	 * Read-only rendering of a whole {@link EditorPage} using the real widget and composite components,
 	 * positioned exactly like on the editor canvas (`left`/`top`/`width`/`height` in px) and themed
 	 * with the site theme through {@link ThemeScope}.
 	 * It is what the home page shows for the selected page, so the overview always matches the
@@ -22,6 +22,8 @@
 	 * @prop {EditorPage} page - Page to render.
 	 * @prop {boolean} [fit=true] - Scale down to the container width.
 	 * @prop {boolean} [interactive=false] - Allow using widgets and links (Preview).
+	 * @prop {EditorComposite[]} [composites=[]] - Composite components that `composite:<Name>` blocks
+	 *   resolve to (provided to {@link BlockContent} through context).
 	 * @prop {SiteTheme} [theme] - Site theme to apply (defaults to the built-in default theme).
 	 * @prop {(event: MouseEvent, block: BuilderBlock) => void} [onlink] - Link widget click handler.
 	 *
@@ -32,21 +34,26 @@
 	import BlockContent from './BlockContent.svelte';
 	import ThemeScope from './editor/ThemeScope.svelte';
 	import { defaultSiteTheme, type SiteTheme } from '../theme.js';
-	import type { BuilderBlock, EditorPage } from '../editor.js';
+	import { provideComposites } from '../composite-context.js';
+	import type { BuilderBlock, EditorComposite, EditorPage } from '../editor.js';
 
 	let {
 		page,
 		fit = true,
 		interactive = false,
 		theme = defaultSiteTheme,
+		composites = [],
 		onlink
 	}: {
 		page: EditorPage;
+		composites?: EditorComposite[];
 		fit?: boolean;
 		interactive?: boolean;
 		theme?: SiteTheme;
 		onlink?: (event: MouseEvent, block: BuilderBlock) => void;
 	} = $props();
+
+	provideComposites(() => composites);
 
 	// eslint-disable-next-line svelte/prefer-writable-derived
 	let blocks = $state<BuilderBlock[]>([]);
@@ -131,8 +138,9 @@
 		box-shadow: 0 5px 18px rgb(34 34 56 / 0.12);
 	}
 
-	/* Widgets sit directly on the themed page; only sections get a card look. */
-	.block[class*='widget-'] {
+	/* Widgets and composites sit directly on the themed page. */
+	.block[class*='widget-'],
+	.block[class*='composite'] {
 		border-radius: 0;
 		background: transparent;
 		box-shadow: none;

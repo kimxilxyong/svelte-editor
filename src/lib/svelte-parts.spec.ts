@@ -47,9 +47,7 @@ describe('splitSvelteSource', () => {
 	});
 
 	it('keeps nested scripts in the markup and handles files without blocks', () => {
-		const { parts } = splitSvelteSource(
-			'<svelte:head><script>1</script></svelte:head>\n<p>a</p>'
-		);
+		const { parts } = splitSvelteSource('<svelte:head><script>1</script></svelte:head>\n<p>a</p>');
 		expect(parts.script).toBe('');
 		expect(parts.markup).toContain('<svelte:head>');
 	});
@@ -94,7 +92,7 @@ describe('diagnostic mapping', () => {
 		expect(source).toBe(TS_SOURCE);
 		// Line 2 col 1 is the first char after the tab -> script line 1 col 0.
 		expect(mapSourcePosition(map, 2, 1)).toEqual({ part: 'script', line: 1, column: 0 });
-		expect(mapSourcePosition(map, 5, 4)?.section).toBe('markup');
+		expect(mapSourcePosition(map, 5, 4)?.part).toBe('markup');
 		expect(mapSourcePosition(map, 9, 2)).toEqual({ part: 'style', line: 2, column: 1 });
 	});
 

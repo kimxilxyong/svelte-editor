@@ -19,6 +19,7 @@ describe('requiredRoleFor', () => {
 	it('applies the longest matching prefix and method split', () => {
 		expect(requiredRoleFor('/admin/users', 'GET')).toBe('admin');
 		expect(requiredRoleFor('/editor/api', 'GET')).toBe('guest');
+		expect(requiredRoleFor('/composites', 'GET')).toBe('user');
 		expect(requiredRoleFor('/editor/api', 'POST')).toBe('user');
 		expect(requiredRoleFor('/editor/api/project', 'GET')).toBe('poweruser');
 		expect(requiredRoleFor('/login', 'GET')).toBe('public');

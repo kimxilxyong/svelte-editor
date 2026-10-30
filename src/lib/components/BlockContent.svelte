@@ -2,8 +2,10 @@
 	/**
 	 * @component BlockContent
 	 *
-	 * Renders the visible content of one {@link BuilderBlock}: the matching section/widget
-	 * component for its `kind`, or a placeholder card for `custom:<Name>` imported components.
+	 * Renders the visible content of one {@link BuilderBlock}: the matching widget component for
+	 * its `kind`, the child blocks of a `composite:<Name>` composite component (resolved through
+	 * {@link useComposites} and scaled to the block's size), or a placeholder card for
+	 * `custom:<Name>` imported components.
 	 * It is the single place that maps block kinds to components, shared by the editor canvas
 	 * (editable, with selection overlays added by the host) and by {@link PageView} (the
 	 * read-only page rendering used for the home overview and previews).
@@ -12,18 +14,14 @@
 	 *   `value`, `checked` and `level` back to it.
 	 * @prop {() => void} [onchange] - Called when the user edits a widget value (the editor uses it
 	 *   to mark the page unsaved).
+	 * @prop {number} [depth=0] - Composite nesting level; stops runaway recursion at
+	 *   {@link maxCompositeDepth}.
 	 * @prop {(event: MouseEvent, block: BuilderBlock) => void} [onlink] - Called when a link widget is
 	 *   clicked, so the host can decide between in-app navigation and a blocked click.
 	 *
 	 * @example
 	 * <BlockContent bind:block onchange={markUnsaved} onlink={handleLinkClick} />
 	 */
-	import Hero from './editor/Hero.svelte';
-	import TextSection from './editor/TextSection.svelte';
-	import ButtonSection from './editor/ButtonSection.svelte';
-	import Features from './editor/Features.svelte';
-	import ImageSection from './editor/ImageSection.svelte';
-	import Quote from './editor/Quote.svelte';
 	import WidgetButton from './editor/WidgetButton.svelte';
 	import WidgetTextField from './editor/WidgetTextField.svelte';
 	import WidgetTextarea from './editor/WidgetTextarea.svelte';
@@ -38,22 +36,31 @@
 	import WidgetAvatar from './editor/WidgetAvatar.svelte';
 	import WidgetCard from './editor/WidgetCard.svelte';
 	import WidgetLink from './editor/WidgetLink.svelte';
-	import { componentNames, type BuilderBlock } from '../editor.js';
+	import BlockContent from './BlockContent.svelte';
+	import { componentNames, getComponentName, type BuilderBlock } from '../editor.js';
+	import { maxCompositeDepth, useComposites } from '../composite-context.js';
 	import { widgetRuntime } from '../widget-runtime.svelte.js';
 
 	let {
 		block = $bindable(),
+		depth = 0,
 		onchange,
 		onlink
 	}: {
 		block: BuilderBlock;
+		depth?: number;
 		onchange?: () => void;
 		onlink?: (event: MouseEvent, block: BuilderBlock) => void;
 	} = $props();
 
+	const lookupComposite = useComposites();
+	const composite = $derived(
+		block.kind.startsWith('composite:') ? lookupComposite(block.kind.slice(10)) : undefined
+	);
+
 	/** User-edited version of this block's built-in component (see widget-runtime), if any. */
 	const Override = $derived(
-		block.kind.startsWith('custom:')
+		block.kind.startsWith('custom:') || block.kind.startsWith('composite:')
 			? undefined
 			: widgetRuntime.components[componentNames[block.kind as keyof typeof componentNames]]
 	);
@@ -76,18 +83,6 @@
 		{onchange}
 		onnavigate={(event: MouseEvent) => onlink?.(event, block)}
 	/>
-{:else if block.kind === 'hero'}
-	<Hero title={block.title} body={block.body} action={block.action} theme={block.theme} />
-{:else if block.kind === 'text'}
-	<TextSection title={block.title} body={block.body} theme={block.theme} />
-{:else if block.kind === 'button'}
-	<ButtonSection title={block.title} body={block.body} action={block.action} theme={block.theme} />
-{:else if block.kind === 'features'}
-	<Features title={block.title} body={block.body} theme={block.theme} />
-{:else if block.kind === 'image'}
-	<ImageSection title={block.title} body={block.body} theme={block.theme} />
-{:else if block.kind === 'quote'}
-	<Quote title={block.title} body={block.body} action={block.action} theme={block.theme} />
 {:else if block.kind === 'widget-button'}
 	<WidgetButton action={block.action} body={block.body} {onchange} />
 {:else if block.kind === 'widget-text-field'}
@@ -167,10 +162,24 @@
 		newTab={block.newTab}
 		onnavigate={(event) => onlink?.(event, block)}
 	/>
-{:else if block.kind.startsWith('custom:')}
+{:else if composite && depth < maxCompositeDepth}
+	<div class="composite" data-composite={composite.name}>
+		{#each composite.blocks as child (child.id)}
+			<div
+				class="composite-child"
+				style:left="{(child.x / composite.width) * 100}%"
+				style:top="{(child.y / composite.height) * 100}%"
+				style:width="{(child.width / composite.width) * 100}%"
+				style:height="{(child.height / composite.height) * 100}%"
+			>
+				<BlockContent block={child} depth={depth + 1} {onchange} {onlink} />
+			</div>
+		{/each}
+	</div>
+{:else if block.kind.startsWith('custom:') || block.kind.startsWith('composite:')}
 	<div class="custom-block-preview">
 		<div class="custom-badge-row">
-			<span class="custom-pill">✳ {block.kind.slice(7)}</span>
+			<span class="custom-pill">✳ {getComponentName(block.kind)}</span>
 		</div>
 		<h4>{block.title || block.kind.slice(7)}</h4>
 		{#if block.body}<p>{block.body}</p>{/if}
@@ -184,6 +193,17 @@
 	</div>{/if}
 
 <style>
+	.composite {
+		position: relative;
+		width: 100%;
+		height: 100%;
+	}
+
+	.composite-child {
+		position: absolute;
+		box-sizing: border-box;
+	}
+
 	.custom-block-preview {
 		display: flex;
 		flex-direction: column;

@@ -29,9 +29,9 @@ Whenever creating, modifying, or refactoring code in this repository, always add
 
 ## Component Editor Architecture Map
 
-The `/component-editor` route edits native `.svelte` files section by section. When changing it, keep these module responsibilities and documentation expectations:
+The `/component-editor` route edits native `.svelte` files part by part. When changing it, keep these module responsibilities and documentation expectations:
 
-- `src/lib/svelte-sections.ts` – pure split/join of a `.svelte` file into Script / Module script / Markup / Style, with indentation preservation and a line map (`SectionMap`) that translates whole-file compiler positions into section editor positions (`distributeDiagnostics`). Lines are 1-based, columns 0-based.
+- `src/lib/svelte-parts.ts` – pure split/join of a `.svelte` file into Script / Module script / Markup / Style, with indentation preservation and a line map (`PartMap`) that translates whole-file compiler positions into part editor positions (`distributeDiagnostics`). Lines are 1-based, columns 0-based.
 - `src/lib/svelte-diagnostics.ts` – `checkSvelteSource` wraps `svelte/compiler` (`generate: false`); isomorphic, used live in the browser and again on the server before writing.
 - `src/lib/server/component-files.ts` – the only place that touches the file system for this feature (path validation, symlink refusal, size limits, overwrite protection, server-side compile check). Never bypass it.
 - `src/routes/component-editor/api/+server.ts` – thin JSON action endpoint (`list`/`read`/`save`/`create`).
@@ -39,6 +39,16 @@ The `/component-editor` route edits native `.svelte` files section by section. W
 - `src/routes/component-editor/+page.svelte` – composes the above; documents the data flow in its `@component` block.
 
 Document any change to these modules in the matching `@fileoverview` / `@component` block, and keep the position conventions (1-based lines, 0-based columns) explicit in new types.
+
+## Composite Components Architecture Map
+
+A **Composite Component** is a named, reusable group of widgets edited on a visual canvas (`/composites`) exactly like a page. Terminology: "parts" are the Script/Markup/Style pieces of a `.svelte` file in the code editor; "sections" no longer exist as a concept.
+
+- `src/lib/editor.ts` – `EditorComposite`, `EditorSite.composites`, `composite:<Name>` block kinds, `parseComposites`, `findCompositeCycle`, `compositeLimits`. Imported project components keep the `custom:` kind.
+- `src/lib/composite-seeds.ts` / `src/lib/site-migration.ts` – starter composites and the one-time rewrite of legacy section kinds (`hero`, `quote`, …) when a site is read (`getSavedSite`).
+- `src/lib/composite-context.ts` + `BlockContent.svelte` – render context and recursive rendering (children positioned in % of the composite size, depth-limited).
+- `src/lib/components/SiteEditor.svelte` – the shared canvas editor; `mode="pages"` (`/editor`) or `mode="composites"` (`/composites`). The other document kind is stashed and merged on save.
+- `src/lib/svelte-pages.ts` / `src/lib/server/project.ts` – generate/parse pages and composites (`src/lib/components/editor/<Name>.svelte`, marked with `data-editor-composite`).
 
 ## Authentication, Admin & Database Architecture Map
 

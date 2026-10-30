@@ -64,6 +64,9 @@ export const pagesPath = '/';
 /** The base path of the single-page editor. */
 export const editorPath = '/editor';
 
+/** Path of the visual Composite Component editor. */
+export const compositesPath = '/composites';
+
 /** Path of the Svelte source (component) editor. */
 export const componentEditorPath = '/component-editor';
 
@@ -200,7 +203,8 @@ export function describePath(
 		const name = pageId ? pageNames[pageId] : undefined;
 		return { label: name ? `Editor · ${name}` : 'Editor', section: 'editor' };
 	}
-	if (pathname === componentEditorPath) return { label: 'Component editor', section: 'components' };
+	if (pathname === compositesPath) return { label: 'Composites', section: 'editor' };
+	if (pathname === componentEditorPath) return { label: 'Code editor', section: 'components' };
 	// A trailing slash must not change the label (`/admin/` is the admin page too).
 	const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 	const known = authPathLabels[normalized];

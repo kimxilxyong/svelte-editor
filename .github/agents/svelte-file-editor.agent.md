@@ -69,9 +69,9 @@ Always add extensive human- and machine-readable documentation to source files a
 
 ## Component Editor Architecture Map
 
-The `/component-editor` route edits native `.svelte` files section by section. When changing it, keep these module responsibilities and documentation expectations:
+The `/component-editor` route edits native `.svelte` files part by part. When changing it, keep these module responsibilities and documentation expectations:
 
-- `src/lib/svelte-sections.ts` – pure split/join of a `.svelte` file into Script / Module script / Markup / Style, with indentation preservation and a line map (`SectionMap`) that translates whole-file compiler positions into section editor positions (`distributeDiagnostics`). Lines are 1-based, columns 0-based.
+- `src/lib/svelte-parts.ts` – pure split/join of a `.svelte` file into Script / Module script / Markup / Style, with indentation preservation and a line map (`PartMap`) that translates whole-file compiler positions into section editor positions (`distributeDiagnostics`). Lines are 1-based, columns 0-based.
 - `src/lib/svelte-diagnostics.ts` – `checkSvelteSource` wraps `svelte/compiler` (`generate: false`); isomorphic, used live in the browser and again on the server before writing.
 - `src/lib/server/component-files.ts` – the only place that touches the file system for this feature (path validation, symlink refusal, size limits, overwrite protection, server-side compile check). Never bypass it.
 - `src/routes/component-editor/api/+server.ts` – thin JSON action endpoint (`list`/`read`/`save`/`create`).

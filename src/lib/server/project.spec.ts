@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { compile } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
-import { componentNames, type BlockKind, type EditorSite } from '../editor.js';
+import { compositeKind, componentNames, type BlockKind, type EditorSite } from '../editor.js';
+import { seedComposites } from '../composite-seeds.js';
 import {
 	exportSite,
 	importSite,
@@ -53,7 +54,8 @@ const site: EditorSite = {
 				newTab: false
 			}))
 		}
-	]
+	],
+	composites: []
 };
 
 describe('project export/import', () => {
@@ -80,6 +82,31 @@ describe('project export/import', () => {
 		expect(imported.pages[0].blocks).toHaveLength(Object.keys(componentNames).length);
 		// All built-in components are scanned in src/lib/components/editor
 		expect(imported.components.length).toBeGreaterThanOrEqual(Object.keys(componentNames).length);
+	});
+
+	it('round-trips composite components and the pages that use them', async () => {
+		const root = await makeProject();
+		const [hero] = seedComposites();
+		const withComposite: EditorSite = {
+			composites: [hero],
+			pages: [
+				{
+					...site.pages[0],
+					blocks: [{ ...site.pages[0].blocks[0], id: 'c1', kind: compositeKind(hero.name) }]
+				}
+			]
+		};
+		const result = await exportSite(root, withComposite);
+		const file = path.join('src', 'lib', 'components', 'editor', `${hero.name}.svelte`);
+		expect(result.written).toContain(file);
+		const source = await readFile(path.join(root, file), 'utf8');
+		expect(() => compile(source, { filename: file, runes: true })).not.toThrow();
+
+		const imported = await importSite(root);
+		expect(imported.composites.map((c) => c.name)).toEqual([hero.name]);
+		expect(imported.pages[0].blocks.map((b) => b.kind)).toEqual([compositeKind(hero.name)]);
+		// Generated composites are not offered as imported native components.
+		expect(imported.components.map((c) => c.name)).not.toContain(hero.name);
 	});
 
 	it('imports custom native Svelte components added to the project', async () => {

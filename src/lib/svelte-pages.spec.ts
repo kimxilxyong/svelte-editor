@@ -35,7 +35,7 @@ describe('svelte page export/import', () => {
 			height: 700,
 			blocks: kinds.map((kind, index) =>
 				block(kind, index, {
-					theme: kind === 'hero' ? 'dark' : 'light',
+					theme: kind === 'widget-card' ? 'dark' : 'light',
 					checked: kind === 'widget-switch',
 					level: kind === 'widget-slider' ? 33 : 60,
 					value: kind === 'widget-text-field' ? 'hello' : '',
@@ -57,8 +57,7 @@ describe('svelte page export/import', () => {
 			parsed!.blocks.map((item) => [item.kind, item.x, item.y, item.width, item.height])
 		).toEqual(page.blocks.map((item) => [item.kind, item.x, item.y, item.width, item.height]));
 		const byKind = Object.fromEntries(parsed!.blocks.map((item) => [item.kind, item]));
-		expect(byKind.hero.theme).toBe('dark');
-		expect(byKind.hero.action).toBe('Go');
+		expect(byKind['widget-card'].action).toBe('Go');
 		expect(byKind['widget-switch'].checked).toBe(true);
 		expect(byKind['widget-slider'].level).toBe(33);
 		expect(byKind['widget-text-field'].value).toBe('hello');
@@ -78,7 +77,7 @@ describe('svelte page export/import', () => {
 			slug: 'nasty',
 			width: 800,
 			height: 600,
-			blocks: [block('quote', 0, { title: nasty, body: '{@html alert(1)}' })]
+			blocks: [block('widget-card', 0, { title: nasty, body: '{@html alert(1)}' })]
 		};
 		const source = renderPageSource(page);
 		expect(source).not.toContain('{@html');

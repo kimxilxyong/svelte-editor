@@ -3,10 +3,12 @@
  *
  * The editor continues to store its serialized site in `editor_page`; backend selection, schema
  * initialization and connection ownership belong to `database/manager.ts`. Older single-page saves
- * under `id = 'home'` remain readable for backwards compatibility.
+ * under `id = 'home'` remain readable for backwards compatibility, and sites saved before composite
+ * components existed are migrated (and re-saved) on first read by `site-migration.ts`.
  */
 
-import { parseBuilderBlocks, parseEditorSite, type EditorSite } from '../../editor.js';
+import { parseEditorSite, type EditorSite } from '../../editor.js';
+import { migrateSiteData } from '../../site-migration.js';
 import { ensureSchema } from '../database/schema.js';
 import { getDatabase } from '../database/manager.js';
 import type { SqlRow } from '../database/types.js';
@@ -61,17 +63,19 @@ export async function getSavedSite(): Promise<EditorSite | null> {
 		throw new Error('The saved editor page does not contain valid data.');
 	}
 
-	const parsed: unknown = JSON.parse(saved.blocks);
+	let parsed: unknown = JSON.parse(saved.blocks);
 	if (Array.isArray(parsed)) {
-		const blocks = parseBuilderBlocks(parsed);
-		if (!blocks) throw new Error('The saved editor page contains invalid block data.');
-		return {
-			pages: [{ id: 'home', name: 'Home', slug: 'home', width: 1920, height: 1080, blocks }]
+		// Legacy flat block list: wrap it into a single Home page first, then migrate like any site.
+		parsed = {
+			pages: [{ id: 'home', name: 'Home', slug: 'home', width: 1920, height: 1080, blocks: parsed }]
 		};
 	}
 
-	const site = parseEditorSite(parsed);
+	// Pre-composite sites (fixed section kinds, no `composites`) are rewritten once and persisted.
+	const migration = migrateSiteData(parsed);
+	const site = parseEditorSite(migration.data);
 	if (!site) throw new Error('The saved editor site contains invalid data.');
+	if (migration.changed) await saveSite(site);
 	return site;
 }
 

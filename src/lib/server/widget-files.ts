@@ -1,5 +1,5 @@
 /**
- * @fileoverview Server-side storage for user-edited built-in widgets and sections.
+ * @fileoverview Server-side storage for user-edited built-in widgets.
  *
  * The built-in components in `src/lib/components/editor/*.svelte` are the defaults. A power user can
  * edit any of them on the Components page; the edited source is stored as

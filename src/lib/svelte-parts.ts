@@ -297,10 +297,10 @@ export function splitSvelteSource(source: string): SplitResult {
 	for (const block of blocks) {
 		if (block.start < cursor) continue; // overlapping match, ignore
 		const slice = text.slice(block.start, block.end);
-		const parts = blockPattern.exec(slice);
-		if (!parts) continue;
-		const attrs = parts[2].trim();
-		const { text: body, indent } = dedent(parts[3]);
+		const match = blockPattern.exec(slice);
+		if (!match) continue;
+		const attrs = match[2].trim();
+		const { text: body, indent } = dedent(match[3]);
 
 		let consumed = true;
 		if (block.kind === 'style') {
@@ -352,12 +352,12 @@ export function splitSvelteSource(source: string): SplitResult {
 
 /** Builds an opening tag from its name, language and remaining attributes. */
 function openTag(name: 'script' | 'style', lang: ScriptLang | null, attrs: string): string {
-	const parts: string[] = [];
-	if (attrs.trim()) parts.push(attrs.trim());
-	if (lang === 'ts') parts.push('lang="ts"');
+	const tokens: string[] = [];
+	if (attrs.trim()) tokens.push(attrs.trim());
+	if (lang === 'ts') tokens.push('lang="ts"');
 	// `lang` goes first for scripts, matching the convention `<script lang="ts" generics="T">`.
-	if (lang === 'ts' && parts.length > 1) parts.unshift(parts.pop()!);
-	return `<${name}${parts.length ? ' ' + parts.join(' ') : ''}>`;
+	if (lang === 'ts' && tokens.length > 1) tokens.unshift(tokens.pop()!);
+	return `<${name}${tokens.length ? ' ' + tokens.join(' ') : ''}>`;
 }
 
 /**
@@ -422,11 +422,11 @@ export function joinSvelteSource(parts: SvelteParts): JoinResult {
 		if (chunk.tag) lines.push(chunk.tag);
 		const bodyLines = chunk.body === '' ? [''] : chunk.body.split('\n');
 		map.push({
-			part: chunk.section,
+			part: chunk.part,
 			tagLine,
 			startLine: lines.length + 1,
 			lineCount: bodyLines.length,
-			indent: indentOf(chunk.section)
+			indent: indentOf(chunk.part)
 		});
 		lines.push(...bodyLines);
 		if (chunk.closing) lines.push(chunk.closing);
@@ -455,7 +455,7 @@ export function mapSourcePosition(
 		const last = entry.startLine + entry.lineCount - 1;
 		if (line >= first && line <= last) {
 			return {
-				part: entry.section,
+				part: entry.part,
 				line: line - first + 1,
 				// Content lines were indented on join; the editor shows them de-indented.
 				column: Math.max(0, column - entry.indent.length)
@@ -477,8 +477,8 @@ export function mapSourcePosition(
 	}
 	if (!best) return null;
 	return line < best.startLine
-		? { part: best.section, line: 1, column: 0 }
-		: { part: best.section, line: best.lineCount, column: 0 };
+		? { part: best.part, line: 1, column: 0 }
+		: { part: best.part, line: best.lineCount, column: 0 };
 }
 
 /** A diagnostic whose position refers to the whole file (as reported by the compiler). */
@@ -532,15 +532,15 @@ export function distributeDiagnostics(
 			item.endLine !== undefined && item.endColumn !== undefined
 				? mapSourcePosition(map, item.endLine, item.endColumn)
 				: null;
-		const sameSection = end && end.section === start.section;
-		grouped[start.section].push({
+		const samePart = end && end.part === start.part;
+		grouped[start.part].push({
 			severity: item.severity,
 			message: item.message,
 			code: item.code,
 			line: start.line,
 			column: start.column,
-			endLine: sameSection ? end.line : undefined,
-			endColumn: sameSection ? end.column : undefined
+			endLine: samePart ? end.line : undefined,
+			endColumn: samePart ? end.column : undefined
 		});
 	}
 	return grouped;

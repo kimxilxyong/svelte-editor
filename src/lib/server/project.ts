@@ -13,8 +13,8 @@
  *    - Protects user-crafted code: files without the `<!-- @svelte-editor` header
  *      are never overwritten and are instead reported as skipped.
  * 3. Complete Component Export:
- *    - Writes all built-in native Svelte components (`Hero.svelte`, `WidgetSlider.svelte`, etc.)
- *      into `src/lib/components/editor/` in the target project.
+ *    - Writes all built-in native widget components (`WidgetSlider.svelte`, etc.) and every
+ *      composite component (`Hero.svelte`, …) into `src/lib/components/editor/`.
  *    - Writes route pages into `src/routes/<slug>/+page.svelte`.
  * 4. Two-Way Scanning & Component Import:
  *    - Recursively scans `src/lib/components/` in the target project for any `.svelte` files.
@@ -28,8 +28,20 @@ import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/pr
 import path from 'node:path';
 import { defaultSiteTheme, normalizeSiteTheme, type SiteTheme } from '../theme.js';
 import { effectiveWidgetSource } from './widget-files.js';
-import { componentNames, type EditorPage, type EditorSite } from '../editor.js';
-import { generatedMarker, parsePageSource, renderPageSource } from '../svelte-pages.js';
+import {
+	componentNames,
+	compositeNamePattern,
+	type EditorComposite,
+	type EditorPage,
+	type EditorSite
+} from '../editor.js';
+import {
+	generatedMarker,
+	parseCompositeSource,
+	parsePageSource,
+	renderCompositeSource,
+	renderPageSource
+} from '../svelte-pages.js';
 import { parseSvelteComponent, type ParsedComponentMetadata } from '../svelte-component-parser.js';
 
 /**
@@ -78,6 +90,8 @@ export type ExportResult = {
 export type ImportResult = {
 	/** Pages successfully reconstructed from project route files. */
 	pages: EditorPage[];
+	/** Composite components reconstructed from generated files in `src/lib/components/editor/`. */
+	composites: EditorComposite[];
 	/** Native Svelte components discovered and parsed in src/lib/components/. */
 	components: ParsedComponentMetadata[];
 	/** Files that failed validation or could not be parsed. */
@@ -227,6 +241,19 @@ export async function exportSite(
 		}
 	}
 
+	// Composite components are generated files like pages: hand-written files are never replaced.
+	for (const composite of site.composites) {
+		if (!compositeNamePattern.test(composite.name)) {
+			throw new ProjectError(`Invalid composite name "${composite.name}".`);
+		}
+		await writeGenerated(
+			root,
+			path.join(componentDir, `${composite.name}.svelte`),
+			renderCompositeSource(composite),
+			result
+		);
+	}
+
 	const scope = componentSources['../components/editor/ThemeScope.svelte'];
 	if (scope !== undefined) {
 		await writeGenerated(
@@ -288,6 +315,8 @@ async function scanComponents(
 		} else if (entry.isFile() && entry.name.endsWith('.svelte')) {
 			try {
 				const src = await readFile(full, 'utf8');
+				// Generated composites are imported as composites, not as opaque custom components.
+				if (src.includes('data-editor-composite=')) continue;
 				const meta = parseSvelteComponent(src, entry.name);
 				found.push(meta);
 			} catch {
@@ -314,7 +343,33 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
 	const componentsDir = path.join(root, 'src', 'lib', 'components');
 
 	const components = await scanComponents(componentsDir, root);
-	const result: ImportResult = { pages: [], components, skipped: [] };
+	const result: ImportResult = { pages: [], composites: [], components, skipped: [] };
+
+	// Composites first: pages and other composites need their names to recognise instances.
+	const compositeFiles: { file: string; source: string }[] = [];
+	const editorDir = path.join(componentsDir, 'editor');
+	for (const entry of (await readdir(editorDir, { withFileTypes: true }).catch(() => [])).sort(
+		(a, b) => a.name.localeCompare(b.name)
+	)) {
+		if (!entry.isFile() || !entry.name.endsWith('.svelte')) continue;
+		const file = path.join(editorDir, entry.name);
+		const source = await readFile(file, 'utf8');
+		if (source.includes('data-editor-composite=')) compositeFiles.push({ file, source });
+	}
+	const compositeNames = new Set(
+		compositeFiles
+			.map(({ source }) => /data-editor-composite="([A-Za-z0-9]+)"/.exec(source)?.[1])
+			.filter((name): name is string => name !== undefined)
+	);
+	for (const { file, source } of compositeFiles) {
+		const composite = parseCompositeSource(source, compositeNames);
+		if (composite && result.composites.length < 50) result.composites.push(composite);
+		else
+			result.skipped.push({
+				file: path.relative(root, file),
+				reason: 'could not be read as a composite component'
+			});
+	}
 
 	for (const entry of (await readdir(routes, { withFileTypes: true })).sort((a, b) =>
 		a.name.localeCompare(b.name)
@@ -327,7 +382,7 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
 		const source = await readFile(file, 'utf8');
 		if (!source.includes('data-editor-page')) continue;
 
-		const page = parsePageSource(source, entry.name);
+		const page = parsePageSource(source, entry.name, compositeNames);
 		if (page) result.pages.push(page);
 		else
 			result.skipped.push({

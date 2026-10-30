@@ -3,12 +3,18 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { requiredRoleFor } from './roles.js';
 import { canAccess } from './access.js';
 
 describe('canAccess', () => {
 	it('allows public paths for everybody', () => {
 		expect(canAccess(null, '/about')).toBe(true);
 		expect(canAccess(undefined, '/login')).toBe(true);
+	});
+
+	it('lets guests read the theme page but only power users save it', () => {
+		expect(canAccess('guest', '/theme')).toBe(true);
+		expect(requiredRoleFor('/theme', 'POST')).toBe('poweruser');
 	});
 
 	it('requires a sign-in for everything else', () => {

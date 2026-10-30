@@ -69,6 +69,7 @@
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onPages = $derived(splitPath(currentPath).pathname === '/');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
+	const onTheme = $derived(splitPath(currentPath).pathname === '/theme');
 	const onAdmin = $derived(splitPath(currentPath).pathname.startsWith('/admin'));
 	const onAbout = $derived(splitPath(currentPath).pathname === '/about');
 
@@ -77,6 +78,7 @@
 	const showPages = $derived(canAccess(role, '/'));
 	const showEditor = $derived(canAccess(role, '/editor'));
 	const showComponents = $derived(canAccess(role, componentEditorPath));
+	const showTheme = $derived(canAccess(role, '/theme'));
 	const showAdmin = $derived(canAccess(role, '/admin'));
 
 	/** Page the "Editor" tab opens: the active one, else the last edited one, else the first. */
@@ -194,6 +196,17 @@
 					aria-current={onComponents ? 'page' : undefined}
 				>
 					Components
+				</a>
+			</li>
+		{/if}
+		{#if showTheme}
+			<li>
+				<a
+					href={resolve('/theme')}
+					class:active={onTheme}
+					aria-current={onTheme ? 'page' : undefined}
+				>
+					Theme
 				</a>
 			</li>
 		{/if}

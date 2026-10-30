@@ -9,14 +9,16 @@
 	 *    - Pure drag-and-drop placement with canvas-relative percentage coordinates.
 	 * 2. Canvas Stage:
 	 *    - Canvas size picker with common resolutions (default Full HD 1920×1080).
-	 *    - Direct pointer interaction for moving and resizing blocks.
+	 *    - Direct pointer interaction: a selected block shows a border frame with 8 handles
+	 *      (corners + edges) to resize; dragging inside the block moves it. Both snap to an
+	 *      8px grid (hold Alt to bypass). Keyboard: arrows move, Alt+arrows resize (Shift = 10px).
 	 *    - Automatic vertical expansion accommodating block boundaries.
 	 *    - Multi-page switching and route jump support in Preview mode.
 	 * 3. History & State Management:
 	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
 	 *    - Duplicate (Ctrl+D) and Delete (Delete/Backspace) keyboard commands.
 	 * 4. Inspector:
-	 *    - Geometry controls (X%, Y px, Width%, Height px).
+	 *    - Geometry controls (X, Y, Width, Height — all px).
 	 *    - Layer ordering: To Front, Forward, Backward, To Back (z-order array management).
 	 *    - Dynamic prop editor for custom imported components and specialized widget controls.
 	 * 5. Database Integration:
@@ -29,9 +31,11 @@
 	import { resolve } from '$app/paths';
 	import { untrack } from 'svelte';
 	import BlockContent from '../../lib/components/BlockContent.svelte';
+	import ThemeScope from '../../lib/components/editor/ThemeScope.svelte';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
 	import { useNavContext } from '../../lib/navigation.svelte.js';
 	import {
+		blockLimits,
 		defaultCanvasSize,
 		isValidLinkHref,
 		type BuilderBlock,
@@ -41,7 +45,15 @@
 		type SectionKind,
 		type WidgetKind
 	} from '../../lib/editor.js';
+	import {
+		filterWidgets,
+		widgetCatalog,
+		widgetCategories,
+		type WidgetCategory
+	} from '../../lib/widget-catalog.js';
 
+	/** Compass direction of the selection-frame handle being dragged (corners and edges). */
+	type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 	type DragPayload = { source: 'palette'; kind: BlockKind };
 	type EditorApiResponse = {
 		created?: boolean;
@@ -59,24 +71,31 @@
 		image: { label: 'Image section', detail: 'A visual moment for your story', mark: '▧' },
 		quote: { label: 'Testimonial', detail: 'Let a happy customer speak', mark: '“' }
 	};
-	const widgetInfo: Record<WidgetKind, { label: string; detail: string; mark: string }> = {
-		'widget-button': { label: 'Button', detail: 'A clear action for visitors', mark: '↗' },
-		'widget-text-field': { label: 'Text field', detail: 'A single-line text input', mark: 'T' },
-		'widget-textarea': { label: 'Textarea', detail: 'A multi-line text input', mark: '≡' },
-		'widget-checkbox': { label: 'Checkbox', detail: 'Choose an independent option', mark: '☑' },
-		'widget-radio': { label: 'Radio button', detail: 'Choose one option in a group', mark: '◉' },
-		'widget-switch': { label: 'Switch', detail: 'Turn a setting on or off', mark: '◉' },
-		'widget-select': { label: 'Select menu', detail: 'Pick from a list of options', mark: '▾' },
-		'widget-slider': { label: 'Slider', detail: 'Choose a value in a range', mark: '━' },
-		'widget-badge': { label: 'Badge', detail: 'A compact status or category', mark: '●' },
-		'widget-alert': { label: 'Alert', detail: 'A short message with context', mark: '!' },
-		'widget-progress': { label: 'Progress bar', detail: 'Show completion at a glance', mark: '▰' },
-		'widget-avatar': { label: 'Avatar', detail: 'Represent a person or account', mark: '◉' },
-		'widget-card': { label: 'Card', detail: 'Group related content together', mark: '▣' },
-		'widget-link': { label: 'Link', detail: 'Go to a page or website', mark: '↪' }
-	};
+	// Flowbite widget palette data (label, category, defaults) lives in the shared catalog.
+	const widgetInfo: Record<WidgetKind, { label: string; detail: string; mark: string }> =
+		widgetCatalog;
 	const sectionKinds = Object.keys(sectionInfo) as SectionKind[];
 	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
+	/** Widgets whose action field is the label of a button. */
+	const actionWidgetKinds: BlockKind[] = [];
+	/** One-line format hint shown under the "Entries" editor of list-like widgets. */
+	const itemsHelp: Record<string, string> = { 'widget-select': 'One option per line.' };
+	let widgetQuery = $state('');
+	let widgetCategory = $state<'All' | WidgetCategory>('All');
+	/** Widgets matching the search box and category chip, grouped for display. */
+	const widgetGroups = $derived(
+		widgetCategories
+			.filter((category) => widgetCategory === 'All' || widgetCategory === category)
+			.map((category) => ({
+				category,
+				kinds: filterWidgets(
+					widgetKinds.filter((kind) => widgetCatalog[kind].category === category),
+					widgetQuery
+				)
+			}))
+			.filter((group) => group.kinds.length > 0)
+	);
+	const visibleWidgetCount = $derived(widgetGroups.reduce((n, g) => n + g.kinds.length, 0));
 	const rawComponentInfo: Record<string, { label: string; detail: string; mark: string }> = {
 		...sectionInfo,
 		...widgetInfo
@@ -90,6 +109,33 @@
 			return { label: String(prop), detail: 'Component', mark: '✳' };
 		}
 	}) as Record<BlockKind, { label: string; detail: string; mark: string }>;
+
+	/** Block content for every widget kind, derived from the catalog. */
+	const widgetDefaults = Object.fromEntries(
+		widgetKinds.map((kind) => {
+			const { theme, title, body, action, items } = widgetCatalog[kind].defaults;
+			return [
+				kind,
+				{ kind, title, body, action, theme: theme ?? 'light', ...(items ? { items } : {}) }
+			];
+		})
+	) as Record<
+		WidgetKind,
+		Omit<
+			BuilderBlock,
+			| 'id'
+			| 'positioned'
+			| 'x'
+			| 'y'
+			| 'width'
+			| 'height'
+			| 'value'
+			| 'checked'
+			| 'level'
+			| 'href'
+			| 'newTab'
+		>
+	>;
 
 	const defaults: Record<
 		BlockKind,
@@ -150,104 +196,7 @@
 			action: 'Maya Chen · Studio founder',
 			theme: 'light'
 		},
-		'widget-button': {
-			kind: 'widget-button',
-			title: 'Button',
-			body: 'A useful action for your visitors.',
-			action: 'Get started',
-			theme: 'lavender'
-		},
-		'widget-text-field': {
-			kind: 'widget-text-field',
-			title: 'Email address',
-			body: 'We’ll only use this to contact you.',
-			action: 'name@example.com',
-			theme: 'light'
-		},
-		'widget-textarea': {
-			kind: 'widget-textarea',
-			title: 'Your message',
-			body: 'Tell us a little more.',
-			action: 'Write your message…',
-			theme: 'light'
-		},
-		'widget-checkbox': {
-			kind: 'widget-checkbox',
-			title: 'Keep me updated',
-			body: 'Receive occasional product news.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-radio': {
-			kind: 'widget-radio',
-			title: 'Standard delivery',
-			body: 'Arrives in 3–5 business days.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-switch': {
-			kind: 'widget-switch',
-			title: 'Enable notifications',
-			body: 'Get notified about important updates.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-select': {
-			kind: 'widget-select',
-			title: 'Choose a country',
-			body: 'Select an option from the menu.',
-			action: 'Canada',
-			theme: 'light'
-		},
-		'widget-slider': {
-			kind: 'widget-slider',
-			title: 'Volume',
-			body: 'Adjust the level to your preference.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-badge': {
-			kind: 'widget-badge',
-			title: 'New',
-			body: 'A small label for status or category.',
-			action: '',
-			theme: 'lavender'
-		},
-		'widget-alert': {
-			kind: 'widget-alert',
-			title: 'Changes saved',
-			body: 'Your settings have been updated successfully.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-progress': {
-			kind: 'widget-progress',
-			title: 'Profile completion',
-			body: 'You’re making great progress.',
-			action: '',
-			theme: 'light'
-		},
-		'widget-avatar': {
-			kind: 'widget-avatar',
-			title: 'Alex Morgan',
-			body: 'Product designer',
-			action: '',
-			theme: 'light'
-		},
-		'widget-card': {
-			kind: 'widget-card',
-			title: 'A thoughtful detail',
-			body: 'Cards group related information into a clear, scannable surface.',
-			action: 'Learn more',
-			theme: 'light'
-		},
-		'widget-link': {
-			kind: 'widget-link',
-			title: 'Read more',
-			body: 'Opens another page.',
-			action: '',
-			theme: 'lavender'
-		}
+		...widgetDefaults
 	};
 
 	const initialPage: EditorPage = {
@@ -265,10 +214,10 @@
 				action: 'Explore what we do',
 				theme: 'lavender',
 				positioned: true,
-				x: 6,
-				y: 40,
-				width: 88,
-				height: 260,
+				x: 24,
+				y: 24,
+				width: 720,
+				height: 220,
 				value: '',
 				checked: false,
 				level: 60,
@@ -283,9 +232,9 @@
 				action: '',
 				theme: 'light',
 				positioned: true,
-				x: 6,
-				y: 340,
-				width: 88,
+				x: 24,
+				y: 264,
+				width: 720,
 				height: 260,
 				value: '',
 				checked: false,
@@ -301,10 +250,10 @@
 				action: 'Maya Chen · Studio founder',
 				theme: 'light',
 				positioned: true,
-				x: 6,
-				y: 640,
-				width: 88,
-				height: 260,
+				x: 24,
+				y: 544,
+				width: 720,
+				height: 200,
 				value: '',
 				checked: false,
 				level: 60,
@@ -343,17 +292,25 @@
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
 	let committedSnapshot = JSON.stringify([initialPage]);
 	let canvasElement: HTMLDivElement | null = null;
+	/** Grid size in canvas pixels that moves and resizes snap to (hold Alt while dragging to bypass). */
+	const SNAP_GRID = 8;
+	const resizeHandles: ResizeDir[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+	const snap = (value: number, enabled: boolean) =>
+		enabled ? Math.round(value / SNAP_GRID) * SNAP_GRID : Math.round(value);
 	let pointerInteraction = $state<{
 		id: string;
 		pointerId: number;
 		mode: 'move' | 'resize';
+		/** Which edges a resize drags; ignored for `move`. */
+		dir: ResizeDir;
 		startX: number;
 		startY: number;
 		startWidth: number;
 		startHeight: number;
 		pointerX: number;
 		pointerY: number;
-		canvasWidth: number;
+		/** Rendered canvas width divided by its CSS pixel width (1 unless the canvas is scaled). */
+		scale: number;
 	} | null>(null);
 
 	let customKinds = $derived([
@@ -578,8 +535,8 @@
 		const copy: BuilderBlock = {
 			...source,
 			id: globalThis.crypto.randomUUID(),
-			x: Math.min(100 - source.width, source.x + 3),
-			y: Math.min(5000, source.y + 24)
+			x: Math.min(blockLimits.maxX - source.width, source.x + 16),
+			y: Math.min(blockLimits.maxY, source.y + 16)
 		};
 		blocks.push(copy);
 		selectedId = copy.id;
@@ -639,24 +596,35 @@
 			action: '',
 			theme: 'light'
 		};
+		const catalogDefaults =
+			kind in widgetCatalog ? widgetCatalog[kind as WidgetKind].defaults : undefined;
 		return {
 			...base,
 			id: globalThis.crypto.randomUUID(),
 			positioned: true,
-			x: 6,
-			y: 40,
-			width: 88,
-			height: 260,
+			x: 24,
+			y: 24,
+			width: catalogDefaults?.width ?? 720,
+			height: catalogDefaults?.height ?? 240,
 			value: kind === 'widget-select' ? defaults[kind].action : '',
 			checked: false,
-			level: 60,
+			level: catalogDefaults?.level ?? 60,
 			href: kind === 'widget-link' ? '/home' : '',
 			newTab: false
 		};
 	}
 
-	function startPointerInteraction(event: PointerEvent, id: string, mode: 'move' | 'resize') {
-		if (isPreview || !canvasElement) return;
+	/**
+	 * Begins a drag on a block: `move` (pointer down anywhere inside the selected block) or
+	 * `resize` (pointer down on a frame handle; `dir` says which edges follow the pointer).
+	 */
+	function startPointerInteraction(
+		event: PointerEvent,
+		id: string,
+		mode: 'move' | 'resize',
+		dir: ResizeDir = 'se'
+	) {
+		if (isPreview || !canvasElement || event.button !== 0) return;
 		const block = blocks.find((item) => item.id === id);
 		if (!block || !(event.currentTarget instanceof HTMLElement)) return;
 
@@ -668,37 +636,72 @@
 			id,
 			pointerId: event.pointerId,
 			mode,
+			dir,
 			startX: block.x,
 			startY: block.y,
 			startWidth: block.width,
 			startHeight: block.height,
 			pointerX: event.clientX,
 			pointerY: event.clientY,
-			canvasWidth: canvasElement.clientWidth
+			scale: canvasElement.getBoundingClientRect().width / currentPage.width || 1
 		};
 	}
 
 	function handlePointerMove(event: PointerEvent) {
 		if (!pointerInteraction || event.pointerId !== pointerInteraction.pointerId) return;
 		const block = blocks.find((item) => item.id === pointerInteraction?.id);
-		if (!block || pointerInteraction.canvasWidth <= 0) return;
+		if (!block) return;
 
-		const deltaX =
-			((event.clientX - pointerInteraction.pointerX) / pointerInteraction.canvasWidth) * 100;
-		const deltaY = event.clientY - pointerInteraction.pointerY;
+		const deltaX = (event.clientX - pointerInteraction.pointerX) / pointerInteraction.scale;
+		const deltaY = (event.clientY - pointerInteraction.pointerY) / pointerInteraction.scale;
+
+		const snapOn = !event.altKey;
 
 		if (pointerInteraction.mode === 'move') {
-			block.x = Math.round(
-				Math.max(0, Math.min(100 - block.width, pointerInteraction.startX + deltaX))
+			block.x = Math.max(
+				0,
+				Math.min(blockLimits.maxX - block.width, snap(pointerInteraction.startX + deltaX, snapOn))
 			);
-			block.y = Math.round(Math.max(0, Math.min(5000, pointerInteraction.startY + deltaY)));
+			block.y = Math.max(
+				0,
+				Math.min(blockLimits.maxY, snap(pointerInteraction.startY + deltaY, snapOn))
+			);
 		} else {
-			block.width = Math.round(
-				Math.max(20, Math.min(100 - block.x, pointerInteraction.startWidth + deltaX))
-			);
-			block.height = Math.round(
-				Math.max(100, Math.min(1600, pointerInteraction.startHeight + deltaY))
-			);
+			// Work with edges so the edge opposite the dragged handle stays fixed.
+			const { dir, startX, startY, startWidth, startHeight } = pointerInteraction;
+			let left = startX;
+			let top = startY;
+			let right = startX + startWidth;
+			let bottom = startY + startHeight;
+
+			if (dir.includes('w'))
+				left = Math.max(
+					Math.max(0, right - blockLimits.maxWidth),
+					Math.min(right - blockLimits.minWidth, snap(startX + deltaX, snapOn))
+				);
+			if (dir.includes('e'))
+				right = Math.max(
+					left + blockLimits.minWidth,
+					Math.min(
+						Math.min(blockLimits.maxWidth, left + blockLimits.maxWidth),
+						snap(startX + startWidth + deltaX, snapOn)
+					)
+				);
+			if (dir.includes('n'))
+				top = Math.max(
+					Math.max(0, bottom - blockLimits.maxHeight),
+					Math.min(bottom - blockLimits.minHeight, snap(startY + deltaY, snapOn))
+				);
+			if (dir.includes('s'))
+				bottom = Math.max(
+					top + blockLimits.minHeight,
+					Math.min(top + blockLimits.maxHeight, snap(startY + startHeight + deltaY, snapOn))
+				);
+
+			block.x = left;
+			block.y = top;
+			block.width = right - left;
+			block.height = bottom - top;
 		}
 
 		markUnsaved();
@@ -709,15 +712,21 @@
 
 		if (field === 'x')
 			selectedBlock.x = Math.round(
-				Math.max(0, Math.min(100 - selectedBlock.width, selectedBlock.x))
+				Math.max(0, Math.min(blockLimits.maxX - selectedBlock.width, selectedBlock.x))
 			);
-		if (field === 'y') selectedBlock.y = Math.round(Math.max(0, Math.min(5000, selectedBlock.y)));
+		if (field === 'y')
+			selectedBlock.y = Math.round(Math.max(0, Math.min(blockLimits.maxY, selectedBlock.y)));
 		if (field === 'width')
 			selectedBlock.width = Math.round(
-				Math.max(20, Math.min(100 - selectedBlock.x, selectedBlock.width))
+				Math.max(
+					blockLimits.minWidth,
+					Math.min(blockLimits.maxWidth - selectedBlock.x, selectedBlock.width)
+				)
 			);
 		if (field === 'height')
-			selectedBlock.height = Math.round(Math.max(100, Math.min(1600, selectedBlock.height)));
+			selectedBlock.height = Math.round(
+				Math.max(blockLimits.minHeight, Math.min(blockLimits.maxHeight, selectedBlock.height))
+			);
 
 		markUnsaved();
 	}
@@ -741,20 +750,26 @@
 		if (mode === 'move') {
 			if (event.key === 'ArrowLeft') selectedBlock.x = Math.max(0, selectedBlock.x - amount);
 			else if (event.key === 'ArrowRight')
-				selectedBlock.x = Math.min(100 - selectedBlock.width, selectedBlock.x + amount);
+				selectedBlock.x = Math.min(
+					blockLimits.maxX - selectedBlock.width,
+					selectedBlock.x + amount
+				);
 			else if (event.key === 'ArrowUp') selectedBlock.y = Math.max(0, selectedBlock.y - amount);
 			else if (event.key === 'ArrowDown')
-				selectedBlock.y = Math.min(5000, selectedBlock.y + amount);
+				selectedBlock.y = Math.min(blockLimits.maxY, selectedBlock.y + amount);
 			else handled = false;
 		} else {
 			if (event.key === 'ArrowLeft')
-				selectedBlock.width = Math.max(20, selectedBlock.width - amount);
+				selectedBlock.width = Math.max(blockLimits.minWidth, selectedBlock.width - amount);
 			else if (event.key === 'ArrowRight')
-				selectedBlock.width = Math.min(100 - selectedBlock.x, selectedBlock.width + amount);
+				selectedBlock.width = Math.min(
+					blockLimits.maxWidth - selectedBlock.x,
+					selectedBlock.width + amount
+				);
 			else if (event.key === 'ArrowUp')
-				selectedBlock.height = Math.max(100, selectedBlock.height - amount);
+				selectedBlock.height = Math.max(blockLimits.minHeight, selectedBlock.height - amount);
 			else if (event.key === 'ArrowDown')
-				selectedBlock.height = Math.min(1600, selectedBlock.height + amount);
+				selectedBlock.height = Math.min(blockLimits.maxHeight, selectedBlock.height + amount);
 			else handled = false;
 		}
 
@@ -768,16 +783,14 @@
 		if (!canvasElement) return;
 		const bounds = canvasElement.getBoundingClientRect();
 		const block = createBlock(kind);
+		// Pointer position → canvas pixels (the rendered canvas may be scaled).
+		const scale = bounds.width / currentPage.width || 1;
+		const pointerX = (clientX - bounds.left) / scale;
+		const pointerY = (clientY - bounds.top) / scale;
 		block.x = Math.round(
-			Math.max(
-				0,
-				Math.min(
-					100 - block.width,
-					((clientX - bounds.left) / bounds.width) * 100 - block.width / 2
-				)
-			)
+			Math.max(0, Math.min(blockLimits.maxX - block.width, pointerX - block.width / 2))
 		);
-		block.y = Math.round(Math.max(0, Math.min(5000, clientY - bounds.top - block.height / 2)));
+		block.y = Math.round(Math.max(0, Math.min(blockLimits.maxY, pointerY - block.height / 2)));
 		blocks.push(block);
 		selectedId = block.id;
 		isPreview = false;
@@ -877,11 +890,15 @@
 					<div>
 						<p class="eyebrow">BUILD YOUR PAGE</p>
 						<h2>
-							{paletteTab === 'sections' ? 'Components' : 'GUI widgets'}
+							{paletteTab === 'sections' ? 'Composite Components' : 'Flowbite widgets'}
 						</h2>
 					</div>
 					<span class="count-pill">
-						{paletteTab === 'sections' ? sectionKinds.length : widgetKinds.length}
+						{paletteTab === 'sections'
+							? sectionKinds.length
+							: paletteTab === 'widgets'
+								? visibleWidgetCount
+								: customKinds.length}
 					</span>
 				</div>
 				<div class="palette-tabs" role="tablist" aria-label="Palette categories">
@@ -894,7 +911,7 @@
 						class:tab-active={paletteTab === 'sections'}
 						onclick={() => (paletteTab = 'sections')}
 					>
-						Sections
+						Components
 					</button>
 					<button
 						type="button"
@@ -927,25 +944,74 @@
 						: 'Drag a widget onto your page to place it.'}
 				</p>
 
-				<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
-					<div class="component-list" role="list" aria-label="Draggable components">
-						{#each paletteTab === 'sections' ? sectionKinds : paletteTab === 'widgets' ? widgetKinds : customKinds as kind (kind)}
-							<div
-								class="palette-item"
-								class:widget-item={paletteTab === 'widgets'}
-								draggable="true"
-								role="listitem"
-								aria-label="Drag {componentInfo[kind].label} onto the page"
-								ondragstart={(event) => handlePaletteDragStart(event, kind)}
-							>
-								<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
-								<span class="component-copy">
-									<strong>{componentInfo[kind].label}</strong>
-									<small>{componentInfo[kind].detail}</small>
-								</span>
-							</div>
-						{/each}
+				{#if paletteTab === 'widgets'}
+					<div class="widget-filter">
+						<input
+							class="field-control"
+							type="search"
+							placeholder="Search Flowbite widgets…"
+							aria-label="Search widgets"
+							bind:value={widgetQuery}
+						/>
+						<div class="widget-chips" role="group" aria-label="Widget categories">
+							{#each ['All', ...widgetCategories] as category (category)}
+								<button
+									type="button"
+									class:tab-active={widgetCategory === category}
+									aria-pressed={widgetCategory === category}
+									onclick={() => (widgetCategory = category as 'All' | WidgetCategory)}
+								>
+									{category}
+								</button>
+							{/each}
+						</div>
 					</div>
+				{/if}
+
+				<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
+					{#if paletteTab === 'widgets'}
+						{#each widgetGroups as group (group.category)}
+							<h3 class="widget-group-title">{group.category}</h3>
+							<div class="component-list" role="list" aria-label="{group.category} widgets">
+								{#each group.kinds as kind (kind)}
+									<div
+										class="palette-item widget-item"
+										draggable="true"
+										role="listitem"
+										aria-label="Drag {componentInfo[kind].label} onto the page"
+										ondragstart={(event) => handlePaletteDragStart(event, kind)}
+									>
+										<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span
+										>
+										<span class="component-copy">
+											<strong>{componentInfo[kind].label}</strong>
+											<small>{componentInfo[kind].detail}</small>
+										</span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="panel-hint">No widget matches “{widgetQuery}”.</p>
+						{/each}
+					{:else}
+						<div class="component-list" role="list" aria-label="Draggable components">
+							{#each paletteTab === 'sections' ? sectionKinds : customKinds as kind (kind)}
+								<div
+									class="palette-item"
+									draggable="true"
+									role="listitem"
+									aria-label="Drag {componentInfo[kind].label} onto the page"
+									ondragstart={(event) => handlePaletteDragStart(event, kind)}
+								>
+									<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
+									<span class="component-copy">
+										<strong>{componentInfo[kind].label}</strong>
+										<small>{componentInfo[kind].detail}</small>
+									</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
 				</div>
 
 				<div class="palette-tip">
@@ -991,89 +1057,83 @@
 			</div>
 
 			<div class="canvas-stage">
-				<div
-					class="page-canvas"
-					class:preview={isPreview}
-					style:width="{currentPage.width}px"
-					style:min-height="{canvasHeight}px"
-					role="region"
-					aria-label="Page canvas drop zone"
-					{@attach attachCanvas}
-					ondragover={handleCanvasDragOver}
-					ondrop={handleDrop}
-				>
-					{#if blocks.length === 0}
-						<div class="empty-canvas">
-							<div class="empty-icon" aria-hidden="true">✳</div>
-							<h2>Your page starts here</h2>
-							<p>
-								Drag a component from the panel onto the canvas to start building something great.
-							</p>
-						</div>
-					{:else}
-						{#each blocks as block, index (block.id)}
-							<article
-								class="canvas-block positioned {block.kind} theme-{block.theme}"
-								class:selected={!isPreview && selectedId === block.id}
-								style:left="{block.x}%"
-								style:top="{block.y}px"
-								style:width="{block.width}%"
-								style:height="{block.height}px"
-							>
-								<BlockContent
-									bind:block={blocks[index]}
-									onchange={markUnsaved}
-									onlink={handleLinkClick}
-								/>
-								{#if !isPreview}
-									<span class="block-type-tag">{componentInfo[block.kind].label}</span>
-									<button
-										type="button"
-										class="selection-overlay"
-										aria-label="Select {componentInfo[block.kind].label}: {block.title}"
-										aria-pressed={selectedId === block.id}
-										onclick={() => (selectedId = block.id)}
-									></button>
-									<button
-										type="button"
-										class="position-handle move-handle"
-										aria-label="Move {componentInfo[block.kind].label}; use arrow keys to move"
-										onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
-										onkeydown={(event) => {
-											selectedId = block.id;
-											handlePositionKeydown(event, 'move');
-										}}
-									>
-										<svg viewBox="0 0 20 20" aria-hidden="true"
-											><path
-												d="M10 2v16M2 10h16M7 5l3-3 3 3m-6 10 3 3 3-3M5 7l-3 3 3 3m10-6 3 3-3 3"
-											/></svg
-										>
-									</button>
-									<button
-										type="button"
-										class="position-handle resize-handle"
-										aria-label="Resize {componentInfo[block.kind].label}; use arrow keys to resize"
-										onpointerdown={(event) => startPointerInteraction(event, block.id, 'resize')}
-										onkeydown={(event) => {
-											selectedId = block.id;
-											handlePositionKeydown(event, 'resize');
-										}}
-									>
-										<svg viewBox="0 0 20 20" aria-hidden="true"
-											><path d="M7 17h10V7M17 7 7 17m3 0H7v-3m10-3v-4h-4" /></svg
-										>
-									</button>
-								{/if}
-							</article>
-						{/each}
-					{/if}
-				</div>
+				<ThemeScope theme={routePage.data.siteTheme}>
+					<div
+						class="page-canvas"
+						class:preview={isPreview}
+						style:width="{currentPage.width}px"
+						style:min-height="{canvasHeight}px"
+						role="region"
+						aria-label="Page canvas drop zone"
+						{@attach attachCanvas}
+						ondragover={handleCanvasDragOver}
+						ondrop={handleDrop}
+					>
+						{#if blocks.length === 0}
+							<div class="empty-canvas">
+								<div class="empty-icon" aria-hidden="true">✳</div>
+								<h2>Your page starts here</h2>
+								<p>
+									Drag a component from the panel onto the canvas to start building something great.
+								</p>
+							</div>
+						{:else}
+							{#each blocks as block, index (block.id)}
+								<article
+									class="canvas-block positioned {block.kind} theme-{block.theme}"
+									class:selected={!isPreview && selectedId === block.id}
+									style:left="{block.x}px"
+									style:top="{block.y}px"
+									style:width="{block.width}px"
+									style:height="{block.height}px"
+								>
+									<BlockContent
+										bind:block={blocks[index]}
+										onchange={markUnsaved}
+										onlink={handleLinkClick}
+									/>
+									{#if !isPreview}
+										<span class="block-type-tag">{componentInfo[block.kind].label}</span>
+										<button
+											type="button"
+											class="selection-overlay"
+											class:movable={selectedId === block.id}
+											aria-label="Select {componentInfo[block.kind].label}: {block.title}"
+											aria-pressed={selectedId === block.id}
+											onclick={() => (selectedId = block.id)}
+											onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
+											onkeydown={(event) => {
+												if (event.key.startsWith('Arrow')) {
+													selectedId = block.id;
+													handlePositionKeydown(event, event.altKey ? 'resize' : 'move');
+												}
+											}}
+										></button>
+										{#if selectedId === block.id}
+											<div class="selection-frame" aria-hidden="true">
+												{#each resizeHandles as dir (dir)}
+													<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
+													<!-- svelte-ignore a11y_no_static_element_interactions -->
+													<span
+														class="frame-handle handle-{dir}"
+														onpointerdown={(event) =>
+															startPointerInteraction(event, block.id, 'resize', dir)}
+													></span>
+												{/each}
+											</div>
+										{/if}
+									{/if}
+								</article>
+							{/each}
+						{/if}
+					</div>
+				</ThemeScope>
 			</div>
 			{#if !isPreview}
 				<p class="canvas-footnote">
 					<span aria-hidden="true">⌘</span> Drag components from the palette to place them
-					<span class="footnote-divider">·</span> Drag handles to move or resize
+					<span class="footnote-divider">·</span> Drag a selected component to move it · drag its
+					corners to resize · hold Alt to bypass the {SNAP_GRID}px grid
 				</p>
 			{/if}
 		</section>
@@ -1132,13 +1192,13 @@
 						<p class="position-hint">Drag the move handle or adjust these values.</p>
 						<div class="position-fields">
 							<div>
-								<label class="field-label" for="block-x">Left (%)</label>
+								<label class="field-label" for="block-x">Left (px)</label>
 								<input
 									id="block-x"
 									class="field-control"
 									type="number"
 									min="0"
-									max={100 - selectedBlock.width}
+									max={blockLimits.maxX - selectedBlock.width}
 									step="1"
 									bind:value={selectedBlock.x}
 									oninput={() => updateSelectedPosition('x')}
@@ -1151,20 +1211,20 @@
 									class="field-control"
 									type="number"
 									min="0"
-									max="5000"
+									max={blockLimits.maxY}
 									step="1"
 									bind:value={selectedBlock.y}
 									oninput={() => updateSelectedPosition('y')}
 								/>
 							</div>
 							<div>
-								<label class="field-label" for="block-width">Width (%)</label>
+								<label class="field-label" for="block-width">Width (px)</label>
 								<input
 									id="block-width"
 									class="field-control"
 									type="number"
-									min="20"
-									max={100 - selectedBlock.x}
+									min={blockLimits.minWidth}
+									max={blockLimits.maxWidth - selectedBlock.x}
 									step="1"
 									bind:value={selectedBlock.width}
 									oninput={() => updateSelectedPosition('width')}
@@ -1176,9 +1236,9 @@
 									id="block-height"
 									class="field-control"
 									type="number"
-									min="100"
-									max="1600"
-									step="10"
+									min={blockLimits.minHeight}
+									max={blockLimits.maxHeight}
+									step="1"
 									bind:value={selectedBlock.height}
 									oninput={() => updateSelectedPosition('height')}
 								/>
@@ -1284,7 +1344,7 @@
 								Open external links in a new tab
 							</label>
 						{/if}
-						{#if ['hero', 'button', 'quote', 'widget-button', 'widget-text-field', 'widget-textarea', 'widget-card'].includes(selectedBlock.kind)}
+						{#if ['hero', 'button', 'quote', 'widget-button', 'widget-text-field', 'widget-textarea', 'widget-card', ...actionWidgetKinds].includes(selectedBlock.kind)}
 							<label class="field-label" for="block-action">
 								{selectedBlock.kind === 'quote'
 									? 'Attribution'
@@ -1309,9 +1369,12 @@
 								onchange={markUnsaved}
 							>
 								<option value="">Choose an option</option>
-								<option value="Canada">Canada</option>
-								<option value="United States">United States</option>
-								<option value="United Kingdom">United Kingdom</option>
+								{#each (selectedBlock.items || widgetCatalog['widget-select'].defaults.items || '')
+									.split('\n')
+									.map((line) => line.trim())
+									.filter(Boolean) as option (option)}
+									<option value={option}>{option}</option>
+								{/each}
 							</select>
 						{/if}
 						{#if ['widget-checkbox', 'widget-radio', 'widget-switch'].includes(selectedBlock.kind)}
@@ -1323,6 +1386,17 @@
 								/>
 								<span>Initially selected</span>
 							</label>
+						{/if}
+						{#if selectedBlock.kind in itemsHelp}
+							<label class="field-label" for="block-items">Entries</label>
+							<textarea
+								id="block-items"
+								class="field-control field-textarea"
+								bind:value={selectedBlock.items}
+								rows="6"
+								maxlength="600"
+								oninput={markUnsaved}></textarea>
+							<p class="panel-hint">{itemsHelp[selectedBlock.kind]}</p>
 						{/if}
 						{#if ['widget-slider', 'widget-progress'].includes(selectedBlock.kind)}
 							<label class="field-label" for="block-level">Value ({selectedBlock.level}%)</label>
@@ -1469,8 +1543,46 @@
 		height: 100%;
 		min-height: 0;
 		flex-direction: column;
+		overflow-y: auto;
 		padding: 1.5rem 1.1rem;
 		border-right: 1px solid var(--line);
+	}
+
+	.widget-filter {
+		display: grid;
+		gap: 0.5rem;
+		margin-bottom: 0.6rem;
+	}
+
+	.widget-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	.widget-chips button {
+		padding: 0.2rem 0.55rem;
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		background: #fff;
+		color: #5d5f78;
+		font-size: 0.68rem;
+		cursor: pointer;
+	}
+
+	.widget-chips button.tab-active {
+		border-color: #6554d8;
+		background: #eeeaff;
+		color: #4b3fc0;
+	}
+
+	.widget-group-title {
+		margin: 0.8rem 0 0.4rem;
+		color: #85869a;
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
 	}
 
 	.inspector-panel {
@@ -1756,7 +1868,8 @@
 		overflow: hidden;
 		border: 1px solid #e8e8ed;
 		border-radius: 8px;
-		background: #fff;
+		background: var(--site-bg, #fff);
+		color: var(--site-fg, inherit);
 		box-shadow: 0 8px 26px rgb(34 34 56 / 0.09);
 		transition: max-width 200ms ease;
 	}
@@ -1785,6 +1898,13 @@
 		box-sizing: border-box;
 		border-radius: 8px;
 		box-shadow: 0 5px 18px rgb(34 34 56 / 0.12);
+	}
+
+	/* Widgets sit directly on the themed page; only sections get a card look. */
+	.canvas-block.positioned[class*='widget-'] {
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
 	}
 
 	.canvas-block + .canvas-block {
@@ -1826,42 +1946,74 @@
 		cursor: grab;
 	}
 
-	.position-handle {
-		position: absolute;
-		z-index: 4;
-		display: grid;
-		width: 28px;
-		height: 28px;
-		place-items: center;
-		padding: 0;
-		border: 1px solid #dcd7ff;
-		border-radius: 7px;
-		background: #fff;
-		color: #6558cb;
-		box-shadow: 0 2px 6px rgb(34 34 56 / 0.15);
+	.selection-overlay.movable {
+		cursor: move;
 		touch-action: none;
 	}
 
-	.position-handle svg {
-		width: 16px;
-		height: 16px;
-		fill: none;
-		stroke: currentColor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 1.5;
+	.selection-frame {
+		position: absolute;
+		inset: 0;
+		z-index: 4;
+		border: 2px solid #6558cb;
+		pointer-events: none;
 	}
 
-	.move-handle {
-		top: 7px;
-		left: 7px;
-		cursor: move;
+	.frame-handle {
+		position: absolute;
+		width: 12px;
+		height: 12px;
+		box-sizing: border-box;
+		border: 2px solid #6558cb;
+		border-radius: 3px;
+		background: #fff;
+		pointer-events: auto;
+		touch-action: none;
 	}
 
-	.resize-handle {
-		right: 5px;
-		bottom: 5px;
+	.handle-nw {
+		top: 0;
+		left: 0;
 		cursor: nwse-resize;
+	}
+	.handle-n {
+		top: 0;
+		left: 50%;
+		margin-left: -6px;
+		cursor: ns-resize;
+	}
+	.handle-ne {
+		top: 0;
+		right: 0;
+		cursor: nesw-resize;
+	}
+	.handle-e {
+		top: 50%;
+		right: 0;
+		margin-top: -6px;
+		cursor: ew-resize;
+	}
+	.handle-se {
+		right: 0;
+		bottom: 0;
+		cursor: nwse-resize;
+	}
+	.handle-s {
+		bottom: 0;
+		left: 50%;
+		margin-left: -6px;
+		cursor: ns-resize;
+	}
+	.handle-sw {
+		bottom: 0;
+		left: 0;
+		cursor: nesw-resize;
+	}
+	.handle-w {
+		top: 50%;
+		left: 0;
+		margin-top: -6px;
+		cursor: ew-resize;
 	}
 
 	.canvas-block.hero {

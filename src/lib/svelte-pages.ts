@@ -41,7 +41,16 @@ export const componentImportBase = '$lib/components/editor';
 
 /** Allowed property names recognized on built-in builder blocks. */
 type PropName =
-	'title' | 'body' | 'action' | 'theme' | 'value' | 'checked' | 'level' | 'href' | 'newTab';
+	| 'title'
+	| 'body'
+	| 'action'
+	| 'theme'
+	| 'value'
+	| 'checked'
+	| 'level'
+	| 'href'
+	| 'newTab'
+	| 'items';
 
 const sectionProps: PropName[] = ['title', 'body', 'theme'];
 
@@ -61,7 +70,7 @@ const kindProps: Record<BlockKind, PropName[]> = {
 	'widget-checkbox': ['title', 'body', 'checked'],
 	'widget-radio': ['title', 'body', 'checked'],
 	'widget-switch': ['title', 'body', 'checked'],
-	'widget-select': ['title', 'body', 'value'],
+	'widget-select': ['title', 'body', 'value', 'items'],
 	'widget-slider': ['title', 'body', 'level'],
 	'widget-badge': ['title', 'body'],
 	'widget-alert': ['title', 'body'],
@@ -105,6 +114,7 @@ function escapeAttribute(value: string): string {
  */
 function renderProp(block: BuilderBlock, prop: PropName): string {
 	const value = block[prop];
+	if (value === undefined) return `${prop}=""`;
 	if (typeof value === 'string') return `${prop}="${escapeAttribute(value)}"`;
 	return `${prop}={${value}}`;
 }
@@ -150,26 +160,30 @@ export function renderPageSource(page: EditorPage): string {
 				const allowed = kindProps[block.kind as keyof typeof kindProps] || [];
 				propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
 			}
-			return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="left: ${block.x}%; top: ${block.y}px; width: ${block.width}%; height: ${block.height}px"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
+			return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="left: ${block.x}px; top: ${block.y}px; width: ${block.width}px; height: ${block.height}px"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
 		})
 		.join('\n');
 
 	return `${generatedMarker}
 <script lang="ts">
 ${imports}
+	import ThemeScope from '${componentImportBase}/ThemeScope.svelte';
+	import { siteTheme } from '$lib/site-theme';
 </script>
 
 <svelte:head>
 	<title>${escapeText(page.name)}</title>
 </svelte:head>
 
-<div
-	class="editor-page"
-	data-editor-page="${escapeAttribute(page.name)}"
-	style="width: ${page.width}px; min-height: ${pageHeight(page)}px"
->
+<ThemeScope theme={siteTheme}>
+	<div
+		class="editor-page"
+		data-editor-page="${escapeAttribute(page.name)}"
+		style="width: ${page.width}px; min-height: ${pageHeight(page)}px"
+	>
 ${blocks}
-</div>
+	</div>
+</ThemeScope>
 
 <style>
 	.editor-page {
@@ -177,6 +191,8 @@ ${blocks}
 		max-width: 100%;
 		margin-inline: auto;
 		overflow: hidden;
+		background: var(--site-bg, #fff);
+		color: var(--site-fg, inherit);
 	}
 
 	.editor-block {

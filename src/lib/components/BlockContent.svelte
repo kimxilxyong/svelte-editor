@@ -38,7 +38,8 @@
 	import WidgetAvatar from './editor/WidgetAvatar.svelte';
 	import WidgetCard from './editor/WidgetCard.svelte';
 	import WidgetLink from './editor/WidgetLink.svelte';
-	import type { BuilderBlock } from '../editor.js';
+	import { componentNames, type BuilderBlock } from '../editor.js';
+	import { widgetRuntime } from '../widget-runtime.svelte.js';
 
 	let {
 		block = $bindable(),
@@ -49,9 +50,33 @@
 		onchange?: () => void;
 		onlink?: (event: MouseEvent, block: BuilderBlock) => void;
 	} = $props();
+
+	/** User-edited version of this block's built-in component (see widget-runtime), if any. */
+	const Override = $derived(
+		block.kind.startsWith('custom:')
+			? undefined
+			: widgetRuntime.components[componentNames[block.kind as keyof typeof componentNames]]
+	);
 </script>
 
-{#if block.kind === 'hero'}
+{#if Override}
+	<!-- Overrides get the superset of widget props; their own local state handles typing/toggling. -->
+	<Override
+		id={block.id}
+		title={block.title}
+		body={block.body}
+		action={block.action}
+		theme={block.theme}
+		items={block.items}
+		value={block.value}
+		checked={block.checked}
+		level={block.level}
+		href={block.href}
+		newTab={block.newTab}
+		{onchange}
+		onnavigate={(event: MouseEvent) => onlink?.(event, block)}
+	/>
+{:else if block.kind === 'hero'}
 	<Hero title={block.title} body={block.body} action={block.action} theme={block.theme} />
 {:else if block.kind === 'text'}
 	<TextSection title={block.title} body={block.body} theme={block.theme} />
@@ -112,6 +137,7 @@
 		id={block.id}
 		title={block.title}
 		body={block.body}
+		items={block.items}
 		bind:value={block.value}
 		{onchange}
 	/>
@@ -128,7 +154,7 @@
 {:else if block.kind === 'widget-alert'}
 	<WidgetAlert title={block.title} body={block.body} />
 {:else if block.kind === 'widget-progress'}
-	<WidgetProgress title={block.title} body={block.body} bind:level={block.level} />
+	<WidgetProgress title={block.title} body={block.body} level={block.level} />
 {:else if block.kind === 'widget-avatar'}
 	<WidgetAvatar title={block.title} body={block.body} />
 {:else if block.kind === 'widget-card'}

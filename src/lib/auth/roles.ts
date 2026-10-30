@@ -103,6 +103,8 @@ export const accessRules: readonly AccessRule[] = [
 	// Saved site: everybody signed-in may read it, editors may change it.
 	{ prefix: '/editor/api', read: 'guest', write: 'user' },
 	{ prefix: '/editor', read: 'user' },
+	// Site theme: everybody signed-in may look at it, power users may change it.
+	{ prefix: '/theme', read: 'guest', write: 'poweruser' },
 	{ prefix: '/account', read: 'guest' }
 ];
 

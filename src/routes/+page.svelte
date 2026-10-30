@@ -147,14 +147,16 @@
 		const root = projectRoot.trim();
 		localStorage.setItem('editor-project-root', root);
 		await run('Exporting…', async () => {
-			const result: { written: string[]; skipped: FileNote[] } = await projectRequest({
-				action: 'export',
-				root,
-				site: { pages: $state.snapshot(pages) }
-			});
+			const result: { written: string[]; skipped: FileNote[]; warnings?: string[] } =
+				await projectRequest({
+					action: 'export',
+					root,
+					site: { pages: $state.snapshot(pages) }
+				});
 			projectMessage = `Exported ${result.written.length} files${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
 			projectDetails = [
 				...result.written.map((file) => `wrote ${file}`),
+				...(result.warnings ?? []).map((warning) => `warning: ${warning}`),
 				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
 			];
 			status = projectMessage;
@@ -377,7 +379,12 @@
 			</div>
 			<div class="canvas-stage">
 				{#if selected}
-					<PageView page={selected} interactive={isPreview} onlink={followLink} />
+					<PageView
+						page={selected}
+						theme={routePage.data.siteTheme}
+						interactive={isPreview}
+						onlink={followLink}
+					/>
 				{/if}
 			</div>
 			<p class="canvas-footnote">

@@ -1,15 +1,16 @@
 <script lang="ts">
 	/**
 	 * @component WidgetRadio
-	 * Radio button widget for selecting single options in a group.
+	 * Flowbite `Radio` with title and helper text.
 	 *
-	 * @prop {string} [id] - Unique radio input element ID.
-	 * @prop {string} title - Radio label text.
-	 * @prop {string} body - Explanatory caption.
-	 * @prop {boolean} [checked=false] - Two-way bindable selection state.
-	 * @prop {() => void} [onchange] - Change event callback.
+	 * @prop {string} [id] - Block id, used for the input id.
+	 * @prop {string} title - Option label.
+	 * @prop {string} body - Helper text.
+	 * @prop {boolean} [checked] - `$bindable()` selected state.
+	 * @prop {() => void} [onchange] - Called when the selection changes.
 	 */
-	const generatedId = $props.id();
+	import { Radio, Helper } from 'flowbite-svelte';
+
 	let {
 		id = '',
 		title,
@@ -23,66 +24,14 @@
 		checked?: boolean;
 		onchange?: () => void;
 	} = $props();
-	let inputId = $derived(id || generatedId);
+	// Flowbite's Radio works with a shared `group`; a single radio maps it to the boolean.
+	let group = $state(checked ? 'on' : '');
+	$effect(() => {
+		checked = group === 'on';
+	});
 </script>
 
-<div class="widget-preview widget-choice">
-	<label for={inputId}>
-		<input
-			id={inputId}
-			type="radio"
-			name={inputId}
-			{checked}
-			onchange={(event) => {
-				if (event.currentTarget.checked) checked = true;
-				onchange?.();
-			}}
-		/>
-		<span><strong>{title}</strong><small>{body}</small></span>
-	</label>
+<div class="flex h-full w-full flex-col justify-center gap-1 overflow-hidden">
+	<Radio id="radio-{id}" value="on" bind:group onchange={() => onchange?.()}>{title}</Radio>
+	{#if body}<Helper class="ps-6">{body}</Helper>{/if}
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-choice {
-		justify-content: center;
-	}
-	.widget-choice label {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		cursor: pointer;
-	}
-	.widget-choice label > span {
-		display: grid;
-		gap: 0.25rem;
-	}
-	.widget-choice strong {
-		color: #43455a;
-		font-size: 0.76rem;
-		font-weight: 650;
-	}
-	.widget-choice small {
-		color: #85869a;
-		font-size: 0.67rem;
-	}
-	.widget-choice input[type='radio'] {
-		width: 18px;
-		height: 18px;
-		accent-color: #6b5ce7;
-	}
-</style>

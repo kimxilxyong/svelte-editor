@@ -40,7 +40,8 @@ describe('svelte page export/import', () => {
 					level: kind === 'widget-slider' ? 33 : 60,
 					value: kind === 'widget-text-field' ? 'hello' : '',
 					href: kind === 'widget-link' ? '/home#top' : '',
-					newTab: kind === 'widget-link'
+					newTab: kind === 'widget-link',
+					items: kind === 'widget-select' ? 'A\nB' : undefined
 				})
 			)
 		};
@@ -61,6 +62,7 @@ describe('svelte page export/import', () => {
 		expect(byKind['widget-switch'].checked).toBe(true);
 		expect(byKind['widget-slider'].level).toBe(33);
 		expect(byKind['widget-text-field'].value).toBe('hello');
+		expect(byKind['widget-select'].items).toBe('A\nB');
 		expect(byKind['widget-link']).toMatchObject({
 			href: '/home#top',
 			newTab: true,

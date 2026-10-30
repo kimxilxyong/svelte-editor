@@ -57,14 +57,19 @@ const site: EditorSite = {
 };
 
 describe('project export/import', () => {
-	it('exports all 20 native components and compilable pages', async () => {
+	it('exports all native components and compilable pages', async () => {
 		const root = await makeProject();
 		const result = await exportSite(root, site);
 		expect(result.skipped).toEqual([]);
+		expect(result.warnings[0]).toContain('flowbite-svelte');
 		expect(result.written).toContain(path.join('src', 'routes', 'home', '+page.svelte'));
-		expect(result.written).toHaveLength(21);
+		// components + page + ThemeScope + src/lib/theme.ts + src/lib/site-theme.ts
+		expect(result.written).toHaveLength(Object.keys(componentNames).length + 4);
+		expect(result.written).toContain(path.join('src', 'lib', 'site-theme.ts'));
+		const page = await readFile(path.join(root, 'src', 'routes', 'home', '+page.svelte'), 'utf8');
+		expect(page).toContain('<ThemeScope theme={siteTheme}>');
 
-		for (const file of result.written) {
+		for (const file of result.written.filter((name) => name.endsWith('.svelte'))) {
 			const source = await readFile(path.join(root, file), 'utf8');
 			expect(() => compile(source, { filename: file, runes: true })).not.toThrow();
 		}
@@ -72,9 +77,9 @@ describe('project export/import', () => {
 		const imported = await importSite(root);
 		expect(imported.pages).toHaveLength(1);
 		expect(imported.pages[0].slug).toBe('home');
-		expect(imported.pages[0].blocks).toHaveLength(20);
-		// All 20 built-in components are scanned in src/lib/components/editor
-		expect(imported.components.length).toBeGreaterThanOrEqual(20);
+		expect(imported.pages[0].blocks).toHaveLength(Object.keys(componentNames).length);
+		// All built-in components are scanned in src/lib/components/editor
+		expect(imported.components.length).toBeGreaterThanOrEqual(Object.keys(componentNames).length);
 	});
 
 	it('imports custom native Svelte components added to the project', async () => {

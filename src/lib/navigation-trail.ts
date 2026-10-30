@@ -77,6 +77,7 @@ const authPathLabels: Record<string, PathDescription> = {
 	'/register': { label: 'Register', section: 'auth' },
 	'/setup': { label: 'Setup', section: 'auth' },
 	'/account': { label: 'Account', section: 'account' },
+	'/theme': { label: 'Theme', section: 'other' },
 	'/admin': { label: 'Admin', section: 'admin' },
 	'/admin/users': { label: 'Users', section: 'admin' }
 };

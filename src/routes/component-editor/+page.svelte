@@ -8,7 +8,9 @@
 	 *
 	 * ## Layout (same shell as the pages and editor routes)
 	 * - Header: the shared top navigation (`AppNav`, mounted in the root layout) + `BuilderHeader` (Save, Undo and Redo of the focused section editor).
-	 * - Left: project folder (browse), component file list, "New component".
+	 * - Left: project folder (browse), component file list, "New component". The **Built-in
+	 *   widgets** tab instead lists the editor's own widgets/sections; saving stores an override in
+	 *   `.data/widgets` (see `widget-files.ts`) that the canvas and exports use ("Reset to default").
 	 * - Centre: the section editors (or a read-only "Full file" view of the assembled source).
 	 * - Right: problems from the Svelte compiler (click to jump) and the detected props.
 	 *
@@ -31,6 +33,7 @@
 	import { onMount } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
+	import { loadWidgetOverrides } from '../../lib/widget-runtime.svelte.js';
 	import { useNavContext } from '../../lib/navigation.svelte.js';
 	import DirectoryPickerModal from '../../lib/components/DirectoryPickerModal.svelte';
 	import CodeEditor, {
@@ -77,6 +80,9 @@
 		style: []
 	});
 
+	/** `project`: files of a real SvelteKit project; `widgets`: the built-in widgets/sections. */
+	let mode = $state<'project' | 'widgets'>('project');
+	let widgets = $state<{ name: string; modified: boolean }[]>([]);
 	let projectRoot = $state('');
 	let showPicker = $state(false);
 	let files = $state<{ path: string; size: number }[]>([]);
@@ -167,6 +173,7 @@
 	 * @returns Parsed JSON, or an `{ error }` object when the request failed.
 	 */
 	async function request<T extends { error?: string }>(body: Record<string, unknown>): Promise<T> {
+		if (mode === 'widgets') return widgetRequest<T>(body);
 		try {
 			const response = await fetch('/component-editor/api', {
 				method: 'POST',
@@ -178,6 +185,74 @@
 		} catch {
 			return { error: 'The server could not be reached.' } as T;
 		}
+	}
+
+	/**
+	 * Built-in widget mode: the same actions as the project API, mapped onto
+	 * `/editor/api/widgets` (`path` is `<Name>.svelte`, no project folder involved).
+	 */
+	async function widgetRequest<T extends { error?: string }>(
+		body: Record<string, unknown>
+	): Promise<T> {
+		const name = typeof body.path === 'string' ? body.path.replace(/\.svelte$/, '') : undefined;
+		try {
+			const response = await fetch('/editor/api/widgets', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ ...body, name, root: undefined }),
+				cache: 'no-store'
+			});
+			return (await response.json()) as T;
+		} catch {
+			return { error: 'The server could not be reached.' } as T;
+		}
+	}
+
+	async function loadWidgets() {
+		const result = await widgetRequest<{
+			widgets?: { name: string; modified: boolean }[];
+			error?: string;
+		}>({ action: 'list' });
+		if (result.widgets) widgets = result.widgets;
+		else status = result.error ?? 'The widgets could not be listed.';
+	}
+
+	async function setMode(next: 'project' | 'widgets') {
+		if (next === mode) return;
+		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
+		mode = next;
+		selectedPath = null;
+		sections = emptySections('ts');
+		baseline = '';
+		if (next === 'widgets') {
+			await loadWidgets();
+			status = 'Edit a built-in widget; the canvas and exports use your version.';
+		} else {
+			status = projectRoot.trim()
+				? 'Choose a component.'
+				: 'Choose a SvelteKit project folder to start.';
+		}
+	}
+
+	/** Deletes the edited version of the open widget so the built-in default applies again. */
+	async function resetWidget() {
+		if (mode !== 'widgets' || !selectedPath || busy) return;
+		if (!confirm('Reset this widget to the built-in default?')) return;
+		busy = true;
+		const result = await widgetRequest<{ error?: string }>({ action: 'reset', path: selectedPath });
+		if (result.error) {
+			busy = false;
+			status = result.error;
+			return;
+		}
+		const read = await widgetRequest<{ content?: string; error?: string }>({
+			action: 'read',
+			path: selectedPath
+		});
+		busy = false;
+		if (read.content !== undefined) loadSource(selectedPath, read.content);
+		await Promise.all([loadWidgets(), loadWidgetOverrides()]);
+		status = `${selectedPath} was reset to the default.`;
 	}
 
 	async function loadFiles() {
@@ -250,6 +325,7 @@
 			baseline = source;
 			confirmForce = false;
 			status = `Saved ${selectedPath}.`;
+			if (mode === 'widgets') await Promise.all([loadWidgets(), loadWidgetOverrides()]);
 		} else {
 			confirmForce = true;
 			status = 'The compiler rejected the file – see the problems list.';
@@ -352,93 +428,137 @@
 				<span class="count-pill">{files.length}</span>
 			</div>
 
-			<label class="field-label" for="ce-root">Project path</label>
-			<div class="row">
-				<input
-					id="ce-root"
-					class="field-control"
-					placeholder="/home/me/my-app"
-					maxlength="500"
-					bind:value={projectRoot}
-					onkeydown={(event) => event.key === 'Enter' && loadFiles()}
-				/>
-				<button type="button" class="ghost" onclick={() => (showPicker = true)}>Browse…</button>
-			</div>
-			<div class="row">
+			<div class="mode-tabs" role="tablist" aria-label="Component source">
 				<button
 					type="button"
-					class="ghost grow"
-					disabled={busy || !projectRoot.trim()}
-					onclick={loadFiles}
+					role="tab"
+					aria-selected={mode === 'project'}
+					class:on={mode === 'project'}
+					onclick={() => setMode('project')}>Project</button
 				>
-					Open project
-				</button>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={mode === 'widgets'}
+					class:on={mode === 'widgets'}
+					onclick={() => setMode('widgets')}>Built-in widgets</button
+				>
 			</div>
-			<DirectoryPickerModal
-				open={showPicker}
-				initialPath={projectRoot}
-				onselect={(path) => {
-					projectRoot = path;
-					showPicker = false;
-					void loadFiles();
-				}}
-				onclose={() => (showPicker = false)}
-			/>
 
-			<label class="field-label" for="ce-filter">Files in <code>src/lib/components</code></label>
-			<input
-				id="ce-filter"
-				class="field-control"
-				type="search"
-				placeholder="Filter…"
-				bind:value={filter}
-			/>
-			<ul class="file-list" aria-label="Component files">
-				{#each visibleFiles as file (file.path)}
-					<li>
-						<button
-							type="button"
-							class="file-item"
-							class:active={file.path === selectedPath}
-							aria-current={file.path === selectedPath ? 'true' : undefined}
-							onclick={() => openFile(file.path)}
-						>
-							<strong>{file.path.split('/').pop()}</strong>
-							{#if file.path.includes('/')}
-								<small>{file.path.slice(0, file.path.lastIndexOf('/'))}/</small>
-							{/if}
-						</button>
-					</li>
-				{:else}
-					<li class="empty">{files.length ? 'No match.' : 'Nothing to show.'}</li>
-				{/each}
-			</ul>
-			{#if truncated}<p class="panel-hint">Only the first files are listed.</p>{/if}
-
-			<form class="new-form" onsubmit={createComponent}>
-				<label class="field-label" for="ce-new">New component</label>
-				<input
-					id="ce-new"
-					class="field-control"
-					placeholder="widgets/MyCard"
-					maxlength="120"
-					bind:value={newName}
-					disabled={files.length === 0 && !projectRoot.trim()}
-				/>
+			{#if mode === 'widgets'}
+				<p class="panel-hint">
+					Edits are stored in <code>.data/widgets</code> and replace the default on the canvas, in the
+					preview and in exports.
+				</p>
+				<ul class="file-list" aria-label="Built-in widgets">
+					{#each widgets as widget (widget.name)}
+						<li>
+							<button
+								type="button"
+								class="file-item"
+								class:active={`${widget.name}.svelte` === selectedPath}
+								onclick={() => openFile(`${widget.name}.svelte`)}
+							>
+								<strong>{widget.name}</strong>
+								{#if widget.modified}<small>edited</small>{/if}
+							</button>
+						</li>
+					{/each}
+				</ul>
+				{#if selectedPath}
+					<button type="button" class="ghost" disabled={busy} onclick={resetWidget}>
+						Reset to default
+					</button>
+				{/if}
+			{:else}
+				<label class="field-label" for="ce-root">Project path</label>
 				<div class="row">
-					<select class="field-control" aria-label="Script language" bind:value={newLang}>
-						<option value="ts">TypeScript</option>
-						<option value="js">JavaScript</option>
-					</select>
+					<input
+						id="ce-root"
+						class="field-control"
+						placeholder="/home/me/my-app"
+						maxlength="500"
+						bind:value={projectRoot}
+						onkeydown={(event) => event.key === 'Enter' && loadFiles()}
+					/>
+					<button type="button" class="ghost" onclick={() => (showPicker = true)}>Browse…</button>
+				</div>
+				<div class="row">
 					<button
-						type="submit"
-						class="primary"
-						disabled={creating || !newName.trim() || !projectRoot.trim()}
+						type="button"
+						class="ghost grow"
+						disabled={busy || !projectRoot.trim()}
+						onclick={loadFiles}
 					>
-						Create
+						Open project
 					</button>
 				</div>
-			</form>
+				<DirectoryPickerModal
+					open={showPicker}
+					initialPath={projectRoot}
+					onselect={(path) => {
+						projectRoot = path;
+						showPicker = false;
+						void loadFiles();
+					}}
+					onclose={() => (showPicker = false)}
+				/>
+
+				<label class="field-label" for="ce-filter">Files in <code>src/lib/components</code></label>
+				<input
+					id="ce-filter"
+					class="field-control"
+					type="search"
+					placeholder="Filter…"
+					bind:value={filter}
+				/>
+				<ul class="file-list" aria-label="Component files">
+					{#each visibleFiles as file (file.path)}
+						<li>
+							<button
+								type="button"
+								class="file-item"
+								class:active={file.path === selectedPath}
+								aria-current={file.path === selectedPath ? 'true' : undefined}
+								onclick={() => openFile(file.path)}
+							>
+								<strong>{file.path.split('/').pop()}</strong>
+								{#if file.path.includes('/')}
+									<small>{file.path.slice(0, file.path.lastIndexOf('/'))}/</small>
+								{/if}
+							</button>
+						</li>
+					{:else}
+						<li class="empty">{files.length ? 'No match.' : 'Nothing to show.'}</li>
+					{/each}
+				</ul>
+				{#if truncated}<p class="panel-hint">Only the first files are listed.</p>{/if}
+
+				<form class="new-form" onsubmit={createComponent}>
+					<label class="field-label" for="ce-new">New component</label>
+					<input
+						id="ce-new"
+						class="field-control"
+						placeholder="widgets/MyCard"
+						maxlength="120"
+						bind:value={newName}
+						disabled={files.length === 0 && !projectRoot.trim()}
+					/>
+					<div class="row">
+						<select class="field-control" aria-label="Script language" bind:value={newLang}>
+							<option value="ts">TypeScript</option>
+							<option value="js">JavaScript</option>
+						</select>
+						<button
+							type="submit"
+							class="primary"
+							disabled={creating || !newName.trim() || !projectRoot.trim()}
+						>
+							Create
+						</button>
+					</div>
+				</form>
+			{/if}
 		</aside>
 
 		<section class="canvas-panel" aria-label="Source editors">
@@ -1123,5 +1243,27 @@
 		.canvas-panel {
 			min-height: 50rem;
 		}
+	}
+	.mode-tabs {
+		display: flex;
+		gap: 0.25rem;
+		margin-bottom: 0.75rem;
+	}
+
+	.mode-tabs button {
+		flex: 1;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid #e8e8ed;
+		border-radius: 6px;
+		background: #fff;
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+
+	.mode-tabs button.on {
+		border-color: #6d28d9;
+		background: #f5f3ff;
+		color: #5b21b6;
+		font-weight: 600;
 	}
 </style>

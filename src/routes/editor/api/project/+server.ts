@@ -13,6 +13,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../../lib/editor.js';
+import { getDatabase } from '../../../../lib/server/database/manager.js';
+import { getSiteTheme } from '../../../../lib/server/theme.js';
 import {
 	exportSite,
 	importSite,
@@ -49,7 +51,8 @@ export const POST: RequestHandler = async ({ request }) => {
 					{ status: 400 }
 				);
 			}
-			return json(await exportSite(root, site));
+			const theme = await getSiteTheme(await getDatabase());
+			return json(await exportSite(root, site, theme));
 		}
 		if (action === 'import') return json(await importSite(root));
 		if (action === 'export-component') {

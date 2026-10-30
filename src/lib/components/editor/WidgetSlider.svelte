@@ -1,15 +1,16 @@
 <script lang="ts">
 	/**
 	 * @component WidgetSlider
-	 * Range slider input widget for selecting numerical percentage values.
+	 * Flowbite `Range` slider (0–100) with a live percentage readout.
 	 *
-	 * @prop {string} [id] - Range element ID.
-	 * @prop {string} title - Slider label heading.
-	 * @prop {string} body - Explanatory helper text.
-	 * @prop {number} [level=60] - Two-way bindable numeric value (0-100).
-	 * @prop {() => void} [onchange] - Change event callback.
+	 * @prop {string} [id] - Block id, used to link label and input.
+	 * @prop {string} title - Label text.
+	 * @prop {string} body - Helper text.
+	 * @prop {number} [level] - `$bindable()` value from 0 to 100.
+	 * @prop {() => void} [onchange] - Called while the user drags.
 	 */
-	const generatedId = $props.id();
+	import { Range, Label, Helper } from 'flowbite-svelte';
+
 	let {
 		id = '',
 		title,
@@ -17,68 +18,15 @@
 		level = $bindable(0),
 		onchange
 	}: { id?: string; title: string; body: string; level?: number; onchange?: () => void } = $props();
-	let inputId = $derived(id || generatedId);
+	const inputId = $derived(`slider-${id}`);
 </script>
 
-<div class="widget-preview widget-form">
-	<div class="widget-slider-heading">
-		<label for={inputId}>{title}</label><output for={inputId}>{level}%</output>
+<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+	<div class="flex items-center justify-between">
+		<Label for={inputId} class="text-sm">{title}</Label><output
+			class="text-sm font-medium text-gray-700">{level}%</output
+		>
 	</div>
-	<input
-		id={inputId}
-		class="widget-range"
-		type="range"
-		min="0"
-		max="100"
-		bind:value={level}
-		oninput={() => onchange?.()}
-	/>
-	<p>{body}</p>
+	<Range id={inputId} min={0} max={100} bind:value={level} oninput={() => onchange?.()} />
+	{#if body}<Helper>{body}</Helper>{/if}
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-	.widget-form {
-		align-items: stretch;
-	}
-	.widget-slider-heading label {
-		color: #4a4b60;
-		font-size: 0.72rem;
-		font-weight: 650;
-	}
-	.widget-slider-heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-	.widget-slider-heading output {
-		color: #77798c;
-		font-size: 0.7rem;
-		font-variant-numeric: tabular-nums;
-	}
-	.widget-form input.widget-range {
-		width: 100%;
-		accent-color: #6b5ce7;
-	}
-</style>

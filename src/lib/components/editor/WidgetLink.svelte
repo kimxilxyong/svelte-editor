@@ -1,14 +1,19 @@
 <script lang="ts">
 	/**
 	 * @component WidgetLink
-	 * Navigation link widget supporting internal page routing and external URLs.
+	 * Flowbite `A` link to an internal route or an external http(s) address.
 	 *
-	 * @prop {string} title - Anchor text.
-	 * @prop {string} body - Accompanying caption.
-	 * @prop {string} href - Target route or URL.
-	 * @prop {boolean} newTab - Whether external links open in a new tab.
-	 * @prop {(event: MouseEvent) => void} [onnavigate] - Intercept handler for preview mode routing.
+	 * Unsafe hrefs (anything but `/route` or http(s)) render without an `href`, so a tampered value
+	 * can never become a `javascript:` link.
+	 *
+	 * @prop {string} title - Link text.
+	 * @prop {string} body - Tooltip text.
+	 * @prop {string} href - Target address.
+	 * @prop {boolean} newTab - Open external links in a new tab.
+	 * @prop {(event: MouseEvent) => void} [onnavigate] - Click handler so the host can intercept navigation.
 	 */
+	import { A } from 'flowbite-svelte';
+
 	let {
 		title,
 		body,
@@ -22,58 +27,17 @@
 		newTab: boolean;
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
-	let safeHref = $derived(/^\/[a-z0-9\-_/#?=&.]*$/.test(href) || /^https?:\/\//.test(href));
-	let externalHref = $derived(/^https?:\/\//.test(href));
+	const externalHref = $derived(/^https?:\/\//i.test(href));
+	const safeHref = $derived(externalHref || /^\/[a-z0-9\-_/#?=&.]*$/i.test(href));
 </script>
 
-<div class="widget-preview widget-link-preview">
-	<a
-		class="widget-link"
-		href={safeHref ? href : undefined}
-		target={externalHref && newTab ? '_blank' : undefined}
-		rel="noopener noreferrer"
-		onclick={(event) => onnavigate?.(event)}
-	>
-		{title}<span aria-hidden="true">↪</span>
-	</a>
-	<p>{body}</p>
+<div class="flex h-full w-full items-center overflow-hidden">
+	<div title={body}>
+		<A
+			href={safeHref ? href : undefined}
+			target={externalHref && newTab ? '_blank' : undefined}
+			rel="noopener noreferrer"
+			onclick={(event: MouseEvent) => onnavigate?.(event)}>{title} ↪</A
+		>
+	</div>
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-	.widget-link-preview {
-		gap: 0.25rem;
-	}
-	.widget-link {
-		display: inline-flex;
-		gap: 0.3rem;
-		color: #1f6f5c;
-		font-weight: 600;
-		text-decoration: underline;
-	}
-	.widget-link-preview p {
-		margin: 0;
-		font-size: 0.8rem;
-		opacity: 0.7;
-	}
-</style>

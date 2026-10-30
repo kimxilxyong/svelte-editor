@@ -4,7 +4,7 @@
  *
  * This module defines the domain entities used across the application:
  * - Block kinds (sections, atomic widgets, and user-defined custom components).
- * - Layout and positioning models (relative x%/width% vs absolute y/height px).
+ * - Layout and positioning models (absolute pixel geometry).
  * - Site structure (`EditorSite` -> `EditorPage` -> `BuilderBlock`).
  * - Runtime validation and sanitization for block attributes, routes, and link targets.
  */
@@ -61,11 +61,11 @@ export type Theme = 'light' | 'lavender' | 'dark';
 /**
  * Represents a single visual component or widget placed onto an editor page.
  *
- * Coordinates are hybrid:
- * - `x`: Horizontal offset as a percentage (0% to 100%) of the canvas width.
- * - `width`: Horizontal span as a percentage (20% to 100%) of the canvas width.
- * - `y`: Vertical offset in absolute pixels from the top of the canvas.
- * - `height`: Vertical height in absolute pixels.
+ * All geometry is in absolute CSS pixels relative to the canvas top-left corner:
+ * - `x`: Horizontal offset (0 to {@link blockLimits}.maxX).
+ * - `y`: Vertical offset (0 to 5000).
+ * - `width`: Horizontal span ({@link blockLimits}.minWidth to maxWidth).
+ * - `height`: Vertical span ({@link blockLimits}.minHeight to maxHeight).
  */
 export type BuilderBlock = {
 	/** Unique identifier for the block instance (UUID). */
@@ -82,13 +82,13 @@ export type BuilderBlock = {
 	theme: Theme;
 	/** Whether the block is positioned with coordinates (always true in current version). */
 	positioned: boolean;
-	/** Horizontal coordinate as percentage of canvas width (0-100). */
+	/** Horizontal coordinate in pixels from the canvas left edge. */
 	x: number;
 	/** Vertical coordinate in pixels from canvas top. */
 	y: number;
-	/** Width as percentage of canvas width (20-100). */
+	/** Width in pixels. */
 	width: number;
-	/** Height in pixels (100-1600). */
+	/** Height in pixels. */
 	height: number;
 	/** Input value for text fields, textareas, and select menus. */
 	value: string;
@@ -100,6 +100,12 @@ export type BuilderBlock = {
 	href: string;
 	/** Whether external links should open in a new browser tab. */
 	newTab: boolean;
+	/**
+	 * Newline-separated entries for list-like Flowbite widgets (accordion sections, tabs, table rows,
+	 * breadcrumb crumbs, …). Each widget documents its own line format; `undefined` means "use the
+	 * widget's built-in sample entries".
+	 */
+	items?: string;
 	/** Dynamic properties for custom Svelte components imported from target projects. */
 	customProps?: Record<string, string | number | boolean>;
 };
@@ -165,6 +171,16 @@ export const canvasLimits = {
 	maxWidth: 3840,
 	minHeight: 300,
 	maxHeight: 5000
+};
+
+/** Pixel bounds for a block's geometry (all values are CSS pixels). */
+export const blockLimits = {
+	minWidth: 16,
+	maxWidth: 3840,
+	minHeight: 16,
+	maxHeight: 1600,
+	maxX: 3840,
+	maxY: 5000
 };
 
 /** A named, commonly used canvas resolution (CSS pixels). */
@@ -240,7 +256,7 @@ export function isValidLinkHref(href: string): boolean {
  * Parses, sanitizes, and bounds-checks an untrusted block collection payload.
  *
  * Automatically converts legacy flow blocks into positioned blocks and enforces
- * geometry limits (e.g., width 20-100%, height 100-1600px).
+ * pixel geometry limits ({@link blockLimits}).
  *
  * @param value - Untrusted JSON or parsed object array.
  * @returns Validated BuilderBlock array, or `null` if the payload is malformed.
@@ -257,15 +273,16 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 
 		const block = item as Record<string, unknown>;
 		const positioned = block.positioned ?? true;
-		const x = block.x ?? 6;
+		const x = block.x ?? 24;
 		const y = block.y ?? 40;
-		const width = block.width ?? 88;
-		const height = block.height ?? 260;
+		const width = block.width ?? 240;
+		const height = block.height ?? 40;
 		const value = block.value ?? '';
 		const checked = block.checked ?? false;
 		const level = block.level ?? 60;
 		const href = block.href ?? '';
 		const newTab = block.newTab ?? false;
+		const items = block.items ?? '';
 
 		if (
 			typeof block.id !== 'string' ||
@@ -286,20 +303,19 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			typeof x !== 'number' ||
 			!Number.isFinite(x) ||
 			x < 0 ||
-			x > 100 ||
+			x > blockLimits.maxX ||
 			typeof y !== 'number' ||
 			!Number.isFinite(y) ||
 			y < 0 ||
-			y > 5000 ||
+			y > blockLimits.maxY ||
 			typeof width !== 'number' ||
 			!Number.isFinite(width) ||
-			width < 20 ||
-			width > 100 ||
-			x + width > 100 ||
+			width < blockLimits.minWidth ||
+			width > blockLimits.maxWidth ||
 			typeof height !== 'number' ||
 			!Number.isFinite(height) ||
-			height < 100 ||
-			height > 1600 ||
+			height < blockLimits.minHeight ||
+			height > blockLimits.maxHeight ||
 			typeof value !== 'string' ||
 			value.length > 100 ||
 			typeof checked !== 'boolean' ||
@@ -309,14 +325,16 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			level > 100 ||
 			typeof href !== 'string' ||
 			!isValidLinkHref(href) ||
-			typeof newTab !== 'boolean'
+			typeof newTab !== 'boolean' ||
+			typeof items !== 'string' ||
+			items.length > 600
 		) {
 			return null;
 		}
 
 		const positionedY = positioned ? y : nextFlowPosition;
 		ids.add(block.id);
-		if (!positioned) nextFlowPosition = Math.min(5000, positionedY + height + 40);
+		if (!positioned) nextFlowPosition = Math.min(blockLimits.maxY, positionedY + height + 16);
 
 		let customProps: Record<string, string | number | boolean> | undefined;
 		if (
@@ -351,6 +369,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			level,
 			href,
 			newTab,
+			...(items ? { items } : {}),
 			...(customProps ? { customProps } : {})
 		});
 	}

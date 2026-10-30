@@ -1,13 +1,15 @@
 <script lang="ts">
 	/**
 	 * @component WidgetCard
-	 * Content card container widget grouping title, description, and link action.
+	 * Flowbite `Card` grouping a heading, text and an action button.
 	 *
-	 * @prop {string} title - Card title headline.
-	 * @prop {string} body - Summary paragraph.
-	 * @prop {string} action - Card link button text.
-	 * @prop {() => void} [onchange] - Optional click action handler.
+	 * @prop {string} title - Card heading.
+	 * @prop {string} body - Card text.
+	 * @prop {string} action - Button label.
+	 * @prop {() => void} [onchange] - Called when the button is clicked.
 	 */
+	import { Card, Button } from 'flowbite-svelte';
+
 	let {
 		title,
 		body,
@@ -16,64 +18,12 @@
 	}: { title: string; body: string; action: string; onchange?: () => void } = $props();
 </script>
 
-<div class="widget-preview widget-card-preview">
-	<span class="widget-card-mark" aria-hidden="true">✦</span>
-	<h2>{title}</h2>
-	<p>{body}</p>
-	<button type="button" onclick={() => onchange?.()}
-		>{action} <span aria-hidden="true">↗</span></button
-	>
+<div class="flex h-full w-full items-center overflow-hidden">
+	<Card size="xl" class="h-full w-full max-w-none justify-between gap-1 overflow-hidden p-3">
+		<div class="min-h-0">
+			<h5 class="truncate text-base font-bold">{title}</h5>
+			<p class="text-sm opacity-80">{body}</p>
+		</div>
+		{#if action}<div><Button size="xs" onclick={() => onchange?.()}>{action}</Button></div>{/if}
+	</Card>
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-	.widget-card-preview {
-		align-items: flex-start;
-		border: 1px solid #e8e8ef;
-		border-radius: 10px;
-		box-shadow: 0 5px 16px rgb(34 34 56 / 0.07);
-	}
-	.widget-card-mark {
-		color: #7667dd;
-		font-size: 1.2rem;
-	}
-	.widget-card-preview h2 {
-		margin: 0;
-		color: #36384d;
-		font-size: 0.95rem;
-		font-weight: 700;
-	}
-	.widget-card-preview button {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.45rem;
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: #6253ca;
-		font: inherit;
-		font-size: 0.7rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-</style>

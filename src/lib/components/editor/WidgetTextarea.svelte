@@ -1,16 +1,17 @@
 <script lang="ts">
 	/**
 	 * @component WidgetTextarea
-	 * Multi-line textarea form widget for long-form user responses.
+	 * Flowbite `Textarea` multi-line input with label and helper text.
 	 *
-	 * @prop {string} [id] - Optional element ID (falls back to generated ID).
-	 * @prop {string} title - Field label text.
-	 * @prop {string} action - Textarea placeholder text.
-	 * @prop {string} body - Helper text below textarea.
-	 * @prop {string} [value] - Two-way bindable textarea content.
-	 * @prop {() => void} [onchange] - Input change callback.
+	 * @prop {string} [id] - Block id, used to link label and textarea.
+	 * @prop {string} title - Label text.
+	 * @prop {string} action - Placeholder text.
+	 * @prop {string} body - Helper text.
+	 * @prop {string} [value] - `$bindable()` textarea value.
+	 * @prop {() => void} [onchange] - Called when the user edits the value.
 	 */
-	const generatedId = $props.id();
+	import { Textarea, Label, Helper } from 'flowbite-svelte';
+
 	let {
 		id = '',
 		title,
@@ -26,68 +27,18 @@
 		value?: string;
 		onchange?: () => void;
 	} = $props();
-	let inputId = $derived(id || generatedId);
+	const inputId = $derived(`textarea-${id}`);
 </script>
 
-<div class="widget-preview widget-form">
-	<label for={inputId}>{title}</label>
-	<textarea
+<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+	<Label for={inputId} class="text-sm">{title}</Label>
+	<Textarea
+		class="h-full min-h-0 resize-none"
 		id={inputId}
 		placeholder={action}
+		maxlength={100}
 		bind:value
-		maxlength="100"
-		oninput={() => onchange?.()}></textarea>
-	<p>{body}</p>
+		oninput={() => onchange?.()}
+	/>
+	{#if body}<Helper>{body}</Helper>{/if}
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-	.widget-form {
-		align-items: stretch;
-	}
-	.widget-form label {
-		color: #4a4b60;
-		font-size: 0.72rem;
-		font-weight: 650;
-	}
-	.widget-form textarea {
-		width: 100%;
-		min-height: 40px;
-		box-sizing: border-box;
-		padding: 0.6rem 0.7rem;
-		border: 1px solid #dfe0e8;
-		border-radius: 7px;
-		background: #fff;
-		color: #393b50;
-		font: inherit;
-		font-size: 0.72rem;
-	}
-	.widget-form textarea:focus {
-		border-color: #9285ec;
-		outline: 3px solid rgb(119 102 223 / 12%);
-	}
-	.widget-form textarea {
-		min-height: 90px;
-		resize: vertical;
-	}
-</style>

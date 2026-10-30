@@ -7,15 +7,20 @@
 	 * - `beforeNavigate` asks for confirmation when the active route reports unsaved changes
 	 *   and the navigation would leave that route (page switches inside the editor are fine).
 	 */
+	import { onMount } from 'svelte';
 	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import DemoLinks from './demo/DemoLinks.svelte';
 	import type { LayoutProps } from './$types';
 	import AppNav from '../lib/components/AppNav.svelte';
 	import { nav, trackNavigation } from '../lib/navigation.svelte.js';
 	import { toPath } from '../lib/navigation-trail.js';
+	import { loadWidgetOverrides } from '../lib/widget-runtime.svelte.js';
 	import './layout.css';
 
 	let { children }: LayoutProps = $props();
+
+	// Edited built-in widgets (Components page) are compiled in the browser for canvas/preview.
+	onMount(() => void loadWidgetOverrides());
 
 	afterNavigate((navigation) => {
 		if (!navigation.to) return;

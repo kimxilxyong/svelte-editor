@@ -1,80 +1,51 @@
 <script lang="ts">
 	/**
 	 * @component WidgetSelect
-	 * Dropdown selection menu widget for picking from options.
+	 * Flowbite `Select` dropdown field.
 	 *
-	 * @prop {string} [id] - Select element ID.
-	 * @prop {string} title - Menu label text.
-	 * @prop {string} body - Explanatory helper caption.
-	 * @prop {string} [value=''] - Two-way bindable selected value.
-	 * @prop {() => void} [onchange] - Change event callback.
+	 * @prop {string} [id] - Block id, used to link label and select.
+	 * @prop {string} title - Label text.
+	 * @prop {string} body - Helper text.
+	 * @prop {string} [items] - Options, one per line. Defaults to a sample country list.
+	 * @prop {string} [value] - `$bindable()` selected option.
+	 * @prop {() => void} [onchange] - Called when the selection changes.
 	 */
-	const generatedId = $props.id();
+	import { Select, Label, Helper } from 'flowbite-svelte';
+
 	let {
 		id = '',
 		title,
 		body,
+		items = '',
 		value = $bindable(''),
 		onchange
-	}: { id?: string; title: string; body: string; value?: string; onchange?: () => void } = $props();
-	let inputId = $derived(id || generatedId);
+	}: {
+		id?: string;
+		title: string;
+		body: string;
+		items?: string;
+		value?: string;
+		onchange?: () => void;
+	} = $props();
+	const options = $derived(
+		(items || 'Canada\nUnited States\nUnited Kingdom')
+			.split('\n')
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((name) => ({ value: name, name }))
+	);
+	const inputId = $derived(`select-${id}`);
 </script>
 
-<div class="widget-preview widget-form">
-	<label for={inputId}>{title}</label>
-	<select bind:value id={inputId} onchange={() => onchange?.()}>
-		<option value="">Choose an option</option>
-		<option value="Canada">Canada</option>
-		<option value="United States">United States</option>
-		<option value="United Kingdom">United Kingdom</option>
-	</select>
-	<p>{body}</p>
+<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+	<Label for={inputId} class="text-sm">{title}</Label>
+	<Select
+		size="sm"
+		id={inputId}
+		items={options}
+		placeholder="Choose an option"
+		bind:value
+		onchange={() => onchange?.()}
+	/>
+	{#if body}<Helper>{body}</Helper>{/if}
 </div>
-
-<style>
-	.widget-preview {
-		width: 100%;
-		height: 100%;
-		min-height: 130px;
-		box-sizing: border-box;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		gap: 0.7rem;
-		padding: 1.5rem;
-		overflow: auto;
-		background: #fff;
-		color: #323449;
-		font-size: 0.78rem;
-	}
-	.widget-preview p {
-		margin: 0;
-		color: #85869a;
-		font-size: 0.68rem;
-		line-height: 1.55;
-	}
-	.widget-form {
-		align-items: stretch;
-	}
-	.widget-form label {
-		color: #4a4b60;
-		font-size: 0.72rem;
-		font-weight: 650;
-	}
-	.widget-form select {
-		width: 100%;
-		min-height: 40px;
-		box-sizing: border-box;
-		padding: 0.6rem 0.7rem;
-		border: 1px solid #dfe0e8;
-		border-radius: 7px;
-		background: #fff;
-		color: #393b50;
-		font: inherit;
-		font-size: 0.72rem;
-	}
-	.widget-form select:focus {
-		border-color: #9285ec;
-		outline: 3px solid rgb(119 102 223 / 12%);
-	}
-</style>

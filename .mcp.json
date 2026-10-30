@@ -6,6 +6,16 @@
 			"tools": [
 				"*"
 			]
+		},
+		"flowbite-svelte": {
+			"type": "stdio",
+			"command": "node",
+			"args": [
+				"/home/kim/source/svelte-editor/.mcp-servers/flowbite-svelte-mcp-main/build/server.js"
+			],
+			"tools": [
+				"*"
+			]
 		}
 	}
 }

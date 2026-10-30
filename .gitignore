@@ -30,3 +30,6 @@ test-results
 
 # Database backend configuration and local state
 .data/
+
+# Local MCP servers (cloned + built per developer)
+.mcp-servers/

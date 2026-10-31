@@ -3,13 +3,12 @@
 	 * @fileoverview Visual Drag-and-Drop canvas editor shared by `/editor` (pages) and
 	 * `/composites` (Composite Components).
 	 *
-	 * The `mode` prop selects what is edited. In `pages` mode the documents are the site's pages;
-	 * in `composites` mode they are the reusable Composite Components (named groups of widgets),
-	 * mapped to the page-shaped `EditorPage` (slug = name) so the same canvas, history and
-	 * inspector code serves both. The kind not being edited is stashed and merged back on save, so
-	 * every save writes the whole `EditorSite`. Composites render through `provideComposites`
-	 * (see `composite-context.ts`); placing a composite inside another is cycle-checked here and
-	 * on the server.
+	 * The `mode` prop selects the domain documents edited by the shared canvas: site pages or
+	 * reusable Composite Components. Their persisted shapes remain distinct; `editor-mode.ts`
+	 * selects the active collection and merges it back with the untouched collection on save.
+	 * Canvas interaction, history and inspector behavior are shared. Composites render through
+	 * `provideComposites` (see `composite-context.ts`); placing a composite inside another is
+	 * cycle-checked here and on the server.
 	 *
 	 * Architecture & Features:
 	 * 1. Palette:
@@ -22,7 +21,7 @@
 	 *      (corners + edges) to resize; dragging inside the block moves it. Both snap to an
 	 *      8px grid (hold Alt to bypass). Keyboard: arrows move, Alt+arrows resize (Shift = 10px).
 	 *    - Automatic vertical expansion accommodating block boundaries.
-	 *    - Multi-page switching and route jump support in Preview mode.
+	 *    - Mode-specific document switching and route jump support in Preview mode.
 	 * 3. History & State Management:
 	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
 	 *    - Duplicate (Ctrl+D) and Delete (Delete/Backspace) keyboard commands.
@@ -36,8 +35,8 @@
 
 	/**
 	 * @component SiteEditor
-	 * @prop {'pages' | 'composites'} [mode='pages'] - Which documents the canvas edits. Fixed for
-	 *   the lifetime of the component (the routes mount one editor per mode).
+	 * @prop {'pages' | 'composites'} [mode='pages'] - Which domain collection the shared canvas
+	 *   edits. Fixed for the component lifetime; routes mount one editor per mode.
 	 */
 	import { onMount } from 'svelte';
 	import { page as routePage } from '$app/state';
@@ -71,6 +70,15 @@
 		widgetCategories,
 		type WidgetCategory
 	} from '../widget-catalog.js';
+	import {
+		editorDocumentLabel,
+		editorDocumentsForMode,
+		isEditorPage,
+		linkPagesForMode,
+		mergeEditorDocuments,
+		type EditorDocument,
+		type EditorMode
+	} from '../editor-mode.js';
 
 	/** Compass direction of the selection-frame handle being dragged (corners and edges). */
 	type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
@@ -84,8 +92,9 @@
 	type PaletteTab = 'composites' | 'widgets' | 'custom';
 
 	/** `pages`: edits site pages. `composites`: edits composite components on the same canvas. */
-	let { mode = 'pages' }: { mode?: 'pages' | 'composites' } = $props();
-	const composing = untrack(() => mode === 'composites');
+	let { mode = 'pages' }: { mode?: EditorMode } = $props();
+	const editorMode = untrack(() => mode);
+	const composing = editorMode === 'composites';
 	/** Route that hosts this editor and the query parameter selecting the open document. */
 	const basePath = composing ? '/composites' : '/editor';
 	const paramName = composing ? 'composite' : 'page';
@@ -189,34 +198,27 @@
 		}))
 	};
 
-	/** Composites are edited as page-shaped documents (the slug mirrors the name). */
-	const toDoc = (composite: EditorComposite): EditorPage => ({
-		...composite,
-		slug: composite.name
-	});
-	const toComposite = (doc: EditorPage): EditorComposite => ({
-		id: doc.id,
-		name: doc.name,
-		width: doc.width,
-		height: doc.height,
-		blocks: doc.blocks
-	});
-
 	/**
-	 * The documents being edited: the site's pages, or (in composite mode) its composites. The
-	 * other kind is kept untouched in `stashed*` and merged back when saving, so one save always
-	 * writes the complete site.
+	 * The active documents keep their domain shapes: pages retain their slug and composites have
+	 * none. The untouched collection is stashed and merged back on save.
 	 */
-	let pages = $state<EditorPage[]>(composing ? seedComposites().map(toDoc) : [initialPage]);
+	const initialDocuments: EditorDocument[] = composing ? seedComposites() : [initialPage];
+	let documents = $state<EditorDocument[]>(initialDocuments);
 	let stashedPages = $state.raw<EditorPage[]>(composing ? [initialPage] : []);
 	let stashedComposites = $state.raw<EditorComposite[]>(composing ? [] : seedComposites());
 	/** Composites that `composite:<Name>` blocks render from (live while editing one). */
-	const composites = $derived(composing ? pages.map(toComposite) : stashedComposites);
+	const composites = $derived(
+		composing
+			? documents.filter((document): document is EditorComposite => !isEditorPage(document))
+			: stashedComposites
+	);
 	provideComposites(() => composites);
 
-	let currentPageId = $state(composing ? 'seed-hero' : 'home');
-	let currentPage = $derived(pages.find((page) => page.id === currentPageId) ?? pages[0]);
-	let blocks = $derived(currentPage.blocks);
+	let currentDocumentId = $state(composing ? 'seed-hero' : 'home');
+	let currentDocument = $derived(
+		documents.find((document) => document.id === currentDocumentId) ?? documents[0]
+	);
+	let blocks = $derived(currentDocument.blocks);
 	let selectedId = $state<string | null>(composing ? 'seed-hero-0' : 'sample-hero');
 	let paletteTab = $state<PaletteTab>(composing ? 'widgets' : 'composites');
 	let isPreview = $state(false);
@@ -232,10 +234,11 @@
 	);
 
 	let hasUnsavedChanges = $state(true);
+	const linkPages = $derived(linkPagesForMode(editorMode, documents, stashedPages));
 	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
 	useNavContext(() => ({
-		pages: composing ? [] : pages,
-		activePageId: composing ? null : currentPageId,
+		pages: composing ? [] : linkPages,
+		activePageId: composing ? null : currentDocumentId,
 		unsavedChanges: hasUnsavedChanges
 	}));
 	let revision = $state(0);
@@ -244,7 +247,7 @@
 	let redoStack = $state.raw<string[]>([]);
 	let historyPending = $state(false);
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
-	let committedSnapshot = JSON.stringify([initialPage]);
+	let committedSnapshot = JSON.stringify(initialDocuments);
 	let canvasElement: HTMLDivElement | null = null;
 	/** Grid size in canvas pixels that moves and resizes snap to (hold Alt while dragging to bypass). */
 	const SNAP_GRID = 8;
@@ -269,13 +272,15 @@
 
 	let customKinds = $derived([
 		...new Set(
-			pages.flatMap((page) => page.blocks.map((b) => b.kind).filter((k) => k.startsWith('custom:')))
+			documents.flatMap((document) =>
+				document.blocks.map((block) => block.kind).filter((kind) => kind.startsWith('custom:'))
+			)
 		)
 	]);
 	let selectedBlock = $derived(blocks.find((block) => block.id === selectedId));
 	let blockCount = $derived(blocks.length);
 	let canvasHeight = $derived(
-		Math.max(currentPage.height, ...blocks.map((block) => block.y + block.height + 40))
+		Math.max(currentDocument.height, ...blocks.map((block) => block.y + block.height + 40))
 	);
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
@@ -320,19 +325,21 @@
 		}
 
 		if (result.site) {
+			// A site without composites yet: offer the starters so there is something to edit.
+			const site =
+				composing && result.site.composites.length === 0
+					? { ...result.site, composites: seedComposites() }
+					: result.site;
 			if (composing) {
-				stashedPages = result.site.pages;
-				// A site without composites yet: offer the starters so there is something to edit.
-				const loaded = result.site.composites.length ? result.site.composites : seedComposites();
-				pages = loaded.map(toDoc);
+				stashedPages = site.pages;
 			} else {
-				pages = result.site.pages;
-				stashedComposites = result.site.composites;
+				stashedComposites = site.composites;
 			}
-			currentPageId =
-				pages.find((item) => item.id === routePage.url.searchParams.get(paramName))?.id ??
-				pages[0].id;
-			selectedId = currentPage.blocks[0]?.id ?? null;
+			documents = editorDocumentsForMode(editorMode, site);
+			currentDocumentId =
+				documents.find((item) => item.id === routePage.url.searchParams.get(paramName))?.id ??
+				documents[0].id;
+			selectedId = currentDocument.blocks[0]?.id ?? null;
 			resetHistory();
 			hasUnsavedChanges = false;
 			databaseStatus = 'Saved site loaded from the database';
@@ -357,16 +364,16 @@
 	async function savePageToDatabase() {
 		if (databaseBusy || readOnlyNotice) return;
 
-		if (pages.some((page) => page.blocks.some((block) => !isValidLinkHref(block.href)))) {
+		if (
+			documents.some((document) => document.blocks.some((block) => !isValidLinkHref(block.href)))
+		) {
 			databaseStatus = 'A link address is invalid. Use /page or https://…';
 			return;
 		}
 
 		const savedRevision = revision;
-		const edited = $state.snapshot(pages);
-		const siteSnapshot: EditorSite = composing
-			? { pages: [...stashedPages], composites: edited.map(toComposite) }
-			: { pages: edited, composites: [...stashedComposites] };
+		const edited = $state.snapshot(documents);
+		const siteSnapshot = mergeEditorDocuments(editorMode, edited, stashedPages, stashedComposites);
 		const cycle = findCompositeCycle(siteSnapshot.composites);
 		if (cycle) {
 			databaseStatus = `Composite "${cycle}" contains itself. Remove the loop to save.`;
@@ -403,7 +410,7 @@
 	}
 
 	function takeSnapshot() {
-		return JSON.stringify($state.snapshot(pages));
+		return JSON.stringify($state.snapshot(documents));
 	}
 
 	function commitHistory() {
@@ -425,9 +432,11 @@
 	}
 
 	function restoreSnapshot(snapshot: string) {
-		pages = JSON.parse(snapshot) as EditorPage[];
-		if (!pages.some((page) => page.id === currentPageId)) currentPageId = pages[0].id;
-		if (!currentPage.blocks.some((block) => block.id === selectedId)) selectedId = null;
+		documents = JSON.parse(snapshot) as EditorDocument[];
+		if (!documents.some((document) => document.id === currentDocumentId)) {
+			currentDocumentId = documents[0].id;
+		}
+		if (!currentDocument.blocks.some((block) => block.id === selectedId)) selectedId = null;
 		committedSnapshot = snapshot;
 		revision += 1;
 		hasUnsavedChanges = true;
@@ -453,37 +462,32 @@
 	}
 
 	/**
-	 * Selects a page. The URL (`?page=<id>`) is the source of truth for history: the state is
-	 * applied immediately for responsiveness and a history entry is pushed so browser/app Back
-	 * returns to the previously edited page. The URL effect below handles the reverse direction.
+	 * Selects a document. Its mode-specific URL parameter is the source of truth for browser
+	 * history; selection updates immediately while the URL effect handles Back/Forward changes.
 	 */
-	function selectPage(id: string) {
-		applyPageSelection(id);
+	function selectDocument(id: string) {
+		applyDocumentSelection(id);
 		if (routePage.url.searchParams.get(paramName) !== id) {
 			void goto(resolve(`${basePath}?${paramName}=${encodeURIComponent(id)}`), { reset: false });
 		}
 	}
 
-	function applyPageSelection(id: string) {
-		currentPageId = id;
+	function applyDocumentSelection(id: string) {
+		currentDocumentId = id;
 		selectedId = null;
 		routeError = null;
 	}
 
-	// URL → state: browser Back/Forward (or a typed URL) changes `?page=`. Only the URL is
-	// tracked so that adding pages or editing never resets the selection.
+	// URL → state: browser Back/Forward (or a typed URL) changes the selected document.
 	$effect(() => {
 		const urlPageId = routePage.url.searchParams.get(paramName);
 		untrack(() => {
-			const id = urlPageId ?? pages[0]?.id;
-			if (id && id !== currentPageId && pages.some((item) => item.id === id)) {
-				applyPageSelection(id);
+			const id = urlPageId ?? documents[0]?.id;
+			if (id && id !== currentDocumentId && documents.some((item) => item.id === id)) {
+				applyDocumentSelection(id);
 			}
 		});
 	});
-
-	/** Pages that links may point to (in composite mode these come from the stashed site pages). */
-	const linkPages = $derived(composing ? stashedPages : pages);
 
 	function resolveInternalPage(href: string) {
 		const slug = href.slice(1).split(/[?#]/)[0];
@@ -499,14 +503,14 @@
 
 		event.preventDefault();
 		const target = resolveInternalPage(block.href);
-		if (target && !composing) selectPage(target.id);
+		if (target && !composing) selectDocument(target.id);
 		else routeError = `No page found at ${block.href}`;
 	}
 
 	/** Composites that may be placed on the open document (never itself or one that contains it). */
 	const placeableComposites = $derived.by(() => {
 		if (!composing) return composites;
-		const open = currentPage.name;
+		const open = currentDocument.name;
 		return composites.filter((item) => {
 			if (item.name === open) return false;
 			const trial = composites.map((c) =>
@@ -525,53 +529,53 @@
 			routeError = problem;
 			return;
 		}
-		const doc: EditorPage = {
+		const doc: EditorComposite = {
 			id: globalThis.crypto.randomUUID(),
 			name,
-			slug: name,
 			width: 960,
 			height: 360,
 			blocks: []
 		};
-		pages.push(doc);
+		documents.push(doc);
 		markUnsaved();
-		selectPage(doc.id);
+		selectDocument(doc.id);
 	}
 
 	/** Renames the open composite; instances elsewhere follow on the next save. */
 	function renameComposite() {
-		const name = window.prompt('New name:', currentPage.name)?.trim();
-		if (!name || name === currentPage.name) return;
-		const problem = compositeNameProblem(name, currentPage.id);
+		const name = window.prompt('New name:', currentDocument.name)?.trim();
+		if (!name || name === currentDocument.name) return;
+		const problem = compositeNameProblem(name, currentDocument.id);
 		if (problem) {
 			routeError = problem;
 			return;
 		}
-		const previous = compositeKind(currentPage.name);
+		const previous = compositeKind(currentDocument.name);
 		const next = compositeKind(name);
-		for (const doc of pages)
+		for (const doc of documents)
 			for (const block of doc.blocks) if (block.kind === previous) block.kind = next;
 		for (const doc of stashedPages)
 			for (const block of doc.blocks) if (block.kind === previous) block.kind = next;
 		stashedPages = JSON.parse(JSON.stringify(stashedPages));
-		currentPage.name = name;
-		currentPage.slug = name;
+		currentDocument.name = name;
 		markUnsaved();
 	}
 
 	/** Deletes the open composite after confirmation; blocks that used it keep a placeholder. */
 	function deleteComposite() {
-		if (pages.length < 2) {
+		if (documents.length < 2) {
 			routeError = 'Keep at least one composite, or create another first.';
 			return;
 		}
 		if (
-			!window.confirm(`Delete composite "${currentPage.name}"? Pages using it show a placeholder.`)
+			!window.confirm(
+				`Delete composite "${currentDocument.name}"? Pages using it show a placeholder.`
+			)
 		)
 			return;
-		const index = pages.findIndex((doc) => doc.id === currentPageId);
-		pages.splice(index, 1);
-		selectPage(pages[Math.max(0, index - 1)].id);
+		const index = documents.findIndex((doc) => doc.id === currentDocumentId);
+		documents.splice(index, 1);
+		selectDocument(documents[Math.max(0, index - 1)].id);
 		markUnsaved();
 	}
 
@@ -580,7 +584,7 @@
 		if (!isValidCompositeKind(compositeKind(name))) {
 			return 'Use a PascalCase name: letters and digits, starting with a capital letter.';
 		}
-		if (pages.some((doc) => doc.id !== ignoreId && doc.name === name)) {
+		if (documents.some((doc) => doc.id !== ignoreId && doc.name === name)) {
 			return `A composite named "${name}" already exists.`;
 		}
 		return null;
@@ -659,7 +663,7 @@
 		const source = kind.startsWith('composite:')
 			? composites.find((item) => compositeKind(item.name) === kind)
 			: undefined;
-		const fit = source ? Math.min(1, (currentPage.width - 48) / source.width) : 1;
+		const fit = source ? Math.min(1, (currentDocument.width - 48) / source.width) : 1;
 		return {
 			...base,
 			id: globalThis.crypto.randomUUID(),
@@ -705,7 +709,7 @@
 			startHeight: block.height,
 			pointerX: event.clientX,
 			pointerY: event.clientY,
-			scale: canvasElement.getBoundingClientRect().width / currentPage.width || 1
+			scale: canvasElement.getBoundingClientRect().width / currentDocument.width || 1
 		};
 	}
 
@@ -846,7 +850,7 @@
 		const bounds = canvasElement.getBoundingClientRect();
 		const block = createBlock(kind);
 		// Pointer position → canvas pixels (the rendered canvas may be scaled).
-		const scale = bounds.width / currentPage.width || 1;
+		const scale = bounds.width / currentDocument.width || 1;
 		const pointerX = (clientX - bounds.left) / scale;
 		const pointerY = (clientY - bounds.top) / scale;
 		block.x = Math.round(
@@ -917,13 +921,13 @@
 	function deleteSelected() {
 		if (!selectedId) return;
 		const index = blocks.findIndex((block) => block.id === selectedId);
-		currentPage.blocks = currentPage.blocks.filter((block) => block.id !== selectedId);
+		currentDocument.blocks = currentDocument.blocks.filter((block) => block.id !== selectedId);
 		selectedId = blocks[Math.min(index, blocks.length - 1)]?.id ?? null;
 		markUnsaved();
 	}
 
 	function clearPage() {
-		currentPage.blocks = [];
+		currentDocument.blocks = [];
 		selectedId = null;
 		markUnsaved();
 	}
@@ -1109,13 +1113,11 @@
 					<label class="page-switch">
 						<span class="sr-only">{composing ? 'Composite' : 'Page'}</span>
 						<select
-							value={currentPage.id}
-							onchange={(event) => selectPage(event.currentTarget.value)}
+							value={currentDocument.id}
+							onchange={(event) => selectDocument(event.currentTarget.value)}
 						>
-							{#each pages as page (page.id)}
-								<option value={page.id}
-									>{composing ? page.name : `${page.name} · /${page.slug}`}</option
-								>
+							{#each documents as document (document.id)}
+								<option value={document.id}>{editorDocumentLabel(document)}</option>
 							{/each}
 						</select>
 					</label>
@@ -1131,7 +1133,7 @@
 									type="number"
 									min={compositeLimits.minWidth}
 									max={compositeLimits.maxWidth}
-									bind:value={currentPage.width}
+									bind:value={currentDocument.width}
 									oninput={markUnsaved}
 								/>
 							</label>
@@ -1141,7 +1143,7 @@
 									type="number"
 									min={compositeLimits.minHeight}
 									max={compositeLimits.maxHeight}
-									bind:value={currentPage.height}
+									bind:value={currentDocument.height}
 									oninput={markUnsaved}
 								/>
 							</label>
@@ -1166,7 +1168,7 @@
 					<div
 						class="page-canvas"
 						class:preview={isPreview}
-						style:width="{currentPage.width}px"
+						style:width="{currentDocument.width}px"
 						style:min-height="{canvasHeight}px"
 						role="region"
 						aria-label="Page canvas drop zone"

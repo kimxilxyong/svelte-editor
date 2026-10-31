@@ -17,7 +17,9 @@
 	 * @prop {number} [depth=0] - Composite nesting level; stops runaway recursion at
 	 *   {@link maxCompositeDepth}.
 	 * @prop {(event: MouseEvent, block: BuilderBlock) => void} [onlink] - Called when a link widget is
-	 *   clicked, so the host can decide between in-app navigation and a blocked click.
+	 *   clicked (link, button and card CTA anchors), so the host can decide between in-app navigation
+	 *   and a blocked click. Intentionally separate from `onchange`: following a link never edits the page.
+	 *   Composite children report their own block, so nested links resolve recursively.
 	 *
 	 * @example
 	 * <BlockContent bind:block onchange={markUnsaved} onlink={handleLinkClick} />
@@ -84,7 +86,13 @@
 		onnavigate={(event: MouseEvent) => onlink?.(event, block)}
 	/>
 {:else if block.kind === 'widget-button'}
-	<WidgetButton action={block.action} body={block.body} {onchange} />
+	<WidgetButton
+		action={block.action}
+		body={block.body}
+		href={block.href}
+		newTab={block.newTab}
+		onnavigate={(event) => onlink?.(event, block)}
+	/>
 {:else if block.kind === 'widget-text-field'}
 	<WidgetTextField
 		id={block.id}
@@ -153,7 +161,14 @@
 {:else if block.kind === 'widget-avatar'}
 	<WidgetAvatar title={block.title} body={block.body} />
 {:else if block.kind === 'widget-card'}
-	<WidgetCard title={block.title} body={block.body} action={block.action} {onchange} />
+	<WidgetCard
+		title={block.title}
+		body={block.body}
+		action={block.action}
+		href={block.href}
+		newTab={block.newTab}
+		onnavigate={(event) => onlink?.(event, block)}
+	/>
 {:else if block.kind === 'widget-link'}
 	<WidgetLink
 		title={block.title}

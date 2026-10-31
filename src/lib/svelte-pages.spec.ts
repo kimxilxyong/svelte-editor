@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { componentNames, type BlockKind, type EditorPage } from './editor.js';
-import { generatedMarker, parsePageSource, renderPageSource } from './svelte-pages.js';
+import {
+	generatedMarker,
+	parseCompositeSource,
+	parsePageSource,
+	renderCompositeSource,
+	renderPageSource
+} from './svelte-pages.js';
 
 function block(kind: BlockKind, index: number, overrides: Record<string, unknown> = {}) {
 	return {
@@ -39,8 +45,8 @@ describe('svelte page export/import', () => {
 					checked: kind === 'widget-switch',
 					level: kind === 'widget-slider' ? 33 : 60,
 					value: kind === 'widget-text-field' ? 'hello' : '',
-					href: kind === 'widget-link' ? '/home#top' : '',
-					newTab: kind === 'widget-link',
+					href: ['widget-link', 'widget-button', 'widget-card'].includes(kind) ? '/home#top' : '',
+					newTab: ['widget-link', 'widget-button', 'widget-card'].includes(kind),
 					items: kind === 'widget-select' ? 'A\nB' : undefined
 				})
 			)
@@ -67,6 +73,58 @@ describe('svelte page export/import', () => {
 			newTab: true,
 			title: 'Title'
 		});
+		for (const kind of ['widget-button', 'widget-card']) {
+			expect(byKind[kind], kind).toMatchObject({ href: '/home#top', newTab: true });
+		}
+	});
+
+	it('exports and re-imports button and card link settings in pages and composites', () => {
+		const blocks = [
+			block('widget-button', 0, { href: 'https://example.com/x?a=1&b=2', newTab: true }),
+			block('widget-card', 1, { href: '/about', newTab: false })
+		];
+		const page: EditorPage = {
+			id: 'p',
+			name: 'Links',
+			slug: 'links',
+			width: 800,
+			height: 600,
+			blocks
+		};
+		const pageSource = renderPageSource(page);
+		expect(pageSource).toContain('href="https://example.com/x?a=1&amp;b=2"');
+		expect(pageSource).toContain('newTab={true}');
+		const parsedPage = parsePageSource(pageSource, 'links');
+		expect(parsedPage?.blocks.map((item) => [item.href, item.newTab])).toEqual([
+			['https://example.com/x?a=1&b=2', true],
+			['/about', false]
+		]);
+
+		const compositeSource = renderCompositeSource({
+			id: 'c',
+			name: 'Cta',
+			width: 400,
+			height: 300,
+			blocks
+		});
+		expect(compositeSource).toContain('<WidgetButton');
+		const reparsed = parseCompositeSource(compositeSource);
+		expect(reparsed?.blocks.map((item) => [item.href, item.newTab])).toEqual([
+			['https://example.com/x?a=1&b=2', true],
+			['/about', false]
+		]);
+	});
+
+	it('drops pages whose imported button link is unsafe', () => {
+		const source = renderPageSource({
+			id: 'p',
+			name: 'Bad',
+			slug: 'bad',
+			width: 800,
+			height: 600,
+			blocks: [block('widget-button', 0)]
+		}).replace('href=""', 'href="javascript:alert(1)"');
+		expect(parsePageSource(source, 'bad')).toBeNull();
 	});
 
 	it('escapes quotes, braces and markup', () => {

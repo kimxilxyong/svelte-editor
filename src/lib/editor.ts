@@ -288,7 +288,8 @@ const slugPattern = /^[a-z0-9-]{1,40}$/;
  *
  * Accepts:
  * - Empty string
- * - Relative internal paths matching `^/[a-z0-9\-_/#?=&.]*$`
+ * - Relative internal paths matching `^/[a-z0-9\-_/#?=&.]*$` that do not start with `//`
+ *   (a protocol-relative `//host` address would leave the site)
  * - Absolute HTTP/HTTPS URLs matching `^https?://[^\s]+$`
  *
  * Rejects javascript: URLs, data: URIs, or overly long inputs (>200 chars).
@@ -300,7 +301,7 @@ export function isValidLinkHref(href: string): boolean {
 	return (
 		href === '' ||
 		(href.length <= 200 &&
-			(/^\/[a-z0-9\-_/#?=&.]*$/i.test(href) || /^https?:\/\/[^\s]+$/i.test(href)))
+			(/^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href) || /^https?:\/\/[^\s]+$/i.test(href)))
 	);
 }
 

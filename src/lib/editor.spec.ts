@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockLimits, parseBuilderBlocks } from './editor.js';
+import { blockLimits, isValidLinkHref, parseBuilderBlocks } from './editor.js';
 
 const base = {
 	id: 'a',
@@ -35,5 +35,27 @@ describe('parseBuilderBlocks pixel geometry', () => {
 		expect(parseBuilderBlocks([{ ...base, width: blockLimits.maxWidth + 1 }])).toBeNull();
 		expect(parseBuilderBlocks([{ ...base, height: blockLimits.maxHeight + 1 }])).toBeNull();
 		expect(parseBuilderBlocks([{ ...base, x: -1 }])).toBeNull();
+	});
+});
+
+describe('isValidLinkHref', () => {
+	it('accepts empty, internal and http(s) targets', () => {
+		for (const href of ['', '/home', '/about#team', 'https://example.com/a?b=1', 'http://x.dev']) {
+			expect(isValidLinkHref(href), href).toBe(true);
+		}
+	});
+
+	it('rejects script, data, protocol-relative and overlong targets', () => {
+		for (const href of [
+			'javascript:alert(1)',
+			'data:text/html,x',
+			'//evil.example',
+			'ftp://example.com',
+			'home',
+			'https://exa mple.com',
+			`/${'a'.repeat(200)}`
+		]) {
+			expect(isValidLinkHref(href), href).toBe(false);
+		}
 	});
 });

@@ -59,7 +59,7 @@ type PropName =
  * Prop attribute whitelist mapping for each built-in widget kind.
  */
 const kindProps: Record<WidgetKind, PropName[]> = {
-	'widget-button': ['body', 'action'],
+	'widget-button': ['body', 'action', 'href', 'newTab'],
 	'widget-text-field': ['title', 'body', 'action', 'value'],
 	'widget-textarea': ['title', 'body', 'action', 'value'],
 	'widget-checkbox': ['title', 'body', 'checked'],
@@ -71,7 +71,7 @@ const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-alert': ['title', 'body'],
 	'widget-progress': ['title', 'body', 'level'],
 	'widget-avatar': ['title', 'body'],
-	'widget-card': ['title', 'body', 'action'],
+	'widget-card': ['title', 'body', 'action', 'href', 'newTab'],
 	'widget-link': ['title', 'body', 'href', 'newTab']
 };
 

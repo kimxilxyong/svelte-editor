@@ -25,10 +25,13 @@
 	 * 3. History & State Management:
 	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
 	 *    - Duplicate (Ctrl+D) and Delete (Delete/Backspace) keyboard commands.
-	 * 4. Inspector:
-	 *    - Geometry controls (X, Y, Width, Height — all px).
-	 *    - Layer ordering: To Front, Forward, Backward, To Back (z-order array management).
-	 *    - Dynamic prop editor for custom imported components and specialized widget controls.
+	 * 4. Inspector (UI extracted to `BlockInspector.svelte`; this component only supplies the
+	 *    selected block and callbacks for dirty marking, geometry clamping, layer order,
+	 *    duplicate and delete, and keeps history/navigation/persistence):
+	 *    - Geometry controls (X, Y, Width, Height — all px) and layer ordering.
+	 *    - Content controls limited to the fields each kind supports (`inspector-fields.ts`),
+	 *      including the Link Navigation group of link, button and card widgets.
+	 *    - Preview-mode link clicks (`handleLinkClick`) are routed here for in-app navigation.
 	 * 5. Database Integration:
 	 *    - Seamless load and save of `EditorSite` models with `/editor/api`.
 	 */
@@ -42,6 +45,7 @@
 	import { page as routePage } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import BlockInspector from './BlockInspector.svelte';
 	import { untrack } from 'svelte';
 	import BlockContent from './BlockContent.svelte';
 	import ThemeScope from './editor/ThemeScope.svelte';
@@ -104,10 +108,6 @@
 	const widgetInfo: Record<WidgetKind, { label: string; detail: string; mark: string }> =
 		widgetCatalog;
 	const widgetKinds = Object.keys(widgetInfo) as WidgetKind[];
-	/** Widgets whose action field is the label of a button. */
-	const actionWidgetKinds: BlockKind[] = [];
-	/** One-line format hint shown under the "Entries" editor of list-like widgets. */
-	const itemsHelp: Record<string, string> = { 'widget-select': 'One option per line.' };
 	let widgetQuery = $state('');
 	let widgetCategory = $state<'All' | WidgetCategory>('All');
 	/** Widgets matching the search box and category chip, grouped for display. */
@@ -285,6 +285,18 @@
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
 	);
+	/** "Edit composite" shortcut for a selected composite instance (shown by the inspector). */
+	const selectedComposite = $derived.by(() => {
+		if (!selectedBlock?.kind.startsWith('composite:')) return undefined;
+		const kind = selectedBlock.kind;
+		const target = composites.find((item) => compositeKind(item.name) === kind);
+		return target
+			? {
+					name: target.name,
+					id: target.id
+				}
+			: undefined;
+	});
 
 	let canUndo = $derived(undoStack.length > 0 || historyPending);
 	let canRedo = $derived(redoStack.length > 0);
@@ -1247,332 +1259,18 @@
 
 		{#if !isPreview}
 			<aside class="inspector-panel" aria-label="Selection inspector">
-				<div class="panel-heading inspector-heading">
-					<div>
-						<p class="eyebrow">MAKE IT YOURS</p>
-						<h2>Inspector</h2>
-					</div>
-					{#if selectedBlock}
-						<div class="inspector-actions">
-							<button
-								class="icon-button"
-								type="button"
-								aria-label="Duplicate selected block"
-								title="Duplicate (Ctrl+D)"
-								onclick={duplicateSelected}
-							>
-								<svg viewBox="0 0 20 20" aria-hidden="true"
-									><rect x="7" y="7" width="9" height="9" rx="1.5" /><path
-										d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2"
-									/></svg
-								>
-							</button>
-							<button
-								class="icon-button delete-button"
-								type="button"
-								aria-label="Delete selected block"
-								onclick={deleteSelected}
-							>
-								<svg viewBox="0 0 20 20" aria-hidden="true"
-									><path d="M4.5 6h11m-9.5 0 .6 10h6.8l.6-10M8 6V4h4v2m-3 3v4m2-4v4" /></svg
-								>
-							</button>
-						</div>
-					{/if}
-				</div>
-				{#if selectedBlock}
-					<div class="inspector-content">
-						<div class="selected-component">
-							<span class="component-mark" aria-hidden="true"
-								>{componentInfo[selectedBlock.kind].mark}</span
-							>
-							<div><strong>{selectedLabel}</strong><small>Selected block</small></div>
-						</div>
-						{#if selectedBlock.kind.startsWith('composite:')}
-							{@const target = composites.find(
-								(item) => compositeKind(item.name) === selectedBlock?.kind
-							)}
-							{#if target}
-								<a
-									class="text-button edit-composite"
-									href={resolve(`/composites?composite=${encodeURIComponent(target.id)}`)}
-									>Edit composite “{target.name}”</a
-								>
-							{/if}
-						{/if}
-						<span class="field-label">Layer</span>
-						<div class="layer-buttons">
-							<button type="button" onclick={() => reorderSelected('back')}>To back</button>
-							<button type="button" onclick={() => reorderSelected('backward')}>Backward</button>
-							<button type="button" onclick={() => reorderSelected('forward')}>Forward</button>
-							<button type="button" onclick={() => reorderSelected('front')}>To front</button>
-						</div>
-						<span class="field-label">Fixed position</span>
-						<p class="position-hint">Drag the move handle or adjust these values.</p>
-						<div class="position-fields">
-							<div>
-								<label class="field-label" for="block-x">Left (px)</label>
-								<input
-									id="block-x"
-									class="field-control"
-									type="number"
-									min="0"
-									max={blockLimits.maxX - selectedBlock.width}
-									step="1"
-									bind:value={selectedBlock.x}
-									oninput={() => updateSelectedPosition('x')}
-								/>
-							</div>
-							<div>
-								<label class="field-label" for="block-y">Top (px)</label>
-								<input
-									id="block-y"
-									class="field-control"
-									type="number"
-									min="0"
-									max={blockLimits.maxY}
-									step="1"
-									bind:value={selectedBlock.y}
-									oninput={() => updateSelectedPosition('y')}
-								/>
-							</div>
-							<div>
-								<label class="field-label" for="block-width">Width (px)</label>
-								<input
-									id="block-width"
-									class="field-control"
-									type="number"
-									min={blockLimits.minWidth}
-									max={blockLimits.maxWidth - selectedBlock.x}
-									step="1"
-									bind:value={selectedBlock.width}
-									oninput={() => updateSelectedPosition('width')}
-								/>
-							</div>
-							<div>
-								<label class="field-label" for="block-height">Height (px)</label>
-								<input
-									id="block-height"
-									class="field-control"
-									type="number"
-									min={blockLimits.minHeight}
-									max={blockLimits.maxHeight}
-									step="1"
-									bind:value={selectedBlock.height}
-									oninput={() => updateSelectedPosition('height')}
-								/>
-							</div>
-						</div>
-						<label class="field-label" for="block-title">
-							{selectedBlock.kind.startsWith('widget-') ? 'Label / text' : 'Heading'}
-						</label>
-						<input
-							id="block-title"
-							class="field-control"
-							bind:value={selectedBlock.title}
-							maxlength="100"
-							oninput={markUnsaved}
-						/>
-						<label class="field-label" for="block-body">
-							{selectedBlock.kind.startsWith('widget-') ? 'Helper text' : 'Description'}
-						</label>
-						<textarea
-							id="block-body"
-							class="field-control field-textarea"
-							bind:value={selectedBlock.body}
-							rows="4"
-							maxlength="240"
-							oninput={markUnsaved}></textarea>
-						{#if selectedBlock.kind.startsWith('custom:')}
-							<label class="field-label" for="custom-title">Title / Heading</label>
-							<input
-								id="custom-title"
-								class="field-control"
-								bind:value={selectedBlock.title}
-								oninput={markUnsaved}
-							/>
-							<label class="field-label" for="custom-body">Description</label>
-							<textarea
-								id="custom-body"
-								class="field-control field-textarea"
-								bind:value={selectedBlock.body}
-								oninput={markUnsaved}></textarea>
-							{#if selectedBlock.customProps && Object.keys(selectedBlock.customProps).length > 0}
-								<span class="field-label">Component Props</span>
-								{#each Object.entries(selectedBlock.customProps) as [propKey, propVal] (propKey)}
-									{#if typeof propVal === 'boolean'}
-										<label class="widget-state-control">
-											<input
-												type="checkbox"
-												checked={Boolean(selectedBlock.customProps[propKey])}
-												onchange={(e) => {
-													selectedBlock.customProps![propKey] = e.currentTarget.checked;
-													markUnsaved();
-												}}
-											/>
-											<span>{propKey}</span>
-										</label>
-									{:else if typeof propVal === 'number'}
-										<label class="field-label" for="prop-{propKey}">{propKey}</label>
-										<input
-											id="prop-{propKey}"
-											class="field-control"
-											type="number"
-											value={Number(selectedBlock.customProps[propKey])}
-											oninput={(e) => {
-												selectedBlock.customProps![propKey] = Number(e.currentTarget.value);
-												markUnsaved();
-											}}
-										/>
-									{:else}
-										<label class="field-label" for="prop-{propKey}">{propKey}</label>
-										<input
-											id="prop-{propKey}"
-											class="field-control"
-											value={String(selectedBlock.customProps[propKey])}
-											oninput={(e) => {
-												selectedBlock.customProps![propKey] = e.currentTarget.value;
-												markUnsaved();
-											}}
-										/>
-									{/if}
-								{/each}
-							{/if}
-						{/if}
-
-						{#if selectedBlock.kind === 'widget-link'}
-							<label class="field-label" for="link-href">Link address</label>
-							<input
-								id="link-href"
-								class="field-control"
-								list="page-routes"
-								maxlength="200"
-								placeholder="/page or https://…"
-								bind:value={selectedBlock.href}
-								oninput={markUnsaved}
-							/>
-							<datalist id="page-routes">
-								{#each linkPages as page (page.id)}<option value="/{page.slug}">{page.name}</option
-									>{/each}
-							</datalist>
-							{#if !isValidLinkHref(selectedBlock.href)}
-								<p class="route-error" role="alert">Use /page-route or an http(s) address.</p>
-							{/if}
-							<label class="check-row">
-								<input type="checkbox" bind:checked={selectedBlock.newTab} onchange={markUnsaved} />
-								Open external links in a new tab
-							</label>
-						{/if}
-						{#if ['widget-button', 'widget-text-field', 'widget-textarea', 'widget-card', ...actionWidgetKinds].includes(selectedBlock.kind)}
-							<label class="field-label" for="block-action">
-								{['widget-text-field', 'widget-textarea'].includes(selectedBlock.kind)
-									? 'Placeholder'
-									: 'Button label'}
-							</label>
-							<input
-								id="block-action"
-								class="field-control"
-								bind:value={selectedBlock.action}
-								maxlength="48"
-								oninput={markUnsaved}
-							/>
-						{/if}
-						{#if selectedBlock.kind === 'widget-select'}
-							<label class="field-label" for="block-select-value">Selected option</label>
-							<select
-								id="block-select-value"
-								class="field-control"
-								bind:value={selectedBlock.value}
-								onchange={markUnsaved}
-							>
-								<option value="">Choose an option</option>
-								{#each (selectedBlock.items || widgetCatalog['widget-select'].defaults.items || '')
-									.split('\n')
-									.map((line) => line.trim())
-									.filter(Boolean) as option (option)}
-									<option value={option}>{option}</option>
-								{/each}
-							</select>
-						{/if}
-						{#if ['widget-checkbox', 'widget-radio', 'widget-switch'].includes(selectedBlock.kind)}
-							<label class="widget-state-control">
-								<input
-									type="checkbox"
-									bind:checked={selectedBlock.checked}
-									onchange={markUnsaved}
-								/>
-								<span>Initially selected</span>
-							</label>
-						{/if}
-						{#if selectedBlock.kind in itemsHelp}
-							<label class="field-label" for="block-items">Entries</label>
-							<textarea
-								id="block-items"
-								class="field-control field-textarea"
-								bind:value={selectedBlock.items}
-								rows="6"
-								maxlength="600"
-								oninput={markUnsaved}></textarea>
-							<p class="panel-hint">{itemsHelp[selectedBlock.kind]}</p>
-						{/if}
-						{#if ['widget-slider', 'widget-progress'].includes(selectedBlock.kind)}
-							<label class="field-label" for="block-level">Value ({selectedBlock.level}%)</label>
-							<input
-								id="block-level"
-								class="field-control"
-								type="range"
-								min="0"
-								max="100"
-								bind:value={selectedBlock.level}
-								oninput={markUnsaved}
-							/>
-						{/if}
-
-						<div class="field-divider"></div>
-						<span class="field-label">Theme</span>
-						<div class="theme-options" role="group" aria-label="Theme">
-							<button
-								type="button"
-								class:theme-active={selectedBlock.theme === 'light'}
-								aria-pressed={selectedBlock.theme === 'light'}
-								onclick={() => {
-									selectedBlock.theme = 'light';
-									markUnsaved();
-								}}
-							>
-								<span class="swatch swatch-light"></span>Light
-							</button>
-							<button
-								type="button"
-								class:theme-active={selectedBlock.theme === 'lavender'}
-								aria-pressed={selectedBlock.theme === 'lavender'}
-								onclick={() => {
-									selectedBlock.theme = 'lavender';
-									markUnsaved();
-								}}
-							>
-								<span class="swatch swatch-lavender"></span>Soft
-							</button>
-							<button
-								type="button"
-								class:theme-active={selectedBlock.theme === 'dark'}
-								aria-pressed={selectedBlock.theme === 'dark'}
-								onclick={() => {
-									selectedBlock.theme = 'dark';
-									markUnsaved();
-								}}
-							>
-								<span class="swatch swatch-dark"></span>Bold
-							</button>
-						</div>
-					</div>
-				{:else}
-					<div class="inspector-empty">
-						<div aria-hidden="true">✧</div>
-						<h3>Nothing selected</h3>
-						<p>Select a block on your canvas to edit its content and style.</p>
-					</div>
-				{/if}
+				<BlockInspector
+					bind:block={() => selectedBlock, () => {}}
+					label={selectedLabel}
+					mark={selectedBlock ? componentInfo[selectedBlock.kind].mark : ''}
+					{linkPages}
+					compositeEdit={selectedComposite}
+					onchange={markUnsaved}
+					onposition={updateSelectedPosition}
+					onreorder={reorderSelected}
+					onduplicate={duplicateSelected}
+					ondelete={deleteSelected}
+				/>
 			</aside>
 		{/if}
 	</div>
@@ -1620,28 +1318,6 @@
 		height: 7px;
 		border-radius: 50%;
 		background: #69c89d;
-	}
-
-	.icon-button {
-		display: grid;
-		width: 32px;
-		height: 30px;
-		place-items: center;
-		border: 0;
-		border-radius: 6px;
-		background: transparent;
-		color: #9697a9;
-		cursor: pointer;
-	}
-
-	.icon-button svg {
-		width: 18px;
-		height: 18px;
-		fill: none;
-		stroke: currentColor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 1.5;
 	}
 
 	.workspace {
@@ -1773,8 +1449,7 @@
 		box-shadow: 0 1px 4px rgb(34 34 56 / 0.12);
 	}
 
-	.palette-tabs button:focus-visible,
-	.inspector-actions button:focus-visible {
+	.palette-tabs button:focus-visible {
 		outline: 2px solid #8d7cff;
 		outline-offset: 2px;
 	}
@@ -1853,15 +1528,13 @@
 		color: #d1844e;
 	}
 
-	.component-copy,
-	.selected-component > div {
+	.component-copy {
 		display: grid;
 		min-width: 0;
 		gap: 0.2rem;
 	}
 
-	.component-copy strong,
-	.selected-component strong {
+	.component-copy strong {
 		overflow: hidden;
 		font-size: 0.73rem;
 		font-weight: 680;
@@ -1869,8 +1542,7 @@
 		white-space: nowrap;
 	}
 
-	.component-copy small,
-	.selected-component small {
+	.component-copy small {
 		overflow: hidden;
 		color: var(--muted);
 		font-size: 0.62rem;
@@ -2164,8 +1836,7 @@
 		text-align: center;
 	}
 
-	.empty-icon,
-	.inspector-empty > div {
+	.empty-icon {
 		display: grid;
 		width: 48px;
 		height: 48px;
@@ -2183,8 +1854,7 @@
 		letter-spacing: -0.03em;
 	}
 
-	.empty-canvas p,
-	.inspector-empty p {
+	.empty-canvas p {
 		max-width: 290px;
 		margin: 0;
 		color: #898a9a;
@@ -2203,81 +1873,9 @@
 		padding: 0 0.4rem;
 	}
 
-	.inspector-heading {
-		margin-bottom: 1.2rem;
-	}
-
-	.inspector-actions {
-		display: flex;
-		gap: 0.2rem;
-	}
-
-	.inspector-actions .icon-button:disabled {
-		color: #d3d3dc;
-		cursor: not-allowed;
-	}
-
-	.delete-button {
-		border: 1px solid transparent;
-		color: #a1a1b1;
-	}
-
-	.delete-button:hover {
-		border-color: #f2dada;
-		background: #fff5f5;
-		color: #cf5c67;
-	}
-
-	.selected-component {
-		display: flex;
-		align-items: center;
-		gap: 0.65rem;
-		margin-bottom: 1.35rem;
-		padding: 0.7rem;
-		border: 1px solid #efedf7;
-		border-radius: 9px;
-		background: #fcfbff;
-	}
-
-	.selected-component .component-mark {
-		width: 32px;
-		height: 32px;
-		flex-basis: 32px;
-	}
-
-	.field-label {
-		display: block;
-		margin: 0.85rem 0 0.4rem;
-		color: #686a80;
-		font-size: 0.67rem;
-		font-weight: 650;
-	}
-
-	.position-hint {
-		margin: 0.55rem 0 0.2rem;
-		color: var(--muted);
-		font-size: 0.62rem;
-		line-height: 1.5;
-	}
-
-	.position-fields {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.15rem 0.6rem;
-	}
-
-	.widget-state-control {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		margin-top: 0.85rem;
-		color: #686a80;
-		font-size: 0.67rem;
-		font-weight: 650;
-	}
-
-	.widget-state-control input {
-		accent-color: #6b5ce7;
+	.field-control:focus {
+		border-color: #978be9;
+		box-shadow: 0 0 0 3px rgb(119 102 223 / 12%);
 	}
 
 	.field-control {
@@ -2292,80 +1890,6 @@
 		font: inherit;
 		font-size: 0.7rem;
 		outline: none;
-	}
-
-	.field-control:focus {
-		border-color: #978be9;
-		box-shadow: 0 0 0 3px rgb(119 102 223 / 12%);
-	}
-
-	.field-textarea {
-		min-height: 94px;
-		resize: vertical;
-		line-height: 1.5;
-	}
-
-	.field-divider {
-		height: 1px;
-		margin: 1.3rem 0 1rem;
-		background: #eeeef3;
-	}
-
-	.theme-options {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.35rem;
-	}
-
-	.theme-options button {
-		display: grid;
-		justify-items: center;
-		gap: 0.4rem;
-		padding: 0.55rem 0.2rem;
-		border: 1px solid #ececf1;
-		border-radius: 8px;
-		background: #fff;
-		color: #77798c;
-		font-size: 0.61rem;
-		cursor: pointer;
-	}
-
-	.theme-options button.theme-active {
-		border-color: #aa9ff1;
-		background: #faf9ff;
-		color: #6253ca;
-	}
-
-	.swatch {
-		width: 24px;
-		height: 18px;
-		border: 1px solid #e8e8ed;
-		border-radius: 5px;
-	}
-
-	.swatch-light {
-		background: #fff;
-	}
-
-	.swatch-lavender {
-		background: linear-gradient(135deg, #f3efff, #dcd5ff);
-	}
-
-	.swatch-dark {
-		background: #29273d;
-	}
-
-	.inspector-empty {
-		display: grid;
-		justify-items: center;
-		padding: 3rem 0.5rem;
-		text-align: center;
-	}
-
-	.inspector-empty h3 {
-		margin: 0.9rem 0 0.35rem;
-		font-size: 0.85rem;
-		font-weight: 680;
 	}
 
 	.workspace.preview-mode {
@@ -2387,22 +1911,6 @@
 			grid-column: 1 / -1;
 			border-top: 1px solid var(--line);
 			border-left: 0;
-		}
-
-		.inspector-content {
-			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			column-gap: 1rem;
-		}
-
-		.selected-component,
-		.field-divider,
-		.theme-options {
-			grid-column: 1 / -1;
-		}
-
-		.inspector-content .field-label:first-of-type {
-			grid-column: 1;
 		}
 	}
 
@@ -2453,14 +1961,6 @@
 		.inspector-panel {
 			padding: 1.1rem;
 		}
-
-		.inspector-content {
-			display: block;
-		}
-
-		.inspector-content .field-label:first-of-type {
-			grid-column: auto;
-		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
@@ -2494,31 +1994,6 @@
 		white-space: nowrap;
 	}
 
-	.layer-buttons {
-		display: flex;
-		gap: 0.35rem;
-		flex-wrap: wrap;
-	}
-
-	.layer-buttons button {
-		flex: 1;
-		padding: 0.35rem 0.5rem;
-		border: 1px solid #d8d4cc;
-		border-radius: 6px;
-		background: #fff;
-		font: inherit;
-		font-size: 0.75rem;
-		cursor: pointer;
-	}
-
-	.check-row {
-		display: flex;
-		gap: 0.4rem;
-		align-items: center;
-		font-size: 0.8rem;
-		margin-top: 0.5rem;
-	}
-
 	.page-canvas {
 		flex: 0 0 auto;
 		margin-inline: auto;
@@ -2541,10 +2016,5 @@
 		padding: 0.2rem 0.35rem;
 		border: 1px solid #d9d4ec;
 		border-radius: 6px;
-	}
-
-	.edit-composite {
-		display: inline-block;
-		margin-bottom: 0.75rem;
 	}
 </style>

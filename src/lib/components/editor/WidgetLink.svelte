@@ -3,7 +3,7 @@
 	 * @component WidgetLink
 	 * Flowbite `A` link to an internal route or an external http(s) address.
 	 *
-	 * Unsafe hrefs (anything but `/route` or http(s)) render without an `href`, so a tampered value
+	 * Unsafe hrefs (anything but `/route` or http(s); `//host` included) render without an `href`, so a tampered value
 	 * can never become a `javascript:` link.
 	 *
 	 * @prop {string} title - Link text.
@@ -27,8 +27,8 @@
 		newTab: boolean;
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
-	const externalHref = $derived(/^https?:\/\//i.test(href));
-	const safeHref = $derived(externalHref || /^\/[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
+	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">

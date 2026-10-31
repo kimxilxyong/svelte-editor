@@ -6,18 +6,27 @@
 	 * - `afterNavigate` feeds every completed navigation into the trail (see `navigation.svelte.ts`).
 	 * - `beforeNavigate` asks for confirmation when the active route reports unsaved changes
 	 *   and the navigation would leave that route (page switches inside the editor are fine).
+	 *
+	 * It also creates the one app-wide right-click menu ({@link ContextMenu}), shares it through
+	 * context (`useContextMenu()`) and renders it once, so any route can offer context-aware
+	 * actions without mounting its own menu.
 	 */
 	import { onMount } from 'svelte';
 	import { afterNavigate, beforeNavigate } from '$app/navigation';
 	import DemoLinks from './demo/DemoLinks.svelte';
 	import type { LayoutProps } from './$types';
 	import AppNav from '../lib/components/AppNav.svelte';
+	import ContextMenuView from '../lib/components/ContextMenu.svelte';
+	import { ContextMenu, provideContextMenu } from '../lib/context-menu.svelte.js';
 	import { nav, trackNavigation } from '../lib/navigation.svelte.js';
 	import { toPath } from '../lib/navigation-trail.js';
 	import { loadWidgetOverrides } from '../lib/widget-runtime.svelte.js';
 	import './layout.css';
 
 	let { children }: LayoutProps = $props();
+
+	const contextMenu = new ContextMenu();
+	provideContextMenu(contextMenu);
 
 	// Edited built-in widgets (Components page) are compiled in the browser for canvas/preview.
 	onMount(() => void loadWidgetOverrides());
@@ -61,6 +70,8 @@
 		</p>
 	</footer>
 </div>
+
+<ContextMenuView menu={contextMenu} />
 
 <style>
 	.app {

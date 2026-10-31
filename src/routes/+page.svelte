@@ -13,9 +13,13 @@
 	 *   (same content as the editor, reloaded from SQLite on every visit), plus an interactive
 	 *   Preview mode with working internal links.
 	 * - Direct navigation to the visual WYSIWYG editor (`/editor?page=<id>`).
+	 * - Right-click menus (see `editor-menus.ts`): a page row offers Edit / Preview / Duplicate /
+	 *   Delete / Copy route, the list background Add / Save / Reload, the preview Edit / Preview /
+	 *   Save. Right-clicking a row also selects it, so the action targets what the user pointed at.
 	 */
 
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
 	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
@@ -23,6 +27,8 @@
 	import PageView from '../lib/components/PageView.svelte';
 	import { nav, useNavContext } from '../lib/navigation.svelte.js';
 	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
+	import { useContextMenu } from '../lib/context-menu.svelte.js';
+	import { pageItemMenu, pageListMenu, pagePreviewMenu } from '../lib/editor-menus.js';
 	import {
 		canvasLimits,
 		defaultCanvasSize,
@@ -61,6 +67,8 @@
 	let routeError = $state('');
 
 	let selected = $derived(pages.find((page) => page.id === selectedId) ?? pages[0]);
+	const contextMenu = useContextMenu();
+	const canSave = $derived(!readOnlyNotice && (dirty || !databaseReady));
 
 	onMount(() => {
 		projectRoot = localStorage.getItem('editor-project-root') ?? '';
@@ -309,6 +317,54 @@
 		touch();
 	}
 
+	function editPage(id: string) {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied to the base path; the query string is appended
+		void goto(`${resolve('/editor')}?page=${encodeURIComponent(id)}`);
+	}
+
+	/** Menu of one page row; selecting it first makes Duplicate / Delete act on that page. */
+	function pageRowEntries(target: EditorPage) {
+		selectedId = target.id;
+		return pageItemMenu({
+			name: target.name,
+			canDuplicate: pages.length < 20,
+			canDelete: pages.length > 1,
+			edit: () => editPage(target.id),
+			preview: () => {
+				isPreview = true;
+				routeError = '';
+			},
+			duplicate: duplicatePage,
+			remove: deletePage,
+			copyRoute: () => void navigator.clipboard?.writeText(`/${target.slug}`).catch(() => {})
+		});
+	}
+
+	function pageListEntries() {
+		return pageListMenu({
+			canAdd: pages.length < 20 && !!selected,
+			canSave,
+			add: addPage,
+			save: () => void save(),
+			reload: () => {
+				if (!dirty || confirm('Discard unsaved changes and reload the saved site?')) void load();
+			},
+			openComposites: () => void goto(resolve('/composites'))
+		});
+	}
+
+	function pagePreviewEntries() {
+		if (!selected) return [];
+		const target = selected;
+		return pagePreviewMenu({
+			previewing: isPreview,
+			canSave,
+			edit: () => editPage(target.id),
+			togglePreview,
+			save: () => void save()
+		});
+	}
+
 	function togglePreview() {
 		isPreview = !isPreview;
 		routeError = '';
@@ -348,7 +404,7 @@
 
 	<div class="workspace" class:preview-mode={isPreview}>
 		{#if !isPreview}
-			<aside class="palette-panel" aria-label="Pages">
+			<aside class="palette-panel" aria-label="Pages" {@attach contextMenu.attach(pageListEntries)}>
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">YOUR SITE</p>
@@ -366,6 +422,7 @@
 								class:active={selected && page.id === selected.id}
 								aria-current={selected && page.id === selected.id ? 'page' : undefined}
 								onclick={() => (selectedId = page.id)}
+								{@attach contextMenu.attach(() => pageRowEntries(page))}
 							>
 								<strong>{page.name}</strong>
 								<small>/{page.slug} · {page.width}px · {page.blocks.length} items</small>
@@ -387,7 +444,11 @@
 			</aside>
 		{/if}
 
-		<section class="canvas-panel" aria-label="Page overview">
+		<section
+			class="canvas-panel"
+			aria-label="Page overview"
+			{@attach contextMenu.attach(pagePreviewEntries)}
+		>
 			<div class="canvas-toolbar">
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>

@@ -21,6 +21,9 @@
 	 *      (corners + edges) to resize; dragging inside the block moves it. Both snap to an
 	 *      8px grid (hold Alt to bypass). Keyboard: arrows move, Alt+arrows resize (Shift = 10px).
 	 *    - Automatic vertical expansion accommodating block boundaries.
+	 *    - Right-click menus (`editor-menus.ts`): block (edit composite, duplicate, order, delete),
+	 *      canvas / toolbar (undo, save, preview, composite New / Rename / Delete, clear) and
+	 *      palette item (add without dragging, edit composite).
 	 *    - Mode-specific document switching and route jump support in Preview mode.
 	 * 3. History & State Management:
 	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
@@ -51,6 +54,8 @@
 	import ThemeScope from './editor/ThemeScope.svelte';
 	import BuilderHeader from './BuilderHeader.svelte';
 	import { useNavContext } from '../navigation.svelte.js';
+	import { useContextMenu } from '../context-menu.svelte.js';
+	import { blockMenu, canvasMenu, paletteItemMenu } from '../editor-menus.js';
 	import { provideComposites } from '../composite-context.js';
 	import { seedComposites } from '../composite-seeds.js';
 	import {
@@ -531,6 +536,84 @@
 			return !findCompositeCycle(trial);
 		});
 	});
+
+	// ---- Right-click menus (entries are built by the pure functions in `editor-menus.ts`) ----
+	const contextMenu = useContextMenu();
+
+	/** Opens the composite with this name in the composite editor. */
+	function editCompositeNamed(name: string) {
+		const target = composites.find((item) => item.name === name);
+		if (target) void goto(resolve(`/composites?composite=${encodeURIComponent(target.id)}`));
+	}
+
+	/** Name of the composite a block instantiates, or `undefined` for ordinary widgets. */
+	function compositeNameOf(kind: BlockKind): string | undefined {
+		return kind.startsWith('composite:')
+			? composites.find((item) => compositeKind(item.name) === kind)?.name
+			: undefined;
+	}
+
+	/**
+	 * Places a palette component without dragging: below the lowest existing block so it never
+	 * lands on top of another one. Mirrors {@link addBlock} for the pointer-driven path.
+	 */
+	function addBlockBelowContent(kind: BlockKind) {
+		const block = createBlock(kind);
+		const bottom = blocks.reduce((max, item) => Math.max(max, item.y + item.height), 0);
+		block.y = Math.round(Math.min(blockLimits.maxY, blocks.length > 0 ? bottom + 16 : 24));
+		blocks.push(block);
+		selectedId = block.id;
+		isPreview = false;
+		markUnsaved();
+	}
+
+	/** Menu of a block; right-clicking also selects it so the actions (and inspector) match. */
+	function blockEntries(block: BuilderBlock) {
+		if (isPreview) return []; // nothing is editable in preview: fall through to the canvas menu
+		selectedId = block.id;
+		const index = blocks.findIndex((item) => item.id === block.id);
+		const compositeName = compositeNameOf(block.kind);
+		return blockMenu({
+			compositeName,
+			isTop: index === blocks.length - 1,
+			isBottom: index === 0,
+			editComposite: () => compositeName && editCompositeNamed(compositeName),
+			duplicate: duplicateSelected,
+			reorder: reorderSelected,
+			remove: deleteSelected
+		});
+	}
+
+	function canvasEntries() {
+		return canvasMenu({
+			composing,
+			previewing: isPreview,
+			canUndo,
+			canRedo,
+			canSave: !databaseBusy && !readOnlyNotice && (hasUnsavedChanges || !databaseReady),
+			isEmpty: blockCount === 0,
+			canDeleteComposite: documents.length > 1,
+			undo,
+			redo,
+			save: () => void savePageToDatabase(),
+			togglePreview: () => (isPreview = !isPreview),
+			clear: clearPage,
+			newComposite: addComposite,
+			renameComposite,
+			deleteComposite,
+			openOther: () => void goto(resolve(composing ? '/editor' : '/composites'))
+		});
+	}
+
+	function paletteEntries(kind: BlockKind) {
+		const compositeName = compositeNameOf(kind);
+		return paletteItemMenu({
+			label: componentInfo[kind].label,
+			compositeName,
+			addToCanvas: () => addBlockBelowContent(kind),
+			editComposite: () => compositeName && editCompositeNamed(compositeName)
+		});
+	}
 
 	/** Creates a new empty composite (composite mode only) and opens it. */
 	function addComposite() {
@@ -1074,6 +1157,7 @@
 										role="listitem"
 										aria-label="Drag {componentInfo[kind].label} onto the page"
 										ondragstart={(event) => handlePaletteDragStart(event, kind)}
+										{@attach contextMenu.attach(() => paletteEntries(kind))}
 									>
 										<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span
 										>
@@ -1096,6 +1180,7 @@
 									role="listitem"
 									aria-label="Drag {componentInfo[kind].label} onto the page"
 									ondragstart={(event) => handlePaletteDragStart(event, kind)}
+									{@attach contextMenu.attach(() => paletteEntries(kind))}
 								>
 									<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
 									<span class="component-copy">
@@ -1117,7 +1202,11 @@
 			</aside>
 		{/if}
 
-		<section class="canvas-panel" aria-label="{composing ? 'Composite' : 'Page'} canvas">
+		<section
+			class="canvas-panel"
+			aria-label="{composing ? 'Composite' : 'Page'} canvas"
+			{@attach contextMenu.attach(canvasEntries)}
+		>
 			<div class="canvas-toolbar">
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>
@@ -1205,6 +1294,7 @@
 									style:top="{block.y}px"
 									style:width="{block.width}px"
 									style:height="{block.height}px"
+									{@attach contextMenu.attach(() => blockEntries(block))}
 								>
 									<BlockContent
 										bind:block={blocks[index]}

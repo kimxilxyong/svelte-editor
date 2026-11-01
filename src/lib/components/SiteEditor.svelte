@@ -308,6 +308,12 @@
 			})
 		)
 	);
+	/** Width of the stage's content box; the preview scales the canvas down to fit it. */
+	let stageWidth = $state(0);
+	/** Preview-only fit factor (never above 1), matching `PageView`; editing stays 1:1. */
+	const previewScale = $derived(
+		isPreview && stageWidth > 0 ? Math.min(1, stageWidth / currentDocument.width) : 1
+	);
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
 	);
@@ -1358,79 +1364,91 @@
 			</div>
 
 			<div class="canvas-stage">
-				<ThemeScope theme={routePage.data.siteTheme}>
-					<div
-						class="page-canvas"
-						class:preview={isPreview}
-						style:width="{currentDocument.width}px"
-						style:min-height="{canvasHeight}px"
-						role="region"
-						aria-label="Page canvas drop zone"
-						{@attach attachCanvas}
-						ondragover={handleCanvasDragOver}
-						ondrop={handleDrop}
-					>
-						{#if blocks.length === 0}
-							<div class="empty-canvas">
-								<div class="empty-icon" aria-hidden="true">✳</div>
-								<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>
-								<p>
-									Drag widgets from the panel onto the canvas to start building something great.
-								</p>
+				<div class="canvas-fit" bind:clientWidth={stageWidth}>
+					<ThemeScope theme={routePage.data.siteTheme}>
+						<div
+							class="canvas-frame"
+							style:width={previewScale === 1
+								? undefined
+								: `${currentDocument.width * previewScale}px`}
+							style:height={previewScale === 1 ? undefined : `${canvasHeight * previewScale}px`}
+						>
+							<div
+								class="page-canvas"
+								class:preview={isPreview}
+								style:width="{currentDocument.width}px"
+								style:min-height="{canvasHeight}px"
+								style:transform={previewScale === 1 ? undefined : `scale(${previewScale})`}
+								role="region"
+								aria-label="Page canvas drop zone"
+								{@attach attachCanvas}
+								ondragover={handleCanvasDragOver}
+								ondrop={handleDrop}
+							>
+								{#if blocks.length === 0}
+									<div class="empty-canvas">
+										<div class="empty-icon" aria-hidden="true">✳</div>
+										<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>
+										<p>
+											Drag widgets from the panel onto the canvas to start building something great.
+										</p>
+									</div>
+								{:else}
+									{#each blocks as block, index (block.id)}
+										<article
+											class="canvas-block positioned {block.kind} theme-{block.theme}"
+											class:selected={!isPreview && selectedId === block.id}
+											style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
+											style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
+											style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
+											style:height="{blockLayout.get(block.id)?.height ?? block.height}px"
+											{@attach contextMenu.attach(() => blockEntries(block))}
+										>
+											<BlockContent
+												bind:block={blocks[index]}
+												onchange={markUnsaved}
+												onlink={handleLinkClick}
+											/>
+											{#if !isPreview}
+												<span class="block-type-tag">{componentInfo[block.kind].label}</span>
+												<button
+													type="button"
+													class="selection-overlay"
+													class:movable={selectedId === block.id &&
+														(block.alignTo ?? 'none') === 'none'}
+													aria-label="Select {componentInfo[block.kind].label}: {block.title}"
+													aria-pressed={selectedId === block.id}
+													onclick={() => (selectedId = block.id)}
+													onpointerdown={(event) =>
+														startPointerInteraction(event, block.id, 'move')}
+													onkeydown={(event) => {
+														if (event.key.startsWith('Arrow')) {
+															selectedId = block.id;
+															handlePositionKeydown(event, event.altKey ? 'resize' : 'move');
+														}
+													}}
+												></button>
+												{#if selectedId === block.id}
+													<div class="selection-frame" aria-hidden="true">
+														{#each resizeHandlesFor(block) as dir (dir)}
+															<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
+															<!-- svelte-ignore a11y_no_static_element_interactions -->
+															<span
+																class="frame-handle handle-{dir}"
+																onpointerdown={(event) =>
+																	startPointerInteraction(event, block.id, 'resize', dir)}
+															></span>
+														{/each}
+													</div>
+												{/if}
+											{/if}
+										</article>
+									{/each}
+								{/if}
 							</div>
-						{:else}
-							{#each blocks as block, index (block.id)}
-								<article
-									class="canvas-block positioned {block.kind} theme-{block.theme}"
-									class:selected={!isPreview && selectedId === block.id}
-									style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
-									style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
-									style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
-									style:height="{blockLayout.get(block.id)?.height ?? block.height}px"
-									{@attach contextMenu.attach(() => blockEntries(block))}
-								>
-									<BlockContent
-										bind:block={blocks[index]}
-										onchange={markUnsaved}
-										onlink={handleLinkClick}
-									/>
-									{#if !isPreview}
-										<span class="block-type-tag">{componentInfo[block.kind].label}</span>
-										<button
-											type="button"
-											class="selection-overlay"
-											class:movable={selectedId === block.id &&
-												(block.alignTo ?? 'none') === 'none'}
-											aria-label="Select {componentInfo[block.kind].label}: {block.title}"
-											aria-pressed={selectedId === block.id}
-											onclick={() => (selectedId = block.id)}
-											onpointerdown={(event) => startPointerInteraction(event, block.id, 'move')}
-											onkeydown={(event) => {
-												if (event.key.startsWith('Arrow')) {
-													selectedId = block.id;
-													handlePositionKeydown(event, event.altKey ? 'resize' : 'move');
-												}
-											}}
-										></button>
-										{#if selectedId === block.id}
-											<div class="selection-frame" aria-hidden="true">
-												{#each resizeHandlesFor(block) as dir (dir)}
-													<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
-													<!-- svelte-ignore a11y_no_static_element_interactions -->
-													<span
-														class="frame-handle handle-{dir}"
-														onpointerdown={(event) =>
-															startPointerInteraction(event, block.id, 'resize', dir)}
-													></span>
-												{/each}
-											</div>
-										{/if}
-									{/if}
-								</article>
-							{/each}
-						{/if}
-					</div>
-				</ThemeScope>
+						</div>
+					</ThemeScope>
+				</div>
 			</div>
 			{#if !isPreview}
 				<p class="canvas-footnote">
@@ -1853,6 +1871,21 @@
 		min-height: 600px;
 	}
 
+	.canvas-fit {
+		min-width: 0;
+		flex: 1;
+	}
+
+	.canvas-frame {
+		display: flex;
+		max-width: none;
+		margin-inline: auto;
+	}
+
+	.canvas-frame > .page-canvas {
+		transform-origin: top left;
+	}
+
 	.canvas-block {
 		position: relative;
 		display: block;
@@ -1944,6 +1977,35 @@
 		background: #fff;
 		pointer-events: auto;
 		touch-action: none;
+	}
+
+	/* Edge handles also own the whole edge (invisible strip), so the resize cursor shows along it. */
+	.handle-n::after,
+	.handle-s::after,
+	.handle-e::after,
+	.handle-w::after {
+		content: '';
+		position: absolute;
+	}
+	.handle-n::after,
+	.handle-s::after {
+		left: -100vw;
+		right: -100vw;
+		top: -4px;
+		bottom: -4px;
+	}
+	.handle-e::after,
+	.handle-w::after {
+		top: -100vh;
+		bottom: -100vh;
+		left: -4px;
+		right: -4px;
+	}
+	.handle-nw,
+	.handle-ne,
+	.handle-se,
+	.handle-sw {
+		z-index: 1;
 	}
 
 	.handle-nw {

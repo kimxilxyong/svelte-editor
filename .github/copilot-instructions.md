@@ -80,3 +80,9 @@ Sign-in, roles, user management and the selectable database backend follow these
 
 - `src/lib/server/new-project.ts` (`createProject`) scaffolds a complete SvelteKit app (package.json, vite config with `$lib` alias, Tailwind/Flowbite `app.css` mirroring `routes/layout.css`, root redirect route) into an **empty** folder (only `.git`/`.DS_Store` tolerated; a missing last segment is created), then calls `exportSite` from `project.ts`. Never overwrites anything.
 - Exposed as the `create` action of `/editor/api/project` and the "Create new project" button on `/`; `/editor/api/fs` reports `isEmpty` for the picker badge. Tests: `new-project.spec.ts`, `e2e/create-project.e2e.ts` (builds the generated app with the editor's `node_modules` symlinked).
+
+## Site Theming
+
+- `src/lib/theme.ts` (copied verbatim into exports) holds `SiteTheme`: primary/secondary colours, radius, font, dark, plus form-control `inputStyle`/`inputSize`/`inputBorder`/`focusRing` and card `shadow`. New fields are optional on input and default in `parseSiteTheme`, so old stored themes keep loading. `themeLooks` are one-click bundles of the non-colour fields.
+- Class names in `themeConfig` come only from literal lookup tables so Tailwind's scanner sees them. Never build class names from user input or page/composite names; free-form values (hex colours) may only become CSS variable values. `theme.spec.ts` guards this with an allow-list.
+- `secondary-*` defaults live in `routes/layout.css` and the `app.css` template in `server/new-project.ts`; keep them in sync.

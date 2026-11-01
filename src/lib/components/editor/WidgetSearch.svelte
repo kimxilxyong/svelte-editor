@@ -12,7 +12,7 @@
 	let value = $state('');
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Search size="md" placeholder={action} bind:value />
 	{#if body}<Helper>{body}</Helper>{/if}
 </div>

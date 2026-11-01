@@ -105,3 +105,84 @@ test('creates a compilable project whose pages match the editor', async ({ page 
 	await expect(button).toBeVisible();
 	await expect(button).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 });
+
+test('an underlined, large input theme survives into a newly created project', async ({ page }) => {
+	test.setTimeout(240_000);
+	const parent = await mkdtemp(path.join(tmpdir(), 'create-project-theme-e2e-'));
+	dirs.push(parent);
+	const root = path.join(parent, 'themed-site');
+
+	// 1. Choose an underlined, thick, large input look on /theme and save it.
+	await page.setViewportSize({ width: 1600, height: 1000 });
+	await page.goto('/theme');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
+	await page.getByLabel('Input style').selectOption('underlined');
+	await page.getByLabel('Input size').selectOption('lg');
+	await page.getByLabel('Input border').selectOption('thick');
+	await page.getByLabel('Focus ring').selectOption('secondary');
+
+	// The live preview must already show the look (underline only, no side borders, no radius).
+	const previewInput = page.locator('.preview input[type="text"]').first();
+	await expect(previewInput).toHaveCSS('border-top-width', '0px');
+	await expect(previewInput).toHaveCSS('border-bottom-width', '4px');
+	await expect(previewInput).toHaveCSS('border-top-left-radius', '0px');
+	await page.screenshot({ path: 'test-results/theme-underlined.png' });
+
+	await page.getByRole('button', { name: 'Save theme' }).click();
+	await expect(page.getByText('Theme saved.')).toBeVisible();
+
+	// 2. A page with a text field.
+	await page.goto('/editor');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
+	await page.getByRole('tab', { name: 'Widgets' }).click();
+	await page
+		.getByRole('listitem', { name: 'Drag Text field onto the page' })
+		.dragTo(page.locator('.page-canvas'), { targetPosition: { x: 100, y: 100 }, force: true });
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.locator('.save-status')).toContainText('Saved');
+	const editorInput = page.locator('.page-canvas input[type="text"]').first();
+	await expect(editorInput).toHaveCSS('border-bottom-width', '4px');
+	await expect(editorInput).toHaveCSS('border-top-width', '0px');
+	const editorPadding = await editorInput.evaluate((el) => getComputedStyle(el).paddingTop);
+
+	// 3. Create the project, build and preview it.
+	await page.goto('/');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
+	await page.locator('#project-root').fill(root);
+	await page.getByTestId('create-project').click();
+	await expect(page.locator('.project-section')).toContainText('Created a new SvelteKit project', {
+		timeout: 30_000
+	});
+	expect(await readFile(path.join(root, 'src/lib/site-theme.ts'), 'utf8')).toContain(
+		'"inputStyle": "underlined"'
+	);
+	const slug = (await readdir(path.join(root, 'src/routes'), { withFileTypes: true })).filter(
+		(entry) => entry.isDirectory()
+	)[0].name;
+
+	await symlink(path.join(repo, 'node_modules'), path.join(root, 'node_modules'), 'dir');
+	await run('npx', ['vite', 'build'], root);
+	const port = 4392;
+	server = spawn('npx', ['vite', 'preview', '--port', String(port), '--strictPort'], {
+		cwd: root,
+		stdio: 'ignore'
+	});
+	const url = `http://localhost:${port}/${slug}`;
+	await expect
+		.poll(async () => (await fetch(url).catch(() => null))?.status, { timeout: 30_000 })
+		.toBe(200);
+
+	// 4. The built project's input has the same computed look as the editor.
+	await page.goto(url);
+	const built = page.locator('.editor-page input[type="text"]').first();
+	await expect(built).toBeVisible();
+	for (const [prop, value] of [
+		['border-top-width', '0px'],
+		['border-bottom-width', '4px'],
+		['border-top-left-radius', '0px']
+	] as const) {
+		await expect(built).toHaveCSS(prop, value);
+	}
+	await expect(built).toHaveCSS('padding-top', editorPadding);
+	await page.screenshot({ path: 'test-results/built-underlined.png' });
+});

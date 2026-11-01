@@ -3,7 +3,8 @@
 	 * @component ThemePage
 	 *
 	 * `/theme` – edits the site-wide theme: colour preset or custom primary colour, corner radius,
-	 * font family and dark mode. The preview on the right renders real widgets inside a
+	 * font family, dark mode, secondary colour, form-control style/size/border/focus ring, card shadow
+	 * and one-click looks. The preview on the right renders real widgets inside a
 	 * {@link ThemeScope}, so what you see is exactly what the editor canvas, page previews and exported
 	 * projects will use. Saving stores the theme in the database (power users and above); the root
 	 * layout then reloads it for every page.
@@ -20,6 +21,14 @@
 	import ThemeScope from '../../lib/components/editor/ThemeScope.svelte';
 	import { widgetCatalog } from '../../lib/widget-catalog.js';
 	import {
+		contrastRatio,
+		colorScale,
+		themeFocusRings,
+		themeInputBorders,
+		themeInputSizes,
+		themeInputStyles,
+		themeLooks,
+		themeShadows,
 		themeFonts,
 		themePresets,
 		themeRadii,
@@ -42,6 +51,7 @@
 		'widget-button',
 		'widget-text-field',
 		'widget-select',
+		'widget-textarea',
 		'widget-checkbox',
 		'widget-switch',
 		'widget-slider',
@@ -76,7 +86,24 @@
 			...(d.items ? { items: d.items } : {})
 		};
 	}
+	/** Every catalog widget, to review a theme against the complete widget set. */
+	const allKinds = Object.keys(widgetCatalog) as WidgetKind[];
+	let showAll = $state(false);
 	let previews = $state(previewKinds.map(previewBlock));
+
+	/** Swaps the preview between the compact and the complete widget set. */
+	function setShowAll(value: boolean) {
+		showAll = value;
+		previews = (value ? allKinds : previewKinds).map(previewBlock);
+	}
+
+	/** Primary-600 is the default button background; it must stay readable with white text. */
+	const lowContrast = $derived(contrastRatio(colorScale(draft.primary)[600], '#ffffff') < 4.5);
+
+	/** Applies a bundle of non-colour options (a "look"). */
+	function applyLook(values: (typeof themeLooks)[number]['values']) {
+		Object.assign(draft, values);
+	}
 
 	function pickPreset(id: string, primary: string) {
 		draft.preset = id;
@@ -137,6 +164,62 @@
 					/>
 					<code>{draft.primary}</code>
 				</label>
+				<label class="row">
+					<span>Secondary colour</span>
+					<input type="color" bind:value={draft.secondary} />
+					<code>{draft.secondary}</code>
+				</label>
+				{#if lowContrast}
+					<p class="error" role="alert">
+						White text on this primary colour is below the WCAG AA contrast (4.5:1). Pick a darker
+						colour.
+					</p>
+				{/if}
+			</fieldset>
+
+			<fieldset disabled={!data.canEdit}>
+				<legend>Look</legend>
+				<div class="choices">
+					{#each themeLooks as look (look.id)}
+						<button type="button" onclick={() => applyLook(look.values)}>{look.label}</button>
+					{/each}
+				</div>
+				<p class="hint">Sets corners, font, form controls and shadow at once; colours stay.</p>
+			</fieldset>
+
+			<fieldset disabled={!data.canEdit}>
+				<legend>Form controls</legend>
+				<label class="row">
+					<span>Style</span>
+					<select bind:value={draft.inputStyle} aria-label="Input style">
+						{#each themeInputStyles as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+					</select>
+				</label>
+				<label class="row">
+					<span>Size</span>
+					<select bind:value={draft.inputSize} aria-label="Input size">
+						{#each themeInputSizes as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+					</select>
+				</label>
+				<label class="row">
+					<span>Border</span>
+					<select bind:value={draft.inputBorder} aria-label="Input border">
+						{#each themeInputBorders as o (o.value)}<option value={o.value}>{o.label}</option
+							>{/each}
+					</select>
+				</label>
+				<label class="row">
+					<span>Focus ring</span>
+					<select bind:value={draft.focusRing} aria-label="Focus ring">
+						{#each themeFocusRings as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+					</select>
+				</label>
+				<label class="row">
+					<span>Card shadow</span>
+					<select bind:value={draft.shadow} aria-label="Card shadow">
+						{#each themeShadows as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+					</select>
+				</label>
 			</fieldset>
 
 			<fieldset disabled={!data.canEdit}>
@@ -191,6 +274,14 @@
 
 	<section class="panel preview-panel" aria-label="Live preview">
 		<h2>Preview</h2>
+		<label class="row">
+			<input
+				type="checkbox"
+				checked={showAll}
+				onchange={(event) => setShowAll(event.currentTarget.checked)}
+			/>
+			<span>Show all widgets</span>
+		</label>
 		<ThemeScope theme={draft}>
 			<div class="preview">
 				{#each previews as block, index (block.id)}

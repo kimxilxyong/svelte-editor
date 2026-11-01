@@ -37,7 +37,7 @@
 	const inputId = $derived(`select-${id}`);
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Label for={inputId} class="text-sm">{title}</Label>
 	<Select
 		size="sm"

@@ -14,7 +14,7 @@
 	let value = $state('');
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-1 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-1">
 	<FloatingLabelInput id={inputId} variant="outlined" bind:value>{title}</FloatingLabelInput>
 	{#if body}<Helper>{body}</Helper>{/if}
 </div>

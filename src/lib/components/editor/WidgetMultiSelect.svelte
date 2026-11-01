@@ -26,7 +26,7 @@
 	let value = $state<string[]>([]);
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Label class="text-sm">{title}</Label>
 	<MultiSelect size="sm" items={options} bind:value placeholder={action} />
 	{#if body}<Helper>{body}</Helper>{/if}

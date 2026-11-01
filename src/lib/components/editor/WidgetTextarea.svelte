@@ -10,7 +10,7 @@
 	 * @prop {string} [value] - `$bindable()` textarea value.
 	 * @prop {() => void} [onchange] - Called when the user edits the value.
 	 */
-	import { Textarea, Label, Helper } from 'flowbite-svelte';
+	import { Textarea, Label, Helper, getTheme } from 'flowbite-svelte';
 
 	let {
 		id = '',
@@ -28,12 +28,15 @@
 		onchange?: () => void;
 	} = $props();
 	const inputId = $derived(`textarea-${id}`);
+	// Flowbite only applies the provider's `textarea.wrapper` classes to wrapped textareas (with a
+	// header/footer/addon); a plain one ignores them, so the site theme is passed in explicitly.
+	const themed = $derived(getTheme('textarea')?.wrapper);
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Label for={inputId} class="text-sm">{title}</Label>
 	<Textarea
-		class="h-full min-h-0 resize-none"
+		class={[themed, 'h-full min-h-0 resize-none']}
 		id={inputId}
 		placeholder={action}
 		maxlength={100}

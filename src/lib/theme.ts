@@ -28,19 +28,160 @@ export type ThemeRadius = 'none' | 'sm' | 'md' | 'lg' | 'full';
 /** Font family choices (mapped to Tailwind's `font-sans|serif|mono`). */
 export type ThemeFont = 'sans' | 'serif' | 'mono';
 
+/** Visual style of text-entry controls (input, textarea, select). */
+export type ThemeInputStyle = 'outlined' | 'filled' | 'underlined' | 'soft';
+
+/** Size of text-entry controls: font size and padding. */
+export type ThemeInputSize = 'sm' | 'md' | 'lg';
+
+/** Border thickness of text-entry controls (1px, 2px, 4px). Ignored by `underlined`'s sides. */
+export type ThemeInputBorder = 'thin' | 'medium' | 'thick';
+
+/** Colour of the focus ring of text-entry controls, or `none` to remove it. */
+export type ThemeFocusRing = 'primary' | 'secondary' | 'none';
+
+/** Drop shadow of cards. */
+export type ThemeShadow = 'none' | 'sm' | 'md' | 'lg';
+
 /**
  * The persisted site theme.
  *
- * - `preset`: id of the preset the colour came from, or `custom` when `primary` was edited by hand.
- * - `primary`: base colour (the `500` shade) as `#rrggbb`.
+ * Colours are `#rrggbb`. Every field has a default, and older stored themes that lack the newer
+ * fields (`secondary`, `inputStyle`, …) are completed with those defaults by {@link parseSiteTheme}.
+ *
+ * - `preset`: id of the colour preset, or `custom` when `primary` was edited by hand.
+ * - `primary`: base colour (the `500` shade) of the `primary-*` scale.
+ * - `secondary`: base colour of the `secondary-*` scale (used by secondary buttons and focus rings).
+ * - `radius`: corner radius family of buttons, badges, inputs and cards.
+ * - `inputStyle` / `inputSize` / `inputBorder` / `focusRing`: look of text-entry controls.
+ * - `shadow`: drop shadow of cards.
  */
 export type SiteTheme = {
 	preset: string;
 	primary: string;
+	secondary: string;
 	radius: ThemeRadius;
 	font: ThemeFont;
 	dark: boolean;
+	inputStyle: ThemeInputStyle;
+	inputSize: ThemeInputSize;
+	inputBorder: ThemeInputBorder;
+	focusRing: ThemeFocusRing;
+	shadow: ThemeShadow;
 };
+
+/** A selectable `{ value, label }` option for pickers. */
+export type ThemeOption<T extends string> = { value: T; label: string };
+
+export const themeInputStyles: readonly ThemeOption<ThemeInputStyle>[] = [
+	{ value: 'outlined', label: 'Outlined' },
+	{ value: 'filled', label: 'Filled' },
+	{ value: 'underlined', label: 'Underlined' },
+	{ value: 'soft', label: 'Soft tint' }
+];
+export const themeInputSizes: readonly ThemeOption<ThemeInputSize>[] = [
+	{ value: 'sm', label: 'Small' },
+	{ value: 'md', label: 'Medium' },
+	{ value: 'lg', label: 'Large' }
+];
+export const themeInputBorders: readonly ThemeOption<ThemeInputBorder>[] = [
+	{ value: 'thin', label: 'Thin' },
+	{ value: 'medium', label: 'Medium' },
+	{ value: 'thick', label: 'Thick' }
+];
+export const themeFocusRings: readonly ThemeOption<ThemeFocusRing>[] = [
+	{ value: 'primary', label: 'Primary' },
+	{ value: 'secondary', label: 'Secondary' },
+	{ value: 'none', label: 'None' }
+];
+export const themeShadows: readonly ThemeOption<ThemeShadow>[] = [
+	{ value: 'none', label: 'None' },
+	{ value: 'sm', label: 'Subtle' },
+	{ value: 'md', label: 'Medium' },
+	{ value: 'lg', label: 'Strong' }
+];
+
+/**
+ * A "look": a bundle of non-colour options applied at once on the `/theme` page. Colours are
+ * independent, so every look works with every colour preset.
+ */
+export type ThemeLook = {
+	id: string;
+	label: string;
+	values: Pick<
+		SiteTheme,
+		'radius' | 'font' | 'inputStyle' | 'inputSize' | 'inputBorder' | 'focusRing' | 'shadow'
+	>;
+};
+
+/** Built-in looks, loosely modelled on Flowbite's default / minimal / enterprise / playful themes. */
+export const themeLooks: readonly ThemeLook[] = [
+	{
+		id: 'default',
+		label: 'Default',
+		values: {
+			radius: 'md',
+			font: 'sans',
+			inputStyle: 'outlined',
+			inputSize: 'sm',
+			inputBorder: 'thin',
+			focusRing: 'primary',
+			shadow: 'none'
+		}
+	},
+	{
+		id: 'minimal',
+		label: 'Minimal',
+		values: {
+			radius: 'none',
+			font: 'sans',
+			inputStyle: 'underlined',
+			inputSize: 'md',
+			inputBorder: 'medium',
+			focusRing: 'none',
+			shadow: 'none'
+		}
+	},
+	{
+		id: 'enterprise',
+		label: 'Enterprise',
+		values: {
+			radius: 'sm',
+			font: 'serif',
+			inputStyle: 'outlined',
+			inputSize: 'md',
+			inputBorder: 'medium',
+			focusRing: 'primary',
+			shadow: 'sm'
+		}
+	},
+	{
+		id: 'soft',
+		label: 'Soft',
+		values: {
+			radius: 'lg',
+			font: 'sans',
+			inputStyle: 'soft',
+			inputSize: 'lg',
+			inputBorder: 'thin',
+			focusRing: 'primary',
+			shadow: 'md'
+		}
+	},
+	{
+		id: 'playful',
+		label: 'Playful',
+		values: {
+			radius: 'full',
+			font: 'sans',
+			inputStyle: 'filled',
+			inputSize: 'lg',
+			inputBorder: 'thick',
+			focusRing: 'secondary',
+			shadow: 'lg'
+		}
+	}
+];
 
 /** A selectable colour preset. */
 export type ThemePreset = { id: string; label: string; primary: string };
@@ -73,39 +214,83 @@ export const themeFonts: readonly { value: ThemeFont; label: string }[] = [
 export const defaultSiteTheme: Readonly<SiteTheme> = {
 	preset: 'violet',
 	primary: '#7766df',
+	secondary: '#0ea5e9',
 	radius: 'md',
 	font: 'sans',
-	dark: false
+	dark: false,
+	inputStyle: 'outlined',
+	inputSize: 'sm',
+	inputBorder: 'thin',
+	focusRing: 'primary',
+	shadow: 'none'
 };
 
 const hexPattern = /^#[0-9a-f]{6}$/i;
 
 /**
+ * Reads an optional enumerated field: absent → `fallback`; present but not one of `options` →
+ * `undefined` (the caller rejects the whole theme).
+ */
+function pickOption<T extends string>(
+	value: unknown,
+	options: readonly ThemeOption<T>[],
+	fallback: T
+): T | undefined {
+	if (value === undefined) return fallback;
+	return options.find((option) => option.value === value)?.value;
+}
+
+/**
  * Strictly validates an untrusted theme payload.
  *
+ * The original five fields (`preset`, `primary`, `radius`, `font`, `dark`) are required. The newer
+ * fields are optional so themes saved by older versions keep loading; a missing one takes its
+ * default, a present but invalid one rejects the theme. Free-form values (colours) are only ever
+ * emitted as CSS variable values, never as class names, so Tailwind's class scanning is unaffected.
+ *
  * @param value - Parsed JSON.
- * @returns A normalised {@link SiteTheme} or `null` when any field is missing or invalid.
+ * @returns A normalised {@link SiteTheme} or `null` when any field is invalid.
  */
 export function parseSiteTheme(value: unknown): SiteTheme | null {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
 	const v = value as Record<string, unknown>;
+	const d = defaultSiteTheme;
+	const secondary = v.secondary === undefined ? d.secondary : v.secondary;
+	const inputStyle = pickOption(v.inputStyle, themeInputStyles, d.inputStyle);
+	const inputSize = pickOption(v.inputSize, themeInputSizes, d.inputSize);
+	const inputBorder = pickOption(v.inputBorder, themeInputBorders, d.inputBorder);
+	const focusRing = pickOption(v.focusRing, themeFocusRings, d.focusRing);
+	const shadow = pickOption(v.shadow, themeShadows, d.shadow);
 	if (
 		typeof v.preset !== 'string' ||
 		!/^[a-z0-9-]{1,30}$/.test(v.preset) ||
 		typeof v.primary !== 'string' ||
 		!hexPattern.test(v.primary) ||
+		typeof secondary !== 'string' ||
+		!hexPattern.test(secondary) ||
 		!themeRadii.some((r) => r.value === v.radius) ||
 		!themeFonts.some((f) => f.value === v.font) ||
-		typeof v.dark !== 'boolean'
+		typeof v.dark !== 'boolean' ||
+		!inputStyle ||
+		!inputSize ||
+		!inputBorder ||
+		!focusRing ||
+		!shadow
 	) {
 		return null;
 	}
 	return {
 		preset: v.preset,
 		primary: v.primary.toLowerCase(),
+		secondary: secondary.toLowerCase(),
 		radius: v.radius as ThemeRadius,
 		font: v.font as ThemeFont,
-		dark: v.dark
+		dark: v.dark,
+		inputStyle,
+		inputSize,
+		inputBorder,
+		focusRing,
+		shadow
 	};
 }
 
@@ -157,6 +342,33 @@ export function primaryScale(hex: string): Record<number, string> {
 }
 
 /**
+ * Relative luminance (WCAG 2.x) of a `#rrggbb` colour.
+ *
+ * @param hex - Colour `#rrggbb`.
+ */
+function luminance(hex: string): number {
+	const [r, g, b] = [1, 3, 5].map((i) => {
+		const c = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
+		return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * WCAG contrast ratio between two `#rrggbb` colours (1 … 21). 4.5 is the AA minimum for body text.
+ *
+ * @example
+ * contrastRatio('#000000', '#ffffff'); // 21
+ */
+export function contrastRatio(a: string, b: string): number {
+	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+}
+
+/** Alias of {@link primaryScale}: the same scale generator is used for the secondary colour. */
+export const colorScale = primaryScale;
+
+/**
  * Inline style (CSS custom properties) that applies the colours of a theme to a subtree.
  *
  * @param theme - Theme to apply.
@@ -167,6 +379,11 @@ export function themeStyle(theme: SiteTheme): string {
 	const vars = Object.entries(scale).map(
 		([shade, colour]) => `--color-primary-${shade}: ${colour}`
 	);
+	for (const [shade, colour] of Object.entries(colorScale(theme.secondary))) {
+		vars.push(`--color-secondary-${shade}: ${colour}`);
+	}
+	// Plain links inside the theme scope follow the primary colour (dark mode needs a lighter shade).
+	vars.push(`--site-link: ${scale[theme.dark ? 400 : 600]}`);
 	vars.push(
 		`--site-bg: ${theme.dark ? '#111827' : '#ffffff'}`,
 		`--site-fg: ${theme.dark ? '#f3f4f6' : '#1f2937'}`
@@ -189,8 +406,73 @@ const radiusClasses: Record<ThemeRadius, { control: string; surface: string }> =
 };
 
 /**
- * Component-level overrides for flowbite-svelte's `ThemeProvider` (corner radius of the widgets).
- * Colours are handled by {@link themeStyle}; flowbite merges these classes with its defaults.
+ * Class lookup tables for text-entry controls. Every value is a complete literal so Tailwind's
+ * source scanner finds it; user input never builds a class name (only picks a table entry).
+ */
+const inputSizeClasses: Record<ThemeInputSize, string> = {
+	sm: 'text-xs px-2 py-1',
+	md: 'text-sm px-2.5 py-2.5',
+	lg: 'text-base px-3 py-3'
+};
+const inputBorderClasses: Record<ThemeInputBorder, { all: string; bottom: string }> = {
+	thin: { all: 'border', bottom: 'border-0 border-b' },
+	medium: { all: 'border-2', bottom: 'border-0 border-b-2' },
+	thick: { all: 'border-4', bottom: 'border-0 border-b-4' }
+};
+const inputFocusClasses: Record<ThemeFocusRing, string> = {
+	primary: 'focus:ring-2 focus:ring-primary-500 focus:border-primary-500',
+	secondary: 'focus:ring-2 focus:ring-secondary-500 focus:border-secondary-500',
+	none: 'focus:ring-0 focus:border-primary-500'
+};
+const inputStyleClasses: Record<ThemeInputStyle, string> = {
+	outlined: 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800',
+	filled: 'border-transparent bg-gray-100 dark:bg-gray-700',
+	underlined: 'border-gray-300 bg-transparent dark:border-gray-600 dark:bg-transparent',
+	soft: 'border-primary-200 bg-primary-50 dark:border-primary-800 dark:bg-gray-800'
+};
+const shadowClasses: Record<ThemeShadow, string> = {
+	none: 'shadow-none',
+	sm: 'shadow-sm',
+	md: 'shadow-md',
+	lg: 'shadow-lg'
+};
+
+/** Vertical-only size classes for controls whose horizontal padding is reserved for an icon. */
+const inputSizeYClasses: Record<ThemeInputSize, string> = {
+	sm: 'text-xs py-1',
+	md: 'text-sm py-2.5',
+	lg: 'text-base py-3'
+};
+
+/**
+ * Composes the classes of one text-entry control (radius first so `underlined` can win).
+ *
+ * @param padding - `xy` sets full padding; `y` keeps the component's own horizontal padding (search,
+ *   phone and file inputs reserve it for an icon); `none` leaves size and padding alone.
+ */
+function inputClasses(
+	theme: SiteTheme,
+	control: string,
+	padding: 'xy' | 'y' | 'none' = 'xy'
+): string {
+	const underlined = theme.inputStyle === 'underlined';
+	const border = inputBorderClasses[theme.inputBorder];
+	return [
+		underlined ? 'rounded-none' : control,
+		padding === 'xy' ? inputSizeClasses[theme.inputSize] : '',
+		padding === 'y' ? inputSizeYClasses[theme.inputSize] : '',
+		underlined ? border.bottom : border.all,
+		inputStyleClasses[theme.inputStyle],
+		inputFocusClasses[theme.focusRing]
+	]
+		.filter(Boolean)
+		.join(' ');
+}
+
+/**
+ * Component-level overrides for flowbite-svelte's `ThemeProvider` (radius, text-entry look, card
+ * shadow). Colours are handled by {@link themeStyle}; flowbite merges these classes with its
+ * defaults (tailwind-merge lets the provider win).
  *
  * @param theme - Theme to apply.
  */
@@ -199,9 +481,22 @@ export function themeConfig(theme: SiteTheme): ThemeConfig {
 	return {
 		button: { base: control },
 		badge: { base: control },
-		input: { input: control },
-		select: { select: control },
-		textarea: { wrapper: control },
-		card: { base: surface }
+		input: { input: inputClasses(theme, control) },
+		select: { select: inputClasses(theme, control) },
+		// A pill-shaped multi-line box looks wrong, so textareas use the softer surface radius.
+		textarea: { wrapper: inputClasses(theme, surface) },
+		search: { input: inputClasses(theme, control, 'y') },
+		fileupload: { base: inputClasses(theme, control, 'y') },
+		phoneInput: { input: inputClasses(theme, control, 'y') },
+		datepicker: { input: inputClasses(theme, control, 'y') },
+		timepicker: { select: inputClasses(theme, control, 'y') },
+		multiSelect: { base: inputClasses(theme, control, 'none') },
+		tags: {
+			base: inputClasses(theme, control, 'none'),
+			tag: 'dark:bg-gray-600 dark:text-white dark:border-gray-500'
+		},
+		dropzone: surface,
+		floatingLabelInput: { input: control },
+		card: { base: `${surface} ${shadowClasses[theme.shadow]}` }
 	};
 }

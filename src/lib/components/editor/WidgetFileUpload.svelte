@@ -13,7 +13,7 @@
 	const inputId = $derived(`upload-${id}`);
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Label for={inputId} class="text-sm">{title}</Label>
 	<Fileupload id={inputId} size="sm" />
 	{#if body}<Helper>{body}</Helper>{/if}

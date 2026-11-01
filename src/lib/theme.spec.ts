@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+	contrastRatio,
 	defaultSiteTheme,
 	normalizeSiteTheme,
 	parseSiteTheme,
@@ -60,5 +61,39 @@ describe('site theme persistence', () => {
 		await saveSiteTheme(db, next);
 		expect(await getSiteTheme(db)).toEqual(next);
 		await db.close?.();
+	});
+});
+
+describe('extended theme', () => {
+	it('completes old-shape themes with defaults', () => {
+		const old = { preset: 'violet', primary: '#7766df', radius: 'md', font: 'sans', dark: false };
+		expect(parseSiteTheme(old)).toEqual(defaultSiteTheme);
+	});
+	it('rejects invalid new values', () => {
+		expect(parseSiteTheme({ ...defaultSiteTheme, inputStyle: 'x' })).toBeNull();
+		expect(parseSiteTheme({ ...defaultSiteTheme, secondary: 'red' })).toBeNull();
+	});
+	it('emits secondary variables', () => {
+		expect(themeStyle(defaultSiteTheme as never)).toContain('--color-secondary-500: #0ea5e9');
+	});
+	it('computes contrast', () => {
+		expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 0);
+	});
+	it('only emits allow-listed literal classes', () => {
+		const ok =
+			/^(rounded-\w+|text-\S+|px-\S+|py-\S+|border\S*|bg-\S+|dark:\S+|focus:\S+|shadow-\S+)$/;
+		for (const inputStyle of ['outlined', 'filled', 'underlined', 'soft'] as const) {
+			const cfg = themeConfig({ ...defaultSiteTheme, inputStyle, preset: 'x' } as never);
+			const all = JSON.stringify(cfg).match(/"([^"]*)"/g)!;
+			for (const str of all.map((s) => s.slice(1, -1))) {
+				if (
+					/^(button|badge|input|select|textarea|card|base|wrapper|search|fileupload|phoneInput|datepicker|timepicker|multiSelect|dropzone|tags|tag|floatingLabelInput)$/.test(
+						str
+					)
+				)
+					continue;
+				for (const c of str.split(' ')) expect(c).toMatch(ok);
+			}
+		}
 	});
 });

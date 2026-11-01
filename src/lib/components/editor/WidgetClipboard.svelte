@@ -11,7 +11,7 @@
 	let { title = '', body = '' }: { title?: string; body?: string } = $props();
 </script>
 
-<div class="flex h-full w-full flex-col justify-center gap-2 overflow-hidden">
+<div class="flex h-full w-full flex-col justify-center gap-2">
 	<Label class="text-sm">{title}</Label>
 	<ButtonGroup class="w-full">
 		<Input readonly value={body} />

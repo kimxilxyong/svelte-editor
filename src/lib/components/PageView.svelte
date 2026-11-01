@@ -103,6 +103,9 @@
 					{@const geometry = blockLayout.get(block.id)!}
 					<article
 						class="block {block.kind} theme-{block.theme}"
+						class:custom-fg={!!block.foreground}
+						style:color={block.foreground || undefined}
+						style:background-color={block.background || undefined}
 						style:left="{geometry.x}px"
 						style:top="{geometry.y}px"
 						style:width="{geometry.width}px"
@@ -147,6 +150,11 @@
 		border-radius: 8px;
 		background: #fff;
 		box-shadow: 0 5px 18px rgb(34 34 56 / 0.12);
+	}
+
+	/* A custom foreground must also reach widgets that hard-code a text colour (headings, labels…). */
+	.block.custom-fg :global(:where(h1, h2, h3, h4, h5, h6, p, label, li, span, legend, blockquote)) {
+		color: inherit;
 	}
 
 	/* Widgets and composites sit directly on the themed page. */

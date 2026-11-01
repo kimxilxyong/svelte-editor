@@ -26,6 +26,7 @@
 	 * @prop {string} mark - Glyph of the selected block's kind.
 	 * @prop {{ id: string; name: string; slug: string }[]} [linkPages=[]] - Internal pages offered as link suggestions.
 	 * @prop {{ id: string; name: string }} [compositeEdit] - Composite a `composite:` block instantiates; shows an "Edit composite" link.
+	 * @prop {SiteTheme} [siteTheme] - Site theme whose foreground/background are the colour pickers' defaults.
 	 * @prop {() => void} onchange - A content value was edited (mark unsaved).
 	 * @prop {boolean} [hasFillBlock=false] - Another block on this canvas already uses Fill.
 	 * @prop {(alignment: AlignTo) => void} onalign - Align To was changed.
@@ -40,13 +41,8 @@
 	 *   onduplicate={duplicate} ondelete={remove} />
 	 */
 	import { resolve } from '$app/paths';
-	import {
-		blockLimits,
-		isValidLinkHref,
-		type AlignTo,
-		type BuilderBlock,
-		type Theme
-	} from '../editor.js';
+	import { blockLimits, isValidLinkHref, type AlignTo, type BuilderBlock } from '../editor.js';
+	import { defaultSiteTheme, siteBackground, siteForeground, type SiteTheme } from '../theme.js';
 	import { inspectorFields } from '../inspector-fields.js';
 	import { widgetCatalog } from '../widget-catalog.js';
 
@@ -60,6 +56,7 @@
 		linkPages = [],
 		compositeEdit,
 		hasFillBlock = false,
+		siteTheme = defaultSiteTheme,
 		onchange,
 		onalign,
 		onposition,
@@ -73,6 +70,7 @@
 		linkPages?: { id: string; name: string; slug: string }[];
 		compositeEdit?: { id: string; name: string };
 		hasFillBlock?: boolean;
+		siteTheme?: SiteTheme;
 		onchange: () => void;
 		onalign: (alignment: AlignTo) => void;
 		onposition: (field: GeometryField) => void;
@@ -94,12 +92,16 @@
 			.filter(Boolean)
 	);
 
-	/** Theme choices; labels match the swatches ("Soft" = lavender, "Bold" = dark). */
-	const themes: { value: Theme; label: string }[] = [
-		{ value: 'light', label: 'Light' },
-		{ value: 'lavender', label: 'Soft' },
-		{ value: 'dark', label: 'Bold' }
-	];
+	/**
+	 * Colour pickers. Without a custom value a picker shows (and a reset returns to) the site
+	 * theme's colour, so it always reflects what is actually rendered.
+	 */
+	const colorFields = $derived<
+		{ key: 'foreground' | 'background'; label: string; fallback: string }[]
+	>([
+		{ key: 'foreground', label: 'Foreground', fallback: siteForeground(siteTheme) },
+		{ key: 'background', label: 'Background', fallback: siteBackground(siteTheme) }
+	]);
 </script>
 
 <div class="panel-heading inspector-heading">
@@ -406,20 +408,35 @@
 		{/if}
 
 		<div class="field-divider"></div>
-		<span class="field-label">Theme</span>
-		<div class="theme-options" role="group" aria-label="Theme">
-			{#each themes as theme (theme.value)}
-				<button
-					type="button"
-					class={{ 'theme-active': current.theme === theme.value }}
-					aria-pressed={current.theme === theme.value}
-					onclick={() => {
-						current.theme = theme.value;
-						onchange();
-					}}
-				>
-					<span class="swatch swatch-{theme.value}"></span>{theme.label}
-				</button>
+		<span class="field-label">Colors</span>
+		<div class="color-options" role="group" aria-label="Colors">
+			{#each colorFields as field (field.key)}
+				{@const custom = current[field.key]}
+				<div class="color-field">
+					<label for="{uid}-{field.key}">{field.label}</label>
+					<input
+						id="{uid}-{field.key}"
+						type="color"
+						value={custom || field.fallback}
+						oninput={(event) => {
+							current[field.key] = event.currentTarget.value;
+							onchange();
+						}}
+					/>
+					<code>{custom || field.fallback}</code>
+					<button
+						type="button"
+						class="color-reset"
+						disabled={!custom}
+						aria-label="Reset {field.label.toLowerCase()} to the site theme"
+						onclick={() => {
+							current[field.key] = undefined;
+							onchange();
+						}}
+					>
+						Theme
+					</button>
+				</div>
 			{/each}
 		</div>
 	</div>
@@ -676,48 +693,48 @@
 		background: #eeeef3;
 	}
 
-	.theme-options {
+	.color-options {
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.35rem;
+		gap: 0.45rem;
 	}
 
-	.theme-options button {
+	.color-field {
 		display: grid;
-		justify-items: center;
-		gap: 0.4rem;
-		padding: 0.55rem 0.2rem;
-		border: 1px solid #ececf1;
-		border-radius: 8px;
+		grid-template-columns: 5.5rem 2.2rem 1fr auto;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.7rem;
+		color: #4b4d63;
+	}
+
+	.color-field input[type='color'] {
+		width: 2.2rem;
+		height: 1.7rem;
+		padding: 0;
+		border: 1px solid #e3e3ea;
+		border-radius: 6px;
 		background: #fff;
-		color: #77798c;
-		font-size: 0.61rem;
 		cursor: pointer;
 	}
 
-	.theme-options button.theme-active {
-		border-color: #aa9ff1;
-		background: #faf9ff;
-		color: #6253ca;
+	.color-field code {
+		color: #88869f;
+		font-size: 0.65rem;
 	}
 
-	.swatch {
-		width: 24px;
-		height: 18px;
-		border: 1px solid #e8e8ed;
-		border-radius: 5px;
-	}
-
-	.swatch-light {
+	.color-reset {
+		padding: 0.2rem 0.5rem;
+		border: 1px solid #ececf1;
+		border-radius: 6px;
 		background: #fff;
+		color: #6253ca;
+		font-size: 0.62rem;
+		cursor: pointer;
 	}
 
-	.swatch-lavender {
-		background: linear-gradient(135deg, #f3efff, #dcd5ff);
-	}
-
-	.swatch-dark {
-		background: #29273d;
+	.color-reset:disabled {
+		color: #c1c1cc;
+		cursor: default;
 	}
 
 	.inspector-empty {
@@ -761,7 +778,7 @@
 
 		.selected-component,
 		.field-divider,
-		.theme-options,
+		.color-options,
 		.link-group {
 			grid-column: 1 / -1;
 		}

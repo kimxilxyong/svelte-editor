@@ -52,6 +52,9 @@ export type ThemeShadow = 'none' | 'sm' | 'md' | 'lg';
  * - `preset`: id of the colour preset, or `custom` when `primary` was edited by hand.
  * - `primary`: base colour (the `500` shade) of the `primary-*` scale.
  * - `secondary`: base colour of the `secondary-*` scale (used by secondary buttons and focus rings).
+ * - `background`: page background `#rrggbb`, or `''` (automatic) to follow `dark`. A custom value also
+ *   picks a readable default foreground, see {@link siteForeground}.
+ * - `foreground`: text colour `#rrggbb`, or `''` (automatic) to derive it from the background.
  * - `radius`: corner radius family of buttons, badges, inputs and cards.
  * - `inputStyle` / `inputSize` / `inputBorder` / `focusRing`: look of text-entry controls.
  * - `shadow`: drop shadow of cards.
@@ -60,6 +63,8 @@ export type SiteTheme = {
 	preset: string;
 	primary: string;
 	secondary: string;
+	background: string;
+	foreground: string;
 	radius: ThemeRadius;
 	font: ThemeFont;
 	dark: boolean;
@@ -215,6 +220,8 @@ export const defaultSiteTheme: Readonly<SiteTheme> = {
 	preset: 'violet',
 	primary: '#7766df',
 	secondary: '#0ea5e9',
+	background: '',
+	foreground: '',
 	radius: 'md',
 	font: 'sans',
 	dark: false,
@@ -256,6 +263,8 @@ export function parseSiteTheme(value: unknown): SiteTheme | null {
 	const v = value as Record<string, unknown>;
 	const d = defaultSiteTheme;
 	const secondary = v.secondary === undefined ? d.secondary : v.secondary;
+	const background = v.background === undefined ? d.background : v.background;
+	const foreground = v.foreground === undefined ? d.foreground : v.foreground;
 	const inputStyle = pickOption(v.inputStyle, themeInputStyles, d.inputStyle);
 	const inputSize = pickOption(v.inputSize, themeInputSizes, d.inputSize);
 	const inputBorder = pickOption(v.inputBorder, themeInputBorders, d.inputBorder);
@@ -268,6 +277,10 @@ export function parseSiteTheme(value: unknown): SiteTheme | null {
 		!hexPattern.test(v.primary) ||
 		typeof secondary !== 'string' ||
 		!hexPattern.test(secondary) ||
+		typeof background !== 'string' ||
+		(background !== '' && !hexPattern.test(background)) ||
+		typeof foreground !== 'string' ||
+		(foreground !== '' && !hexPattern.test(foreground)) ||
 		!themeRadii.some((r) => r.value === v.radius) ||
 		!themeFonts.some((f) => f.value === v.font) ||
 		typeof v.dark !== 'boolean' ||
@@ -283,6 +296,8 @@ export function parseSiteTheme(value: unknown): SiteTheme | null {
 		preset: v.preset,
 		primary: v.primary.toLowerCase(),
 		secondary: secondary.toLowerCase(),
+		background: background.toLowerCase(),
+		foreground: foreground.toLowerCase(),
 		radius: v.radius as ThemeRadius,
 		font: v.font as ThemeFont,
 		dark: v.dark,
@@ -369,6 +384,36 @@ export function contrastRatio(a: string, b: string): number {
 export const colorScale = primaryScale;
 
 /**
+ * Effective page background of a theme: the custom colour, else white (light) or near-black (dark).
+ *
+ * @example
+ * siteBackground({ ...defaultSiteTheme, dark: true }); // '#111827'
+ */
+export function siteBackground(theme: Pick<SiteTheme, 'background' | 'dark'>): string {
+	if (theme.background) return theme.background;
+	return theme.dark ? '#111827' : '#ffffff';
+}
+
+/**
+ * Effective text colour of a theme: the custom colour if set. Otherwise, with an automatic background it follows `dark`; with a custom
+ * background the more readable of the light and dark text colours is chosen.
+ *
+ * @example
+ * siteForeground({ ...defaultSiteTheme, background: '#000000' }); // '#f3f4f6'
+ */
+export function siteForeground(
+	theme: Pick<SiteTheme, 'background' | 'dark'> & { foreground?: string }
+): string {
+	if (theme.foreground) return theme.foreground;
+	const light = '#f3f4f6';
+	const dark = '#1f2937';
+	if (!theme.background) return theme.dark ? light : dark;
+	return contrastRatio(theme.background, dark) >= contrastRatio(theme.background, light)
+		? dark
+		: light;
+}
+
+/**
  * Inline style (CSS custom properties) that applies the colours of a theme to a subtree.
  *
  * @param theme - Theme to apply.
@@ -384,10 +429,7 @@ export function themeStyle(theme: SiteTheme): string {
 	}
 	// Plain links inside the theme scope follow the primary colour (dark mode needs a lighter shade).
 	vars.push(`--site-link: ${scale[theme.dark ? 400 : 600]}`);
-	vars.push(
-		`--site-bg: ${theme.dark ? '#111827' : '#ffffff'}`,
-		`--site-fg: ${theme.dark ? '#f3f4f6' : '#1f2937'}`
-	);
+	vars.push(`--site-bg: ${siteBackground(theme)}`, `--site-fg: ${siteForeground(theme)}`);
 	return vars.join('; ');
 }
 

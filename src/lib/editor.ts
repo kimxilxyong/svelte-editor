@@ -154,8 +154,15 @@ export type BuilderBlock = {
 	body: string;
 	/** Action button label or kicker caption. */
 	action: string;
-	/** Visual color theme of the block. */
+	/**
+	 * Legacy per-block theme name. It is no longer editable (colours are set with `foreground` and
+	 * `background`) but stays in the model so older saved sites and custom components keep working.
+	 */
 	theme: Theme;
+	/** Optional text colour `#rrggbb`; absent means "inherit the site theme's foreground". */
+	foreground?: string;
+	/** Optional background colour `#rrggbb`; absent means "inherit the site theme's background". */
+	background?: string;
 	/** Whether the block is positioned with coordinates (always true in current version). */
 	positioned: boolean;
 	/**
@@ -298,6 +305,38 @@ const blockKinds: BlockKind[] = [
 	'widget-drawer',
 	'widget-dialog'
 ];
+
+/** Strict `#rrggbb` colour accepted for block colours (never interpolated into class names). */
+const blockColorPattern = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Whether a value is a valid optional block colour: absent/empty or `#rrggbb`.
+ *
+ * @param value - Untrusted value of `foreground` / `background`.
+ */
+export function isValidBlockColor(value: unknown): value is string | undefined {
+	return (
+		value === undefined ||
+		(typeof value === 'string' && (value === '' || blockColorPattern.test(value)))
+	);
+}
+
+/**
+ * Inline CSS for a block's custom colours (empty when none are set).
+ *
+ * @param block - Block carrying optional `foreground` / `background`.
+ * @example
+ * blockColorStyle({ foreground: '#ffffff', background: '#112233' });
+ * // 'color: #ffffff; background-color: #112233'
+ */
+export function blockColorStyle(block: Pick<BuilderBlock, 'foreground' | 'background'>): string {
+	return [
+		block.foreground ? `color: ${block.foreground}` : '',
+		block.background ? `background-color: ${block.background}` : ''
+	]
+		.filter(Boolean)
+		.join('; ');
+}
 
 /** Permitted theme names. */
 const themes: Theme[] = ['light', 'lavender', 'dark'];
@@ -454,6 +493,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			block.action.length > 48 ||
 			typeof block.theme !== 'string' ||
 			!themes.includes(block.theme as Theme) ||
+			!isValidBlockColor(block.foreground) ||
+			!isValidBlockColor(block.background) ||
 			typeof positioned !== 'boolean' ||
 			typeof alignTo !== 'string' ||
 			!['none', 'left', 'right', 'top', 'bottom', 'fill'].includes(alignTo) ||
@@ -517,6 +558,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			body: block.body,
 			action: block.action,
 			theme: block.theme as Theme,
+			...(block.foreground ? { foreground: block.foreground.toLowerCase() } : {}),
+			...(block.background ? { background: block.background.toLowerCase() } : {}),
 			positioned: true,
 			alignTo: alignTo as AlignTo,
 			x,

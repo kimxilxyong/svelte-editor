@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockLimits, isValidLinkHref, parseBuilderBlocks } from './editor.js';
+import { blockColorStyle, blockLimits, isValidLinkHref, parseBuilderBlocks } from './editor.js';
 
 const base = {
 	id: 'a',
@@ -48,6 +48,26 @@ describe('parseBuilderBlocks pixel geometry', () => {
 				{ ...base, id: 'b', alignTo: 'fill' }
 			])
 		).toBeNull();
+	});
+});
+
+describe('block colours', () => {
+	it('accepts #rrggbb, lower-cases it and omits unset colours', () => {
+		const parsed = parseBuilderBlocks([{ ...base, foreground: '#AABBCC', background: '' }]);
+		expect(parsed?.[0].foreground).toBe('#aabbcc');
+		expect(parsed?.[0]).not.toHaveProperty('background');
+		expect(parseBuilderBlocks([base])?.[0]).not.toHaveProperty('foreground');
+	});
+	it('rejects anything but #rrggbb', () => {
+		expect(parseBuilderBlocks([{ ...base, foreground: 'red' }])).toBeNull();
+		expect(parseBuilderBlocks([{ ...base, background: 'url(x)' }])).toBeNull();
+		expect(parseBuilderBlocks([{ ...base, background: 42 }])).toBeNull();
+	});
+	it('builds the inline style', () => {
+		expect(blockColorStyle({})).toBe('');
+		expect(blockColorStyle({ foreground: '#ffffff', background: '#112233' })).toBe(
+			'color: #ffffff; background-color: #112233'
+		);
 	});
 });
 

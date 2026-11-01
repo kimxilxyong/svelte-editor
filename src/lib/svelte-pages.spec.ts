@@ -162,6 +162,39 @@ describe('svelte page export/import', () => {
 		expect(parsed?.blocks.map((item) => item.alignTo)).toEqual(['right', 'fill']);
 	});
 
+	it('round-trips custom block colours in pages and composites', () => {
+		const colored = [
+			block('widget-heading', 0, { foreground: '#ffffff', background: '#112233' }),
+			block('widget-alert', 1)
+		];
+		const page = renderPageSource({
+			id: 'p',
+			name: 'Colors',
+			slug: 'colors',
+			width: 800,
+			height: 600,
+			blocks: colored
+		});
+		expect(page).toContain('color: #ffffff; background-color: #112233');
+		expect(page).toContain('data-fg');
+		const parsedPage = parsePageSource(page, 'colors');
+		expect(parsedPage?.blocks[0]).toMatchObject({ foreground: '#ffffff', background: '#112233' });
+		expect(parsedPage?.blocks[1].foreground).toBeUndefined();
+		expect(parsedPage?.blocks[1].background).toBeUndefined();
+
+		const composite = renderCompositeSource({
+			id: 'c',
+			name: 'Tinted',
+			width: 800,
+			height: 600,
+			blocks: colored
+		});
+		expect(parseCompositeSource(composite)?.blocks[0]).toMatchObject({
+			foreground: '#ffffff',
+			background: '#112233'
+		});
+	});
+
 	it('drops pages whose imported button link is unsafe', () => {
 		const source = renderPageSource({
 			id: 'p',

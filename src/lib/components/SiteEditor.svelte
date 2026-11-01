@@ -1398,6 +1398,9 @@
 										<article
 											class="canvas-block positioned {block.kind} theme-{block.theme}"
 											class:selected={!isPreview && selectedId === block.id}
+											class:custom-fg={!!block.foreground}
+											style:color={block.foreground || undefined}
+											style:background-color={block.background || undefined}
 											style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
 											style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
 											style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
@@ -1468,6 +1471,7 @@
 					{linkPages}
 					compositeEdit={selectedComposite}
 					hasFillBlock={anotherBlockUsesFill}
+					siteTheme={routePage.data.siteTheme}
 					onchange={markUnsaved}
 					onalign={updateSelectedAlignment}
 					onposition={updateSelectedPosition}
@@ -1897,6 +1901,12 @@
 		color: var(--ink);
 		font: inherit;
 		text-align: left;
+	}
+
+	/* A custom foreground must also reach widgets that hard-code a text colour (headings, labels…). */
+	.canvas-block.custom-fg
+		:global(:where(h1, h2, h3, h4, h5, h6, p, label, li, span, legend, blockquote)) {
+		color: inherit;
 	}
 
 	.canvas-block.positioned {

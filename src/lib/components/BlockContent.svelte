@@ -205,6 +205,9 @@
 			{@const geometry = compositeLayout.get(child.id) ?? child}
 			<div
 				class="composite-child"
+				class:custom-fg={!!child.foreground}
+				style:color={child.foreground || undefined}
+				style:background-color={child.background || undefined}
 				style:left="{(geometry.x / composite.width) * 100}%"
 				style:top="{(geometry.y / composite.height) * 100}%"
 				style:width="{(geometry.width / composite.width) * 100}%"
@@ -240,6 +243,12 @@
 	.composite-child {
 		position: absolute;
 		box-sizing: border-box;
+	}
+
+	/* A custom foreground must also reach widgets that hard-code a text colour (headings, labels…). */
+	.composite-child.custom-fg
+		:global(:where(h1, h2, h3, h4, h5, h6, p, label, li, span, legend, blockquote)) {
+		color: inherit;
 	}
 
 	.custom-block-preview {

@@ -25,6 +25,7 @@ import { parse } from 'svelte/compiler';
 import { resolveBlockLayout } from './block-layout.js';
 import {
 	componentNames,
+	blockColorStyle,
 	getComponentName,
 	parseBuilderBlocks,
 	compositeKind,
@@ -250,6 +251,10 @@ ${blocks}
 		position: absolute;
 		box-sizing: border-box;
 	}
+
+	.editor-block[data-fg] :global(:where(h1, h2, h3, h4, h5, h6, p, label, li, span, legend, blockquote)) {
+		color: inherit;
+	}
 </style>
 `;
 }
@@ -282,7 +287,9 @@ function renderBlockElement(block: BuilderBlock, geometry: string): string {
 		const allowed = kindProps[block.kind as WidgetKind] || [];
 		propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
 	}
-	return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tdata-align-to="${block.alignTo ?? 'none'}"\n\t\t\tstyle="${geometry}"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
+	const colors = blockColorStyle(block);
+	// `data-fg` switches on the CSS rule that lets hard-coded widget text colours follow `color`.
+	return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tdata-align-to="${block.alignTo ?? 'none'}"${block.foreground ? '\n\t\t\tdata-fg' : ''}\n\t\t\tstyle="${colors ? `${geometry}; ${colors}` : geometry}"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
 }
 
 /** Rounds to two decimals so percentage geometry stays readable in generated files. */
@@ -347,6 +354,10 @@ ${blocks}
 		position: absolute;
 		box-sizing: border-box;
 	}
+
+	.editor-block[data-fg] :global(:where(h1, h2, h3, h4, h5, h6, p, label, li, span, legend, blockquote)) {
+		color: inherit;
+	}
 </style>
 `;
 }
@@ -402,6 +413,22 @@ function readStyle(style: string): Record<string, number> {
 	return values;
 }
 
+/**
+ * Reads the optional `color` / `background-color` declarations of a wrapper's inline style.
+ * Only strict `#rrggbb` values are accepted; anything else is ignored.
+ */
+function readColors(style: string): { foreground?: string; background?: string } {
+	const colors: { foreground?: string; background?: string } = {};
+	for (const part of style.split(';')) {
+		const [key, ...rest] = part.split(':');
+		const value = rest.join(':').trim().toLowerCase();
+		if (!/^#[0-9a-f]{6}$/.test(value)) continue;
+		if (key?.trim() === 'color') colors.foreground = value;
+		else if (key?.trim() === 'background-color') colors.background = value;
+	}
+	return colors;
+}
+
 /** Finds the container element carrying the `data-editor-page` attribute. */
 function findPageElement(nodes: AstNode[]): AstNode | undefined {
 	for (const node of nodes) {
@@ -435,11 +462,10 @@ function readBlocks(
 	const pageElement = container;
 	const blocks: Record<string, unknown>[] = [];
 	for (const wrapper of elementNodes(pageElement.fragment?.nodes ?? [])) {
-		const wrapperStyle = readStyle(
-			String(
-				attributeValue(wrapper.attributes?.find((a) => a.name === 'style') as AstAttribute) ?? ''
-			)
+		const wrapperStyleText = String(
+			attributeValue(wrapper.attributes?.find((a) => a.name === 'style') as AstAttribute) ?? ''
 		);
+		const wrapperStyle = readStyle(wrapperStyleText);
 		const component = elementNodes(wrapper.fragment?.nodes ?? []).find(
 			(node) =>
 				node.type === 'Component' &&
@@ -489,6 +515,7 @@ function readBlocks(
 			body: '',
 			action: '',
 			theme: 'light',
+			...readColors(wrapperStyleText),
 			x: round2(wrapperStyle.left * scaleX),
 			y: round2(wrapperStyle.top * scaleY),
 			width: round2(wrapperStyle.width * scaleX),

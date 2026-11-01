@@ -9,6 +9,8 @@ import {
 	normalizeSiteTheme,
 	parseSiteTheme,
 	primaryScale,
+	siteBackground,
+	siteForeground,
 	themeClasses,
 	themeConfig,
 	themeStyle
@@ -61,6 +63,29 @@ describe('site theme persistence', () => {
 		await saveSiteTheme(db, next);
 		expect(await getSiteTheme(db)).toEqual(next);
 		await db.close?.();
+	});
+});
+
+describe('theme background', () => {
+	it('is automatic by default and follows dark mode', () => {
+		expect(defaultSiteTheme.background).toBe('');
+		expect(siteBackground(defaultSiteTheme)).toBe('#ffffff');
+		expect(siteBackground({ ...defaultSiteTheme, dark: true })).toBe('#111827');
+		expect(siteForeground({ ...defaultSiteTheme, dark: true })).toBe('#f3f4f6');
+		expect(siteForeground({ ...defaultSiteTheme, foreground: '#123456' })).toBe('#123456');
+	});
+	it('uses a custom background and a readable foreground', () => {
+		const dark = { ...defaultSiteTheme, background: '#101010' };
+		expect(siteBackground(dark)).toBe('#101010');
+		expect(siteForeground(dark)).toBe('#f3f4f6');
+		expect(siteForeground({ ...defaultSiteTheme, background: '#ffee99' })).toBe('#1f2937');
+		expect(themeStyle(dark)).toContain('--site-bg: #101010');
+	});
+	it('validates the colour', () => {
+		expect(parseSiteTheme({ ...defaultSiteTheme, background: '#ABCDEF' })?.background).toBe(
+			'#abcdef'
+		);
+		expect(parseSiteTheme({ ...defaultSiteTheme, background: 'blue' })).toBeNull();
 	});
 });
 

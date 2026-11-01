@@ -2,7 +2,7 @@
 	/**
 	 * @component ThemePage
 	 *
-	 * `/theme` – edits the site-wide theme: colour preset or custom primary colour, corner radius,
+	 * `/theme` – edits the site-wide theme: colour preset or custom primary colour, background and foreground colour, corner radius,
 	 * font family, dark mode, secondary colour, form-control style/size/border/focus ring, card shadow
 	 * and one-click looks. The preview on the right renders real widgets inside a
 	 * {@link ThemeScope}, so what you see is exactly what the editor canvas, page previews and exported
@@ -22,6 +22,8 @@
 	import { widgetCatalog } from '../../lib/widget-catalog.js';
 	import {
 		contrastRatio,
+		siteBackground,
+		siteForeground,
 		colorScale,
 		themeFocusRings,
 		themeInputBorders,
@@ -168,6 +170,36 @@
 					<span>Secondary colour</span>
 					<input type="color" bind:value={draft.secondary} />
 					<code>{draft.secondary}</code>
+				</label>
+				<label class="row">
+					<span>Background colour</span>
+					<input
+						type="color"
+						aria-label="Background colour"
+						value={siteBackground(draft)}
+						oninput={(event) => (draft.background = event.currentTarget.value)}
+					/>
+					<code>{draft.background || `${siteBackground(draft)} (automatic)`}</code>
+					{#if draft.background}
+						<button type="button" class="reset" onclick={() => (draft.background = '')}>
+							Automatic
+						</button>
+					{/if}
+				</label>
+				<label class="row">
+					<span>Foreground colour</span>
+					<input
+						type="color"
+						aria-label="Foreground colour"
+						value={siteForeground(draft)}
+						oninput={(event) => (draft.foreground = event.currentTarget.value)}
+					/>
+					<code>{draft.foreground || `${siteForeground(draft)} (automatic)`}</code>
+					{#if draft.foreground}
+						<button type="button" class="reset" onclick={() => (draft.foreground = '')}>
+							Automatic
+						</button>
+					{/if}
 				</label>
 				{#if lowContrast}
 					<p class="error" role="alert">
@@ -392,6 +424,16 @@
 		gap: 0.6rem;
 		margin-top: 0.6rem;
 		font-size: 0.9rem;
+	}
+
+	.reset {
+		padding: 0.15rem 0.5rem;
+		border: 1px solid #d8d4cc;
+		border-radius: 6px;
+		background: #fff;
+		font: inherit;
+		font-size: 0.8rem;
+		cursor: pointer;
 	}
 
 	.row span:first-child {

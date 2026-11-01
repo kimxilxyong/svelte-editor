@@ -5,6 +5,7 @@
  *
  * Routes project-level operations between the client UI and the server filesystem:
  * - `action: 'export'`: Exports an entire EditorSite to a real SvelteKit application directory.
+ * - `action: 'create'`: Scaffolds a brand-new SvelteKit app in an empty folder, then exports the site into it.
  * - `action: 'import'`: Scans and imports all components and pages from a SvelteKit application directory.
  * - `action: 'export-component'`: Exports a single component by name into `src/lib/components/editor/`.
  * - `action: 'import-component'`: Imports and parses a single `.svelte` component file.
@@ -22,6 +23,7 @@ import {
 	importSingleComponent,
 	ProjectError
 } from '../../../../lib/server/project.js';
+import { createProject } from '../../../../lib/server/new-project.js';
 
 export const POST: RequestHandler = async ({ request }) => {
 	let body: unknown;
@@ -39,11 +41,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		root,
 		site: siteInput,
 		componentName,
-		componentPath
+		componentPath,
+		install
 	} = body as Record<string, unknown>;
 
 	try {
-		if (action === 'export') {
+		if (action === 'export' || action === 'create') {
 			const site = parseEditorSite(siteInput);
 			if (!site) {
 				return json(
@@ -52,6 +55,9 @@ export const POST: RequestHandler = async ({ request }) => {
 				);
 			}
 			const theme = await getSiteTheme(await getDatabase());
+			if (action === 'create') {
+				return json(await createProject(root, site, theme, { install: install === true }));
+			}
 			return json(await exportSite(root, site, theme));
 		}
 		if (action === 'import') return json(await importSite(root));

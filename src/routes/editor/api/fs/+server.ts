@@ -47,6 +47,7 @@ async function isSvelteKitProject(dirPath: string): Promise<boolean> {
  * - `parent`: Path of parent directory or null if at root.
  * - `home`: User's home directory path.
  * - `isSvelteKit`: Whether the current directory itself is a SvelteKit project.
+ * - `isEmpty`: Whether the current directory is empty, i.e. usable for "create new project".
  * - `directories`: Array of child directories with SvelteKit detection flags.
  */
 export const GET: RequestHandler = async ({ url }) => {
@@ -79,12 +80,15 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		const parent = path.dirname(targetPath) !== targetPath ? path.dirname(targetPath) : null;
 		const isSvelteKit = await isSvelteKitProject(targetPath);
+		// Folders that only hold a `.git` directory or `.DS_Store` still count as empty (see new-project.ts).
+		const isEmpty = entries.every((entry) => entry.name === '.git' || entry.name === '.DS_Store');
 
 		return json({
 			current: targetPath,
 			parent,
 			home: os.homedir(),
 			isSvelteKit,
+			isEmpty,
 			directories
 		});
 	} catch (error) {

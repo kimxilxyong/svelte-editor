@@ -75,3 +75,8 @@ Sign-in, roles, user management and the selectable database backend follow these
 - Kinds without a dedicated branch in `BlockContent.svelte` are rendered through `components/editor/registry.ts` (`genericWidgets`), which passes the `WidgetProps` superset (`widget-props.ts`). List-like widgets take `items` as one entry per line, cells separated by `|`.
 - Widgets must stay self-contained: import only `flowbite-svelte`, never `$lib` or relative modules (they are exported and recompiled one file at a time).
 - E2E tests must wait for `html[data-hydrated]` (set by the root layout) before interacting.
+
+## Create New Project
+
+- `src/lib/server/new-project.ts` (`createProject`) scaffolds a complete SvelteKit app (package.json, vite config with `$lib` alias, Tailwind/Flowbite `app.css` mirroring `routes/layout.css`, root redirect route) into an **empty** folder (only `.git`/`.DS_Store` tolerated; a missing last segment is created), then calls `exportSite` from `project.ts`. Never overwrites anything.
+- Exposed as the `create` action of `/editor/api/project` and the "Create new project" button on `/`; `/editor/api/fs` reports `isEmpty` for the picker badge. Tests: `new-project.spec.ts`, `e2e/create-project.e2e.ts` (builds the generated app with the editor's `node_modules` symlinked).

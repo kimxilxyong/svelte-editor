@@ -9,6 +9,8 @@
 	 * - SvelteKit project sync:
 	 *   - Browse server filesystem via `DirectoryPickerModal`.
 	 *   - Two-way export & import of native `.svelte` components and route pages.
+	 *   - "Create new project": scaffolds a complete SvelteKit app in an empty folder (optionally
+	 *     running `npm install`) and exports every page, composite and the theme into it.
 	 * - Visual overview: the selected page rendered with the real components via `PageView`
 	 *   (same content as the editor, reloaded from SQLite on every visit), plus an interactive
 	 *   Preview mode with working internal links.
@@ -62,6 +64,8 @@
 	let projectRoot = $state('');
 	let projectMessage = $state('');
 	let projectDetails = $state<string[]>([]);
+	/** Whether "Create new project" also runs `npm install` (slow, needs network). */
+	let installDependencies = $state(false);
 	let showPickerModal = $state(false);
 	let isPreview = $state(false);
 	let routeError = $state('');
@@ -146,7 +150,9 @@
 
 	async function projectRequest(
 		payload:
-			{ action: 'export'; root: string; site: EditorSite } | { action: 'import'; root: string }
+			| { action: 'export'; root: string; site: EditorSite }
+			| { action: 'create'; root: string; site: EditorSite; install: boolean }
+			| { action: 'import'; root: string }
 	) {
 		const response = await fetch('/editor/api/project', {
 			method: 'POST',
@@ -176,6 +182,41 @@
 			];
 			status = projectMessage;
 		});
+	}
+
+	async function createNewProject() {
+		const root = projectRoot.trim();
+		localStorage.setItem('editor-project-root', root);
+		await run(
+			installDependencies ? 'Creating project and installing…' : 'Creating project…',
+			async () => {
+				const result: {
+					written: string[];
+					skipped: FileNote[];
+					warnings?: string[];
+					root: string;
+					installed: boolean;
+				} = await projectRequest({
+					action: 'create',
+					root,
+					install: installDependencies,
+					site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
+				});
+				projectRoot = result.root;
+				localStorage.setItem('editor-project-root', result.root);
+				projectMessage = `Created a new SvelteKit project with ${result.written.length} files${result.installed ? ' (dependencies installed)' : ''}.`;
+				projectDetails = [
+					`project folder ${result.root}`,
+					result.installed
+						? 'next: npm run dev'
+						: 'next: npm install, then npm run dev (or npm run build)',
+					...result.written.map((file) => `wrote ${file}`),
+					...(result.warnings ?? []).map((warning) => `warning: ${warning}`),
+					...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
+				];
+				status = projectMessage;
+			}
+		);
 	}
 
 	async function importProject() {
@@ -548,7 +589,10 @@
 				<div class="inspector-content project-section">
 					<span class="field-label">SvelteKit project folder</span>
 					<p class="panel-hint">
-						Export writes <code>src/routes/&lt;route&gt;/+page.svelte</code> and
+						<strong>Create new project</strong> sets up a complete SvelteKit app in an empty folder
+						(it is created if missing). Export writes
+						<code>src/routes/&lt;route&gt;/+page.svelte</code>
+						and
 						<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
 						exported.
 					</p>
@@ -585,7 +629,19 @@
 						<button type="button" disabled={busy || !projectRoot.trim()} onclick={importProject}>
 							Import
 						</button>
+						<button
+							type="button"
+							data-testid="create-project"
+							disabled={busy || !projectRoot.trim()}
+							onclick={createNewProject}
+						>
+							Create new project
+						</button>
 					</div>
+					<label class="install-option">
+						<input type="checkbox" bind:checked={installDependencies} />
+						Run <code>npm install</code> after creating (slow, needs network)
+					</label>
 					{#if projectMessage}
 						<p class="panel-hint" role="status">{projectMessage}</p>
 						<ul class="project-details">
@@ -899,6 +955,13 @@
 
 	.project-section .actions {
 		margin-top: 0.7rem;
+	}
+
+	.install-option {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: 0.8rem;
 	}
 
 	.project-details {

@@ -6,7 +6,8 @@
 	 * local SvelteKit project folders directly on the server host:
 	 * - Real-time breadcrumb navigation with clickable folder segments.
 	 * - Root (`/`), home (`~`), and parent (`↑ Up`) quick-jump buttons.
-	 * - Automatic detection badge for valid SvelteKit projects.
+	 * - Automatic detection badge for valid SvelteKit projects and for empty folders (usable by
+	 * "Create new project").
 	 * - Full keyboard accessibility with Escape-to-close.
 	 */
 
@@ -34,6 +35,7 @@
 		parent: string | null;
 		home: string;
 		isSvelteKit: boolean;
+		isEmpty?: boolean;
 		directories: DirEntry[];
 		error?: string;
 	};
@@ -42,6 +44,7 @@
 	let parentPath = $state<string | null>(null);
 	let homePath = $state('');
 	let isSvelteKit = $state(false);
+	let isEmpty = $state(false);
 	let directories = $state<DirEntry[]>([]);
 	let loading = $state(false);
 	let errorMessage = $state('');
@@ -59,6 +62,7 @@
 			parentPath = data.parent;
 			homePath = data.home;
 			isSvelteKit = data.isSvelteKit;
+			isEmpty = data.isEmpty ?? false;
 			directories = data.directories;
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : 'Error accessing directory';
@@ -161,6 +165,13 @@
 				<div class="sveltekit-badge">
 					<span class="badge-icon">✳</span>
 					<span>Valid SvelteKit project directory detected</span>
+				</div>
+			{/if}
+
+			{#if isEmpty}
+				<div class="sveltekit-badge empty-badge">
+					<span class="badge-icon">○</span>
+					<span>Empty folder – ready for a new project</span>
 				</div>
 			{/if}
 
@@ -359,6 +370,12 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		border-bottom: 1px solid #d2eed9;
+	}
+
+	.empty-badge {
+		background: #eef4fb;
+		color: #1e4f8a;
+		border-bottom-color: #d3e3f5;
 	}
 
 	.badge-icon {

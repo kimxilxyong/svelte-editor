@@ -263,18 +263,6 @@
 	/** Grid size in canvas pixels that moves and resizes snap to (hold Alt while dragging to bypass). */
 	const SNAP_GRID = 8;
 	const resizeHandles: ResizeDir[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-	/** Temporary debugging aid: reports what the browser resolves for a hovered resize handle. */
-	function logHandle(phase: string, dir: ResizeDir, event: PointerEvent) {
-		const target = event.currentTarget as HTMLElement;
-		const hit = document.elementFromPoint(event.clientX, event.clientY);
-		console.log(`[resize-handle] ${phase} ${dir}`, {
-			cssCursor: getComputedStyle(target).cursor,
-			hitElement: hit?.className,
-			hitCursor: hit ? getComputedStyle(hit).cursor : null,
-			pointer: [Math.round(event.clientX), Math.round(event.clientY)],
-			pointerType: event.pointerType
-		});
-	}
 	function resizeHandlesFor(block: BuilderBlock): ResizeDir[] {
 		if (block.alignTo === 'left' || block.alignTo === 'right') return ['e', 'w'];
 		if (block.alignTo === 'top' || block.alignTo === 'bottom') return ['n', 's'];
@@ -1447,8 +1435,6 @@
 															<!-- svelte-ignore a11y_no_static_element_interactions -->
 															<span
 																class="frame-handle handle-{dir}"
-																onpointerenter={(event) => logHandle('enter', dir, event)}
-																onpointerleave={(event) => logHandle('leave', dir, event)}
 																onpointerdown={(event) =>
 																	startPointerInteraction(event, block.id, 'resize', dir)}
 															></span>

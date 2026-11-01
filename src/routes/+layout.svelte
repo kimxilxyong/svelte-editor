@@ -13,7 +13,6 @@
 	 */
 	import { onMount } from 'svelte';
 	import { afterNavigate, beforeNavigate } from '$app/navigation';
-	import DemoLinks from './demo/DemoLinks.svelte';
 	import type { LayoutProps } from './$types';
 	import AppNav from '../lib/components/AppNav.svelte';
 	import ContextMenuView from '../lib/components/ContextMenu.svelte';

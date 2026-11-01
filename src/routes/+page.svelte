@@ -359,7 +359,7 @@
 	}
 
 	function editPage(id: string) {
-		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied to the base path; the query string is appended
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied to the base path
 		void goto(`${resolve('/editor')}?page=${encodeURIComponent(id)}`);
 	}
 

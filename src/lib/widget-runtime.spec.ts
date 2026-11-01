@@ -28,7 +28,9 @@ describe('widget runtime', () => {
 	});
 
 	it('compiles a component that renders', async () => {
+		// Compiled widgets import the internal client runtime, so the test must supply it.
 		// @ts-expect-error svelte ships no typings for its internal client runtime
+		// eslint-disable-next-line svelte/no-svelte-internal
 		const client = await import('svelte/internal/client');
 		const Widget = compileWidget(
 			'Hello',

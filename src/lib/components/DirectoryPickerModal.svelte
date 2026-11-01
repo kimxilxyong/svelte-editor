@@ -11,8 +11,6 @@
 	 * - Full keyboard accessibility with Escape-to-close.
 	 */
 
-	import { onMount } from 'svelte';
-
 	/**
 	 * Component Properties.
 	 */

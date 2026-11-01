@@ -52,6 +52,8 @@ export type ParsedComponentMetadata = {
  * @param typeNode - AST type annotation node.
  * @returns ComponentPropType or `undefined` if not a recognized primitive.
  */
+// The AST is walked defensively as untyped data (ESTree + TS nodes with optional fields).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeType(typeNode?: any): ComponentPropType | undefined {
 	if (!typeNode) return undefined;
 	if (typeNode.type === 'TSStringKeyword') return 'string';
@@ -74,6 +76,7 @@ export function parseSvelteComponent(source: string, fileName: string): ParsedCo
 	const name = fileName.replace(/\.svelte$/, '');
 	const props: ComponentProp[] = [];
 
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- see normalizeType
 	let ast: any;
 	try {
 		ast = parse(source, { modern: true });

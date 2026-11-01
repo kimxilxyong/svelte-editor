@@ -16,7 +16,12 @@ describe('inspectorFields capability map', () => {
 
 	it('offers Link Navigation only on link, button and card', () => {
 		const linkable = kinds.filter((kind) => inspectorFields(kind).link);
-		expect(linkable.sort()).toEqual(['widget-button', 'widget-card', 'widget-gradient-button', 'widget-link']);
+		expect(linkable.sort()).toEqual([
+			'widget-button',
+			'widget-card',
+			'widget-gradient-button',
+			'widget-link'
+		]);
 		expect(inspectorFields('widget-link').link).toEqual({ optional: false });
 		expect(inspectorFields('widget-button').link).toEqual({ optional: true });
 	});

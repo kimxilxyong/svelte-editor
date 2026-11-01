@@ -38,6 +38,14 @@ export default defineConfig({
 			name: 'chromium',
 			use: { ...devices['Desktop Chrome'], storageState: '.data/e2e-auth.json' },
 			dependencies: ['setup']
+		},
+		{
+			name: 'firefox',
+			// Cross-browser coverage for the editor's visual interaction; the other suites create
+			// shared database rows and run on Chromium only.
+			testMatch: ['**/editor-preview.e2e.ts', '**/align-to.e2e.ts'],
+			use: { ...devices['Desktop Firefox'], storageState: '.data/e2e-auth.json' },
+			dependencies: ['setup']
 		}
 	]
 });

@@ -87,10 +87,21 @@ describe('createProject', () => {
 
 		const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 		expect(manifest.name).toMatch(/^editor-new-project-/);
+		expect(manifest.imports).toEqual({
+			'#lib': './src/lib/index.js',
+			'#lib/*': './src/lib/*'
+		});
 		expect(Object.keys(manifest.devDependencies)).toEqual(
 			expect.arrayContaining(['@sveltejs/kit', 'flowbite-svelte', 'tailwindcss', 'svelte'])
 		);
+		const viteConfig = await readFile(path.join(root, 'vite.config.ts'), 'utf8');
+		expect(viteConfig).not.toContain('alias:');
 		expect(await readFile(path.join(root, 'src/routes/+page.ts'), 'utf8')).toContain('/welcome');
+		const page = await readFile(path.join(root, 'src/routes/welcome/+page.svelte'), 'utf8');
+		expect(page).toContain("from '#lib/components/editor/WidgetButton.svelte'");
+		expect(page).toContain("from '#lib/site-theme.js'");
+		const hero = await readFile(path.join(root, 'src/lib/components/editor/Hero.svelte'), 'utf8');
+		expect(hero).toContain("from '#lib/components/editor/WidgetCard.svelte'");
 	});
 
 	it('writes svelte files that compile', async () => {

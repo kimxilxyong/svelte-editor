@@ -16,6 +16,8 @@
  *    - Writes all built-in native widget components (`WidgetSlider.svelte`, etc.) and every
  *      composite component (`Hero.svelte`, …) into `src/lib/components/editor/`.
  *    - Writes route pages into `src/routes/<slug>/+page.svelte`.
+ *    - Can emit either legacy `$lib` imports or `#lib` package subpaths, based on the target
+ *      project's `package.json` imports map.
  * 4. Two-Way Scanning & Component Import:
  *    - Recursively scans `src/lib/components/` in the target project for any `.svelte` files.
  *    - Parses AST metadata (props, types, defaults) using `svelte-component-parser`.
@@ -40,7 +42,8 @@ import {
 	parseCompositeSource,
 	parsePageSource,
 	renderCompositeSource,
-	renderPageSource
+	renderPageSource,
+	type LibImportStyle
 } from '../svelte-pages.js';
 import { parseSvelteComponent, type ParsedComponentMetadata } from '../svelte-component-parser.js';
 
@@ -82,6 +85,15 @@ export type ExportResult = {
 	skipped: { file: string; reason: string }[];
 	/** Non-fatal advice, e.g. that the target project lacks the `flowbite-svelte` dependency. */
 	warnings: string[];
+};
+
+/** Options controlling how generated source resolves the target project's `src/lib` directory. */
+export type ExportSiteOptions = {
+	/**
+	 * Select `#lib` when the target package.json declares Node subpath imports; otherwise use the
+	 * legacy SvelteKit `$lib` alias.
+	 */
+	libImportStyle?: LibImportStyle;
 };
 
 /**
@@ -216,14 +228,18 @@ async function writeGenerated(
  *
  * @param rootInput - Absolute path to target SvelteKit project.
  * @param site - EditorSite model containing pages to export.
+ * @param theme - Site theme values copied into the generated theme module.
+ * @param options - Import style supported by the target project's package configuration.
  * @returns Result object with lists of written and skipped files.
  */
 export async function exportSite(
 	rootInput: unknown,
 	site: EditorSite,
-	theme: SiteTheme = defaultSiteTheme
+	theme: SiteTheme = defaultSiteTheme,
+	options: ExportSiteOptions = {}
 ): Promise<ExportResult> {
 	const root = await resolveProject(rootInput);
+	const importStyle = options.libImportStyle ?? 'sveltekit';
 	const result: ExportResult = { written: [], skipped: [], warnings: [] };
 	const componentDir = path.join(root, 'src', 'lib', 'components', 'editor');
 
@@ -249,7 +265,7 @@ export async function exportSite(
 		await writeGenerated(
 			root,
 			path.join(componentDir, `${composite.name}.svelte`),
-			renderCompositeSource(composite),
+			renderCompositeSource(composite, importStyle),
 			result
 		);
 	}
@@ -290,7 +306,7 @@ export async function exportSite(
 	for (const page of site.pages) {
 		if (!slugPattern.test(page.slug)) throw new ProjectError(`Invalid route "${page.slug}".`);
 		const file = path.join(root, 'src', 'routes', page.slug, '+page.svelte');
-		await writeGenerated(root, file, renderPageSource(page), result);
+		await writeGenerated(root, file, renderPageSource(page, importStyle), result);
 	}
 
 	return result;

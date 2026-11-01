@@ -14,6 +14,8 @@
  * - **Compatible dependencies.** Dependency ranges are read from the editor's own `package.json`,
  *   so the generated project uses exactly the SvelteKit/Svelte/Tailwind/Flowbite generation the
  *   exported widgets were written against.
+ * - **Native lib imports.** The package manifest declares `#lib` subpath imports and generated
+ *   pages/composites use those imports instead of deprecated SvelteKit alias configuration.
  * - **No shell.** The optional `npm install` runs through `spawn` with a fixed argument list.
  *
  * Interacts with:
@@ -164,7 +166,11 @@ function renderPackageJson(name: string): string {
 				prepare: "svelte-kit sync || echo ''",
 				check: 'svelte-kit sync && svelte-check --tsconfig ./tsconfig.json'
 			},
-			devDependencies
+			devDependencies,
+			imports: {
+				'#lib': './src/lib/index.js',
+				'#lib/*': './src/lib/*'
+			}
 		},
 		null,
 		'\t'
@@ -186,8 +192,6 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\\\]/).includes('node_modules') ? undefined : true
 			},
-			// Exported pages import via $lib, which SvelteKit 3 only honours as an explicit alias.
-			alias: { $lib: 'src/lib' },
 			adapter: adapter()
 		})
 	]
@@ -468,7 +472,7 @@ export async function createProject(
 		await writeFile(file, content, { flag: 'wx' });
 	}
 
-	const result = await exportSite(root, site, theme);
+	const result = await exportSite(root, site, theme, { libImportStyle: 'subpath' });
 	const written = [...Object.keys(scaffold), ...result.written];
 
 	let installed = false;

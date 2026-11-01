@@ -7,7 +7,8 @@
  * 1. Generator (`renderPageSource`):
  *    - Emits a safety marker comment header `<!-- @svelte-editor generated ... -->`.
  *    - Gathers all unique component dependencies across standard and custom blocks.
- *    - Emits TypeScript `<script>` with imports pointing to `$lib/components/editor/<Name>.svelte`.
+ *    - Emits component imports using either the legacy `$lib` alias or the `#lib` package
+ *      subpath, depending on the target project's import configuration.
  *    - Renders `<svelte:head><title>...</title></svelte:head>`.
  *    - Wraps components in absolute-positioned containers styled with percentage coordinates.
  *
@@ -39,8 +40,19 @@ import {
 export const generatedMarker =
 	'<!-- @svelte-editor generated — re-exporting overwrites this file -->';
 
-/** Base alias path where exported components reside in target projects. */
+/** Legacy SvelteKit alias path where exported components reside in target projects. */
 export const componentImportBase = '$lib/components/editor';
+
+/** Import style used by generated source for the target SvelteKit project's `src/lib` directory. */
+export type LibImportStyle = 'sveltekit' | 'subpath';
+
+function componentImportPath(style: LibImportStyle): string {
+	return style === 'subpath' ? '#lib/components/editor' : componentImportBase;
+}
+
+function siteThemeImportPath(style: LibImportStyle): string {
+	return style === 'subpath' ? '#lib/site-theme.js' : '$lib/site-theme';
+}
 
 /** Allowed property names recognized on built-in builder blocks. */
 type PropName =
@@ -172,12 +184,16 @@ export function pageHeight(page: EditorPage): number {
  * Generates compilable SvelteKit `+page.svelte` file content from an EditorPage definition.
  *
  * @param page - EditorPage to serialize.
+ * @param importStyle - Whether imports use SvelteKit's legacy `$lib` alias or package subpaths.
  * @returns Formatted Svelte 5 component source code.
  */
-export function renderPageSource(page: EditorPage): string {
+export function renderPageSource(
+	page: EditorPage,
+	importStyle: LibImportStyle = 'sveltekit'
+): string {
 	const names = usedComponentNames([page]);
 	const imports = names
-		.map((name) => `\timport ${name} from '${componentImportBase}/${name}.svelte';`)
+		.map((name) => `\timport ${name} from '${componentImportPath(importStyle)}/${name}.svelte';`)
 		.join('\n');
 	const blocks = page.blocks
 		.map((block) =>
@@ -191,8 +207,8 @@ export function renderPageSource(page: EditorPage): string {
 	return `${generatedMarker}
 <script lang="ts">
 ${imports}
-	import ThemeScope from '${componentImportBase}/ThemeScope.svelte';
-	import { siteTheme } from '$lib/site-theme';
+	import ThemeScope from '${componentImportPath(importStyle)}/ThemeScope.svelte';
+	import { siteTheme } from '${siteThemeImportPath(importStyle)}';
 </script>
 
 <svelte:head>
@@ -268,11 +284,15 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
  * freely on a page. The natural size is kept in `data-width` / `data-height` for re-import.
  *
  * @param composite - Composite to serialize.
+ * @param importStyle - Whether imports use SvelteKit's legacy `$lib` alias or package subpaths.
  * @returns Formatted Svelte 5 component source, starting with {@link generatedMarker}.
  * @example
  * renderCompositeSource({ id: 'a', name: 'Hero', width: 720, height: 220, blocks: [] });
  */
-export function renderCompositeSource(composite: EditorComposite): string {
+export function renderCompositeSource(
+	composite: EditorComposite,
+	importStyle: LibImportStyle = 'sveltekit'
+): string {
 	const names = [
 		...new Set(
 			composite.blocks
@@ -281,7 +301,7 @@ export function renderCompositeSource(composite: EditorComposite): string {
 		)
 	];
 	const imports = names
-		.map((name) => `\timport ${name} from '${componentImportBase}/${name}.svelte';`)
+		.map((name) => `\timport ${name} from '${componentImportPath(importStyle)}/${name}.svelte';`)
 		.join('\n');
 	const blocks = composite.blocks
 		.map((block) =>

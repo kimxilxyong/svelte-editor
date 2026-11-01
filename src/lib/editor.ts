@@ -28,7 +28,51 @@ export type WidgetKind =
 	| 'widget-progress'
 	| 'widget-avatar'
 	| 'widget-card'
-	| 'widget-link';
+	| 'widget-link'
+	| 'widget-search'
+	| 'widget-file-upload'
+	| 'widget-dropzone'
+	| 'widget-multi-select'
+	| 'widget-floating-input'
+	| 'widget-datepicker'
+	| 'widget-timepicker'
+	| 'widget-phone-input'
+	| 'widget-tags'
+	| 'widget-button-group'
+	| 'widget-gradient-button'
+	| 'widget-rating'
+	| 'widget-clipboard'
+	| 'widget-heading'
+	| 'widget-paragraph'
+	| 'widget-blockquote'
+	| 'widget-divider'
+	| 'widget-list'
+	| 'widget-kbd'
+	| 'widget-image'
+	| 'widget-video'
+	| 'widget-spinner'
+	| 'widget-indicator'
+	| 'widget-skeleton'
+	| 'widget-list-group'
+	| 'widget-accordion'
+	| 'widget-tabs'
+	| 'widget-table'
+	| 'widget-timeline'
+	| 'widget-stepper'
+	| 'widget-radial-progress'
+	| 'widget-pagination'
+	| 'widget-toast'
+	| 'widget-banner'
+	| 'widget-tooltip'
+	| 'widget-popover'
+	| 'widget-breadcrumb'
+	| 'widget-navbar'
+	| 'widget-footer'
+	| 'widget-sidebar'
+	| 'widget-dropdown'
+	| 'widget-modal'
+	| 'widget-drawer'
+	| 'widget-dialog';
 
 /**
  * Dynamic custom component kind prefix, e.g., 'custom:NewsletterSignup'. These are native
@@ -198,7 +242,51 @@ const blockKinds: BlockKind[] = [
 	'widget-progress',
 	'widget-avatar',
 	'widget-card',
-	'widget-link'
+	'widget-link',
+	'widget-search',
+	'widget-file-upload',
+	'widget-dropzone',
+	'widget-multi-select',
+	'widget-floating-input',
+	'widget-datepicker',
+	'widget-timepicker',
+	'widget-phone-input',
+	'widget-tags',
+	'widget-button-group',
+	'widget-gradient-button',
+	'widget-rating',
+	'widget-clipboard',
+	'widget-heading',
+	'widget-paragraph',
+	'widget-blockquote',
+	'widget-divider',
+	'widget-list',
+	'widget-kbd',
+	'widget-image',
+	'widget-video',
+	'widget-spinner',
+	'widget-indicator',
+	'widget-skeleton',
+	'widget-list-group',
+	'widget-accordion',
+	'widget-tabs',
+	'widget-table',
+	'widget-timeline',
+	'widget-stepper',
+	'widget-radial-progress',
+	'widget-pagination',
+	'widget-toast',
+	'widget-banner',
+	'widget-tooltip',
+	'widget-popover',
+	'widget-breadcrumb',
+	'widget-navbar',
+	'widget-footer',
+	'widget-sidebar',
+	'widget-dropdown',
+	'widget-modal',
+	'widget-drawer',
+	'widget-dialog'
 ];
 
 /** Permitted theme names. */
@@ -627,5 +715,49 @@ export const componentNames: Record<WidgetKind, string> = {
 	'widget-progress': 'WidgetProgress',
 	'widget-avatar': 'WidgetAvatar',
 	'widget-card': 'WidgetCard',
-	'widget-link': 'WidgetLink'
+	'widget-link': 'WidgetLink',
+	'widget-search': 'WidgetSearch',
+	'widget-file-upload': 'WidgetFileUpload',
+	'widget-dropzone': 'WidgetDropzone',
+	'widget-multi-select': 'WidgetMultiSelect',
+	'widget-floating-input': 'WidgetFloatingInput',
+	'widget-datepicker': 'WidgetDatepicker',
+	'widget-timepicker': 'WidgetTimepicker',
+	'widget-phone-input': 'WidgetPhoneInput',
+	'widget-tags': 'WidgetTags',
+	'widget-button-group': 'WidgetButtonGroup',
+	'widget-gradient-button': 'WidgetGradientButton',
+	'widget-rating': 'WidgetRating',
+	'widget-clipboard': 'WidgetClipboard',
+	'widget-heading': 'WidgetHeading',
+	'widget-paragraph': 'WidgetParagraph',
+	'widget-blockquote': 'WidgetBlockquote',
+	'widget-divider': 'WidgetDivider',
+	'widget-list': 'WidgetList',
+	'widget-kbd': 'WidgetKbd',
+	'widget-image': 'WidgetImage',
+	'widget-video': 'WidgetVideo',
+	'widget-spinner': 'WidgetSpinner',
+	'widget-indicator': 'WidgetIndicator',
+	'widget-skeleton': 'WidgetSkeleton',
+	'widget-list-group': 'WidgetListGroup',
+	'widget-accordion': 'WidgetAccordion',
+	'widget-tabs': 'WidgetTabs',
+	'widget-table': 'WidgetTable',
+	'widget-timeline': 'WidgetTimeline',
+	'widget-stepper': 'WidgetStepper',
+	'widget-radial-progress': 'WidgetRadialProgress',
+	'widget-pagination': 'WidgetPagination',
+	'widget-toast': 'WidgetToast',
+	'widget-banner': 'WidgetBanner',
+	'widget-tooltip': 'WidgetTooltip',
+	'widget-popover': 'WidgetPopover',
+	'widget-breadcrumb': 'WidgetBreadcrumb',
+	'widget-navbar': 'WidgetNavbar',
+	'widget-footer': 'WidgetFooter',
+	'widget-sidebar': 'WidgetSidebar',
+	'widget-dropdown': 'WidgetDropdown',
+	'widget-modal': 'WidgetModal',
+	'widget-drawer': 'WidgetDrawer',
+	'widget-dialog': 'WidgetDialog'
 };

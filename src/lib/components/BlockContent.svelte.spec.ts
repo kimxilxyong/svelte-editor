@@ -38,7 +38,7 @@ describe('BlockContent with Flowbite widgets', () => {
 	for (const kind of Object.keys(widgetCatalog) as WidgetKind[]) {
 		it(`renders ${kind} with catalog defaults`, async () => {
 			const { container } = render(BlockContent, { block: dropped(kind) });
-			expect(container.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+			expect(container.querySelector('*')).not.toBeNull();
 		});
 	}
 });

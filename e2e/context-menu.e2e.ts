@@ -7,9 +7,11 @@ import { expect, test } from '@playwright/test';
 test('page list and row menus open, close and act', async ({ page }) => {
 	// A fresh database has no pages: save the editor's default page first.
 	await page.goto('/editor');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.locator('.save-status')).toContainText('Saved to the database');
 	await page.goto('/');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	const rows = page.locator('.page-item');
 	const menu = page.getByRole('menu');
 	await expect(rows.first()).toBeVisible();
@@ -40,6 +42,7 @@ test('page list and row menus open, close and act', async ({ page }) => {
 test('editor palette and block menus work; text fields keep the native menu', async ({ page }) => {
 	await page.setViewportSize({ width: 1600, height: 1000 });
 	await page.goto('/editor');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	const menu = page.getByRole('menu');
 	const blocks = page.locator('.page-canvas article');
 	const before = await blocks.count();

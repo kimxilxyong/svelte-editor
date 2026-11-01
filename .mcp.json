@@ -11,7 +11,7 @@
 			"type": "stdio",
 			"command": "node",
 			"args": [
-				"/home/kim/source/svelte-editor/.mcp-servers/flowbite-svelte-mcp-main/build/server.js"
+				"/home/kim/source/svelte-editor/.mcp-servers/flowbite-svelte-mcp/build/server.js"
 			],
 			"tools": [
 				"*"

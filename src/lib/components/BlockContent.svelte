@@ -24,6 +24,7 @@
 	 * @example
 	 * <BlockContent bind:block onchange={markUnsaved} onlink={handleLinkClick} />
 	 */
+	import { genericWidgets } from './editor/registry.js';
 	import WidgetButton from './editor/WidgetButton.svelte';
 	import WidgetTextField from './editor/WidgetTextField.svelte';
 	import WidgetTextarea from './editor/WidgetTextarea.svelte';
@@ -66,6 +67,9 @@
 			? undefined
 			: widgetRuntime.components[componentNames[block.kind as keyof typeof componentNames]]
 	);
+
+	/** Built-in widget rendered through the generic registry (kinds without a dedicated branch). */
+	const Generic = $derived(genericWidgets[block.kind]);
 </script>
 
 {#if Override}
@@ -176,6 +180,18 @@
 		href={block.href}
 		newTab={block.newTab}
 		onnavigate={(event) => onlink?.(event, block)}
+	/>
+{:else if Generic}
+	<Generic
+		id={block.id}
+		title={block.title}
+		body={block.body}
+		action={block.action}
+		items={block.items}
+		level={block.level}
+		href={block.href}
+		newTab={block.newTab}
+		onnavigate={(event: MouseEvent) => onlink?.(event, block)}
 	/>
 {:else if composite && depth < maxCompositeDepth}
 	<div class="composite" data-composite={composite.name}>

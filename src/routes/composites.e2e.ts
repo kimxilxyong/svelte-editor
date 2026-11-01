@@ -8,6 +8,7 @@ import { expect, test } from '@playwright/test';
 
 test('dragging a composite from the palette onto a page adds a block', async ({ page }) => {
 	await page.goto('/editor');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('tab', { name: 'Composites' }).click();
 	const before = await page.locator('.page-canvas .canvas-block').count();
 	// Manual pointer steps: Playwright's dragTo does not reliably start a native drag for items
@@ -26,6 +27,7 @@ test('dragging a composite from the palette onto a page adds a block', async ({ 
 
 test('dragging a widget onto a page adds a block', async ({ page }) => {
 	await page.goto('/editor');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('tab', { name: 'Widgets' }).click();
 	const before = await page.locator('.page-canvas .canvas-block').count();
 	await page
@@ -37,6 +39,7 @@ test('dragging a widget onto a page adds a block', async ({ page }) => {
 
 test('dragging a widget onto the composite canvas adds a block', async ({ page }) => {
 	await page.goto('/composites');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('tab', { name: 'Widgets' }).click();
 	const before = await page.locator('.page-canvas .canvas-block').count();
 	await page

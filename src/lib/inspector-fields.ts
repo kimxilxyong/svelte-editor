@@ -69,7 +69,64 @@ const widgetFields: Record<WidgetKind, InspectorFields> = {
 		action: 'Button label',
 		link: { optional: true }
 	},
-	'widget-link': { title: 'Link text', body: 'Tooltip', link: { optional: false } }
+	'widget-link': { title: 'Link text', body: 'Tooltip', link: { optional: false } },
+	'widget-search': { body: 'Helper text', action: 'Placeholder' },
+	'widget-file-upload': { title: 'Label', body: 'Helper text' },
+	'widget-dropzone': { title: 'Instruction', body: 'Hint' },
+	'widget-multi-select': {
+		title: 'Label',
+		body: 'Helper text',
+		action: 'Placeholder',
+		items: 'One option per line.'
+	},
+	'widget-floating-input': { title: 'Floating label', body: 'Helper text' },
+	'widget-datepicker': { title: 'Label', body: 'Helper text', action: 'Placeholder' },
+	'widget-timepicker': { title: 'Label', body: 'Helper text' },
+	'widget-phone-input': { title: 'Label', body: 'Helper text' },
+	'widget-tags': { title: 'Label', action: 'Placeholder', items: 'Initial tags, one per line.' },
+	'widget-button-group': { body: 'Tooltip', items: 'One button label per line.' },
+	'widget-gradient-button': { action: 'Button label', body: 'Tooltip', link: { optional: true } },
+	'widget-rating': { title: 'Caption', body: 'Helper text', level: true },
+	'widget-clipboard': { title: 'Label', body: 'Text to copy' },
+	'widget-heading': { title: 'Heading text', action: 'Tag (h1–h6)' },
+	'widget-paragraph': { body: 'Text' },
+	'widget-blockquote': { body: 'Quote', title: 'Attribution' },
+	'widget-divider': { title: 'Centered text (optional)' },
+	'widget-list': { items: 'One entry per line.' },
+	'widget-kbd': { items: 'One key per line.' },
+	'widget-image': { title: 'Alt text', body: 'Caption', action: 'Image URL' },
+	'widget-video': { title: 'Accessible title', action: 'Video URL' },
+	'widget-spinner': { title: 'Caption', action: 'Style: default, dots, bars, pulse, orbit' },
+	'widget-indicator': {
+		title: 'Label',
+		action: 'Color: green, red, yellow, blue, gray, purple, indigo'
+	},
+	'widget-skeleton': { action: 'Variant: text, image, card, list, video, testimonial, widget' },
+	'widget-list-group': { items: 'One row per line.' },
+	'widget-accordion': { items: 'One section per line: Heading | Content' },
+	'widget-tabs': { items: 'One tab per line: Title | Panel text' },
+	'widget-table': {
+		items: 'One row per line, cells separated by |. The first line is the header.'
+	},
+	'widget-timeline': { items: 'One event per line: Date | Title | Text' },
+	'widget-stepper': { items: 'One step name per line.', level: true },
+	'widget-radial-progress': { title: 'Caption', level: true },
+	'widget-pagination': { items: 'One page label per line.' },
+	'widget-toast': { title: 'Heading', body: 'Message' },
+	'widget-banner': { title: 'Lead-in', body: 'Announcement' },
+	'widget-tooltip': { title: 'Tooltip text', action: 'Button label' },
+	'widget-popover': { title: 'Popover heading', body: 'Popover text', action: 'Button label' },
+	'widget-breadcrumb': { items: 'One crumb per line: Label | /link (link optional)' },
+	'widget-navbar': { title: 'Brand name', items: 'One link per line: Label | /link' },
+	'widget-footer': { title: 'Owner', items: 'One link per line: Label | /link' },
+	'widget-sidebar': { items: 'One entry per line: Label | /link' },
+	'widget-dropdown': {
+		action: 'Button label',
+		items: 'One entry per line: Label | /link (link optional)'
+	},
+	'widget-modal': { title: 'Modal heading', body: 'Modal text', action: 'Button label' },
+	'widget-drawer': { title: 'Drawer heading', body: 'Drawer text', action: 'Button label' },
+	'widget-dialog': { title: 'Dialog heading', body: 'Dialog text', action: 'Button label' }
 };
 
 /**

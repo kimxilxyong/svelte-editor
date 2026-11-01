@@ -15,7 +15,15 @@
 import type { BuilderBlock, WidgetKind } from './editor.js';
 
 /** Palette groupings for widgets, in display order. */
-export const widgetCategories = ['Forms', 'Display', 'Feedback', 'Navigation'] as const;
+export const widgetCategories = [
+	'Forms',
+	'Text',
+	'Display',
+	'Data',
+	'Feedback',
+	'Navigation',
+	'Overlays'
+] as const;
 
 /** One palette category name. */
 export type WidgetCategory = (typeof widgetCategories)[number];
@@ -177,6 +185,488 @@ export const widgetCatalog: Record<WidgetKind, WidgetCatalogEntry> = {
 			theme: 'lavender',
 			width: 100,
 			height: 28
+		}
+	},
+	'widget-search': {
+		label: 'Search field',
+		detail: 'A search box with clear button',
+		mark: '⌕',
+		category: 'Forms',
+		defaults: { title: '', body: '', action: 'Search…', width: 240, height: 64 }
+	},
+	'widget-file-upload': {
+		label: 'File upload',
+		detail: 'Let visitors pick a file',
+		mark: '⇪',
+		category: 'Forms',
+		defaults: {
+			title: 'Upload file',
+			body: 'PNG or JPG, up to 2 MB.',
+			action: '',
+			width: 240,
+			height: 80
+		}
+	},
+	'widget-dropzone': {
+		label: 'Dropzone',
+		detail: 'Drag and drop files here',
+		mark: '⇩',
+		category: 'Forms',
+		defaults: {
+			title: 'Click to upload or drag and drop',
+			body: 'SVG, PNG or JPG (max. 800×400px)',
+			action: '',
+			width: 280,
+			height: 120
+		}
+	},
+	'widget-multi-select': {
+		label: 'Multi select',
+		detail: 'Pick several options',
+		mark: '☰',
+		category: 'Forms',
+		defaults: {
+			title: 'Colors',
+			body: '',
+			action: 'Choose options',
+			items: 'Red\nGreen\nBlue',
+			width: 240,
+			height: 70
+		}
+	},
+	'widget-floating-input': {
+		label: 'Floating label input',
+		detail: 'Text field with floating label',
+		mark: 'Ⓣ',
+		category: 'Forms',
+		defaults: { title: 'Full name', body: '', action: '', width: 240, height: 56 }
+	},
+	'widget-datepicker': {
+		label: 'Date picker',
+		detail: 'Choose a date from a calendar',
+		mark: '▦',
+		category: 'Forms',
+		defaults: { title: 'Date', body: '', action: 'Select date', width: 240, height: 70 }
+	},
+	'widget-timepicker': {
+		label: 'Time picker',
+		detail: 'Choose a time of day',
+		mark: '◷',
+		category: 'Forms',
+		defaults: { title: 'Time', body: '', action: '', width: 200, height: 70 }
+	},
+	'widget-phone-input': {
+		label: 'Phone input',
+		detail: 'A telephone number field',
+		mark: '✆',
+		category: 'Forms',
+		defaults: { title: 'Phone number', body: '', action: '', width: 240, height: 70 }
+	},
+	'widget-tags': {
+		label: 'Tags input',
+		detail: 'Type entries that become chips',
+		mark: '#',
+		category: 'Forms',
+		defaults: {
+			title: 'Tags',
+			body: '',
+			action: 'Add a tag',
+			items: 'design\nweb',
+			width: 260,
+			height: 80
+		}
+	},
+	'widget-button-group': {
+		label: 'Button group',
+		detail: 'Joined buttons',
+		mark: '⫼',
+		category: 'Forms',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Profile\nSettings\nMessages',
+			width: 260,
+			height: 40
+		}
+	},
+	'widget-gradient-button': {
+		label: 'Gradient button',
+		detail: 'A call to action with gradient',
+		mark: '✦',
+		category: 'Forms',
+		defaults: { title: '', body: '', action: 'Get started', width: 140, height: 40 }
+	},
+	'widget-rating': {
+		label: 'Rating',
+		detail: 'Star rating',
+		mark: '★',
+		category: 'Forms',
+		defaults: { title: '4.0 out of 5', body: '', action: '', level: 80, width: 240, height: 48 }
+	},
+	'widget-clipboard': {
+		label: 'Copy to clipboard',
+		detail: 'A field with a copy button',
+		mark: '⧉',
+		category: 'Forms',
+		defaults: {
+			title: 'Share link',
+			body: 'https://example.com/share',
+			action: '',
+			width: 280,
+			height: 70
+		}
+	},
+	'widget-heading': {
+		label: 'Heading',
+		detail: 'A title in h1–h6',
+		mark: 'H',
+		category: 'Text',
+		defaults: { title: 'Section heading', body: '', action: 'h2', width: 280, height: 44 }
+	},
+	'widget-paragraph': {
+		label: 'Paragraph',
+		detail: 'A block of body text',
+		mark: '¶',
+		category: 'Text',
+		defaults: {
+			title: '',
+			body: 'A short paragraph of text that explains something to your visitors.',
+			action: '',
+			width: 280,
+			height: 70
+		}
+	},
+	'widget-blockquote': {
+		label: 'Blockquote',
+		detail: 'A highlighted quotation',
+		mark: '❝',
+		category: 'Text',
+		defaults: {
+			title: 'Ada Lovelace',
+			body: 'Imagination is the discovering faculty.',
+			action: '',
+			width: 280,
+			height: 90
+		}
+	},
+	'widget-divider': {
+		label: 'Divider',
+		detail: 'A horizontal rule',
+		mark: '―',
+		category: 'Text',
+		defaults: { title: '', body: '', action: '', width: 240, height: 24 }
+	},
+	'widget-list': {
+		label: 'Bullet list',
+		detail: 'A list of points',
+		mark: '•',
+		category: 'Text',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'First point\nSecond point\nThird point',
+			width: 220,
+			height: 90
+		}
+	},
+	'widget-kbd': {
+		label: 'Keyboard keys',
+		detail: 'Show a key combination',
+		mark: '⌨',
+		category: 'Text',
+		defaults: { title: '', body: '', action: '', items: 'Ctrl\nK', width: 120, height: 32 }
+	},
+	'widget-image': {
+		label: 'Image',
+		detail: 'A picture with caption',
+		mark: '▨',
+		category: 'Display',
+		defaults: { title: 'Image description', body: '', action: '', width: 240, height: 130 }
+	},
+	'widget-video': {
+		label: 'Video',
+		detail: 'A video player',
+		mark: '▶',
+		category: 'Display',
+		defaults: { title: 'Video', body: '', action: '', width: 280, height: 140 }
+	},
+	'widget-spinner': {
+		label: 'Spinner',
+		detail: 'A loading indicator',
+		mark: '◌',
+		category: 'Display',
+		defaults: { title: 'Loading…', body: '', action: 'default', width: 160, height: 44 }
+	},
+	'widget-indicator': {
+		label: 'Status indicator',
+		detail: 'A coloured status dot',
+		mark: '●',
+		category: 'Display',
+		defaults: { title: 'Online', body: '', action: 'green', width: 120, height: 28 }
+	},
+	'widget-skeleton': {
+		label: 'Skeleton',
+		detail: 'A loading placeholder',
+		mark: '░',
+		category: 'Display',
+		defaults: { title: '', body: '', action: 'text', width: 240, height: 100 }
+	},
+	'widget-list-group': {
+		label: 'List group',
+		detail: 'A list of selectable rows',
+		mark: '☷',
+		category: 'Display',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Profile\nSettings\nMessages',
+			width: 220,
+			height: 110
+		}
+	},
+	'widget-accordion': {
+		label: 'Accordion',
+		detail: 'Collapsible sections',
+		mark: '☰',
+		category: 'Data',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'What is this? | A visual page builder.\nCan I export it? | Yes, as native Svelte.',
+			width: 280,
+			height: 130
+		}
+	},
+	'widget-tabs': {
+		label: 'Tabs',
+		detail: 'Switch between panels',
+		mark: '▭',
+		category: 'Data',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items:
+				'Profile | Your profile details.\nSettings | Your preferences.\nContacts | Your contacts.',
+			width: 280,
+			height: 120
+		}
+	},
+	'widget-table': {
+		label: 'Table',
+		detail: 'Rows and columns of data',
+		mark: '▦',
+		category: 'Data',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Product | Color | Price\nLaptop | Silver | $2999\nPhone | Black | $799',
+			width: 300,
+			height: 130
+		}
+	},
+	'widget-timeline': {
+		label: 'Timeline',
+		detail: 'Events in time order',
+		mark: '⋮',
+		category: 'Data',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items:
+				'January 2025 | Launch | The first version went live.\nMarch 2025 | Growth | We reached 1,000 users.',
+			width: 280,
+			height: 140
+		}
+	},
+	'widget-stepper': {
+		label: 'Step indicator',
+		detail: 'Progress through steps',
+		mark: '①',
+		category: 'Data',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Account\nProfile\nDone',
+			level: 50,
+			width: 280,
+			height: 48
+		}
+	},
+	'widget-radial-progress': {
+		label: 'Radial progress',
+		detail: 'Circular completion',
+		mark: '◔',
+		category: 'Data',
+		defaults: { title: 'Completed', body: '', action: '', level: 60, width: 180, height: 72 }
+	},
+	'widget-pagination': {
+		label: 'Pagination',
+		detail: 'Switch between pages of results',
+		mark: '⇆',
+		category: 'Data',
+		defaults: { title: '', body: '', action: '', items: '1\n2\n3\n4\n5', width: 280, height: 44 }
+	},
+	'widget-toast': {
+		label: 'Toast',
+		detail: 'A small notification',
+		mark: '✉',
+		category: 'Feedback',
+		defaults: {
+			title: 'Message sent',
+			body: 'We will get back to you soon.',
+			action: '',
+			width: 280,
+			height: 70
+		}
+	},
+	'widget-banner': {
+		label: 'Banner',
+		detail: 'A dismissible announcement',
+		mark: '▬',
+		category: 'Feedback',
+		defaults: {
+			title: 'New:',
+			body: 'Dark mode is now available.',
+			action: '',
+			width: 300,
+			height: 56
+		}
+	},
+	'widget-tooltip': {
+		label: 'Tooltip',
+		detail: 'A hint on hover',
+		mark: 'ⓘ',
+		category: 'Feedback',
+		defaults: { title: 'Helpful hint', body: '', action: 'Hover me', width: 120, height: 40 }
+	},
+	'widget-popover': {
+		label: 'Popover',
+		detail: 'A card that opens on click',
+		mark: '◗',
+		category: 'Feedback',
+		defaults: {
+			title: 'More details',
+			body: 'A short explanation shown in a popover.',
+			action: 'More info',
+			width: 120,
+			height: 40
+		}
+	},
+	'widget-breadcrumb': {
+		label: 'Breadcrumb',
+		detail: 'Show where the visitor is',
+		mark: '›',
+		category: 'Navigation',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Home | /\nProjects | /projects\nFlowbite',
+			width: 280,
+			height: 32
+		}
+	},
+	'widget-navbar': {
+		label: 'Navbar',
+		detail: 'A top navigation bar',
+		mark: '☰',
+		category: 'Navigation',
+		defaults: {
+			title: 'My Site',
+			body: '',
+			action: '',
+			items: 'Home | /\nAbout | /about\nContact | /contact',
+			width: 300,
+			height: 70
+		}
+	},
+	'widget-footer': {
+		label: 'Footer',
+		detail: 'Copyright and links',
+		mark: '▁',
+		category: 'Navigation',
+		defaults: {
+			title: 'My Site',
+			body: '',
+			action: '',
+			items: 'About | /about\nPrivacy | /privacy\nContact | /contact',
+			width: 300,
+			height: 50
+		}
+	},
+	'widget-sidebar': {
+		label: 'Sidebar',
+		detail: 'A vertical navigation list',
+		mark: '▌',
+		category: 'Navigation',
+		defaults: {
+			title: '',
+			body: '',
+			action: '',
+			items: 'Dashboard | /\nInbox | /inbox\nSettings | /settings',
+			width: 200,
+			height: 130
+		}
+	},
+	'widget-dropdown': {
+		label: 'Dropdown',
+		detail: 'A button with a menu',
+		mark: '▾',
+		category: 'Navigation',
+		defaults: {
+			title: '',
+			body: '',
+			action: 'Menu',
+			items: 'Dashboard\nSettings\nSign out',
+			width: 120,
+			height: 40
+		}
+	},
+	'widget-modal': {
+		label: 'Modal',
+		detail: 'A dialog over the page',
+		mark: '▣',
+		category: 'Overlays',
+		defaults: {
+			title: 'Terms of service',
+			body: 'Please read the terms before you continue.',
+			action: 'Open modal',
+			width: 130,
+			height: 40
+		}
+	},
+	'widget-drawer': {
+		label: 'Drawer',
+		detail: 'A panel that slides in',
+		mark: '◧',
+		category: 'Overlays',
+		defaults: {
+			title: 'Drawer',
+			body: 'Content of the drawer.',
+			action: 'Open drawer',
+			width: 130,
+			height: 40
+		}
+	},
+	'widget-dialog': {
+		label: 'Dialog',
+		detail: 'A native confirmation dialog',
+		mark: '◨',
+		category: 'Overlays',
+		defaults: {
+			title: 'Are you sure?',
+			body: 'This action can not be undone.',
+			action: 'Open dialog',
+			width: 130,
+			height: 40
 		}
 	}
 };

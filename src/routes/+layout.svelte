@@ -29,7 +29,12 @@
 	provideContextMenu(contextMenu);
 
 	// Edited built-in widgets (Components page) are compiled in the browser for canvas/preview.
-	onMount(() => void loadWidgetOverrides());
+	onMount(() => {
+		// Marks the document as interactive: E2E tests wait for it, because clicks and drops made
+		// on the server-rendered markup before hydration are silently ignored.
+		document.documentElement.dataset.hydrated = 'true';
+		void loadWidgetOverrides();
+	});
 
 	afterNavigate((navigation) => {
 		if (!navigation.to) return;

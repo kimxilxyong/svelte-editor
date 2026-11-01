@@ -34,6 +34,7 @@ blob-report
 .data/
 
 # Local MCP servers (cloned + built per developer)
-.mcp-servers/
+# Developer removed the local MCP servers from .gitignore
+#.mcp-servers/
 # Playwright CLI output (may contain credentials)
 .playwright-cli/

@@ -3,6 +3,7 @@
 @plugin '@tailwindcss/typography';
 @plugin 'flowbite/plugin';
 @source '../../node_modules/flowbite-svelte/dist';
+@source '../../node_modules/flowbite';
 /* User-edited built-in widgets (Components page) live outside src, so Tailwind must scan them. */
 @source '../../.data/widgets';
 @custom-variant dark (&:where(.dark, .dark *));

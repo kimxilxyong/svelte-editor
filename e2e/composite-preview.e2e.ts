@@ -31,19 +31,23 @@ test('composite and page previews preserve child styles and positions', async ({
 	await page.setViewportSize({ width: 1600, height: 1000 });
 
 	await page.goto('/composites');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.once('dialog', (dialog) => dialog.accept(compositeName));
 	await page.getByRole('button', { name: 'New', exact: true }).click();
 
 	const compositeCanvas = page.locator('.page-canvas');
 	await dragPaletteItemToCanvas(page, /Alert/, compositeCanvas, { x: 260, y: 120 });
-	await page.getByLabel('Heading').fill(headline);
-	await page.getByLabel('Message').fill(description);
+	await page.getByRole('textbox', { name: 'Heading' }).fill(headline);
+	await page.getByRole('textbox', { name: 'Message' }).fill(description);
 	await setNumberField(page, 'Left (px)', 64);
 	await setNumberField(page, 'Top (px)', 48);
 	await setNumberField(page, 'Width (px)', 360);
 	await setNumberField(page, 'Height (px)', 72);
 
-	await dragPaletteItemToCanvas(page, /Button/, compositeCanvas, { x: 480, y: 260 });
+	await dragPaletteItemToCanvas(page, /Button\s*A clear action/, compositeCanvas, {
+		x: 480,
+		y: 260
+	});
 	await page.getByLabel('Button label').fill(buttonLabel);
 	await setNumberField(page, 'Left (px)', 64);
 	await setNumberField(page, 'Top (px)', 152);
@@ -106,6 +110,7 @@ test('composite and page previews preserve child styles and positions', async ({
 
 	await page.getByRole('button', { name: 'Back to editor', exact: true }).click();
 	await page.goto('/');
+	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.locator('.save-status')).toContainText('Saved to the database');

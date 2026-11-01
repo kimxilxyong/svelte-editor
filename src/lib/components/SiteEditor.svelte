@@ -31,7 +31,7 @@
 	 * 4. Inspector (UI extracted to `BlockInspector.svelte`; this component only supplies the
 	 *    selected block and callbacks for dirty marking, geometry clamping, layer order,
 	 *    duplicate and delete, and keeps history/navigation/persistence):
-	 *    - Geometry controls (X, Y, Width, Height — all px) and layer ordering.
+	 *    - Geometry controls (X, Y, Width, Height — all px), edge/fill docking, and layer ordering.
 	 *    - Content controls limited to the fields each kind supports (`inspector-fields.ts`),
 	 *      including the Link Navigation group of link, button and card widgets.
 	 *    - Preview-mode link clicks (`handleLinkClick`) are routed here for in-app navigation.
@@ -64,6 +64,7 @@
 		defaultCanvasSize,
 		isValidLinkHref,
 		type BuilderBlock,
+		type AlignTo,
 		type BlockKind,
 		type EditorPage,
 		type EditorSite,
@@ -73,6 +74,7 @@
 		findCompositeCycle,
 		type WidgetKind
 	} from '../editor.js';
+	import { resolveBlockLayout } from '../block-layout.js';
 	import {
 		filterWidgets,
 		widgetCatalog,
@@ -224,6 +226,10 @@
 		documents.find((document) => document.id === currentDocumentId) ?? documents[0]
 	);
 	let blocks = $derived(currentDocument.blocks);
+	/** Computed CSS-pixel positions, using the declared size of the active page or composite. */
+	const blockLayout = $derived(
+		resolveBlockLayout(blocks, currentDocument.width, currentDocument.height)
+	);
 	let selectedId = $state<string | null>(composing ? 'seed-hero-0' : 'sample-hero');
 	let paletteTab = $state<PaletteTab>(composing ? 'widgets' : 'composites');
 	let isPreview = $state(false);
@@ -257,6 +263,12 @@
 	/** Grid size in canvas pixels that moves and resizes snap to (hold Alt while dragging to bypass). */
 	const SNAP_GRID = 8;
 	const resizeHandles: ResizeDir[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+	function resizeHandlesFor(block: BuilderBlock): ResizeDir[] {
+		if (block.alignTo === 'left' || block.alignTo === 'right') return ['e', 'w'];
+		if (block.alignTo === 'top' || block.alignTo === 'bottom') return ['n', 's'];
+		if (block.alignTo === 'fill') return [];
+		return resizeHandles;
+	}
 	const snap = (value: number, enabled: boolean) =>
 		enabled ? Math.round(value / SNAP_GRID) * SNAP_GRID : Math.round(value);
 	let pointerInteraction = $state<{
@@ -283,9 +295,18 @@
 		)
 	]);
 	let selectedBlock = $derived(blocks.find((block) => block.id === selectedId));
+	const anotherBlockUsesFill = $derived(
+		blocks.some((block) => block.id !== selectedId && block.alignTo === 'fill')
+	);
 	let blockCount = $derived(blocks.length);
 	let canvasHeight = $derived(
-		Math.max(currentDocument.height, ...blocks.map((block) => block.y + block.height + 40))
+		Math.max(
+			currentDocument.height,
+			...blocks.map((block) => {
+				const geometry = blockLayout.get(block.id)!;
+				return geometry.y + geometry.height + 40;
+			})
+		)
 	);
 	let selectedLabel = $derived(
 		selectedBlock ? componentInfo[selectedBlock.kind].label : 'Nothing selected'
@@ -691,11 +712,24 @@
 		const copy: BuilderBlock = {
 			...source,
 			id: globalThis.crypto.randomUUID(),
+			alignTo: source.alignTo === 'fill' ? 'none' : (source.alignTo ?? 'none'),
 			x: Math.min(blockLimits.maxX - source.width, source.x + 16),
 			y: Math.min(blockLimits.maxY, source.y + 16)
 		};
 		blocks.push(copy);
 		selectedId = copy.id;
+		markUnsaved();
+	}
+
+	function updateSelectedAlignment(alignment: AlignTo) {
+		if (!selectedBlock) return;
+		if (
+			alignment === 'fill' &&
+			blocks.some((block) => block.id !== selectedBlock.id && block.alignTo === 'fill')
+		) {
+			return;
+		}
+		selectedBlock.alignTo = alignment;
 		markUnsaved();
 	}
 
@@ -763,6 +797,7 @@
 			...base,
 			id: globalThis.crypto.randomUUID(),
 			positioned: true,
+			alignTo: 'none',
 			x: 24,
 			y: 24,
 			width: source ? Math.round(source.width * fit) : (catalogDefaults?.width ?? 720),
@@ -819,6 +854,7 @@
 		const snapOn = !event.altKey;
 
 		if (pointerInteraction.mode === 'move') {
+			if ((block.alignTo ?? 'none') !== 'none') return;
 			block.x = Math.max(
 				0,
 				Math.min(blockLimits.maxX - block.width, snap(pointerInteraction.startX + deltaX, snapOn))
@@ -828,6 +864,35 @@
 				Math.min(blockLimits.maxY, snap(pointerInteraction.startY + deltaY, snapOn))
 			);
 		} else {
+			if (block.alignTo === 'fill') return;
+			if (block.alignTo === 'left' || block.alignTo === 'right') {
+				if (pointerInteraction.dir.includes('e') || pointerInteraction.dir.includes('w')) {
+					const direction = pointerInteraction.dir.includes('e') ? 1 : -1;
+					block.width = Math.max(
+						blockLimits.minWidth,
+						Math.min(
+							blockLimits.maxWidth,
+							snap(pointerInteraction.startWidth + direction * deltaX, snapOn)
+						)
+					);
+				}
+				markUnsaved();
+				return;
+			}
+			if (block.alignTo === 'top' || block.alignTo === 'bottom') {
+				if (pointerInteraction.dir.includes('n') || pointerInteraction.dir.includes('s')) {
+					const direction = pointerInteraction.dir.includes('s') ? 1 : -1;
+					block.height = Math.max(
+						blockLimits.minHeight,
+						Math.min(
+							blockLimits.maxHeight,
+							snap(pointerInteraction.startHeight + direction * deltaY, snapOn)
+						)
+					);
+				}
+				markUnsaved();
+				return;
+			}
 			// Work with edges so the edge opposite the dragged handle stays fixed.
 			const { dir, startX, startY, startWidth, startHeight } = pointerInteraction;
 			let left = startX;
@@ -909,6 +974,10 @@
 		let handled = true;
 
 		if (mode === 'move') {
+			if ((selectedBlock.alignTo ?? 'none') !== 'none') {
+				event.preventDefault();
+				return;
+			}
 			if (event.key === 'ArrowLeft') selectedBlock.x = Math.max(0, selectedBlock.x - amount);
 			else if (event.key === 'ArrowRight')
 				selectedBlock.x = Math.min(
@@ -920,7 +989,31 @@
 				selectedBlock.y = Math.min(blockLimits.maxY, selectedBlock.y + amount);
 			else handled = false;
 		} else {
-			if (event.key === 'ArrowLeft')
+			if (selectedBlock.alignTo === 'fill') {
+				event.preventDefault();
+				return;
+			}
+			if (
+				(selectedBlock.alignTo === 'left' || selectedBlock.alignTo === 'right') &&
+				(event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+			) {
+				const delta = event.key === 'ArrowRight' ? amount : -amount;
+				selectedBlock.width = Math.max(
+					blockLimits.minWidth,
+					Math.min(blockLimits.maxWidth, selectedBlock.width + delta)
+				);
+			} else if (
+				(selectedBlock.alignTo === 'top' || selectedBlock.alignTo === 'bottom') &&
+				(event.key === 'ArrowUp' || event.key === 'ArrowDown')
+			) {
+				const delta = event.key === 'ArrowDown' ? amount : -amount;
+				selectedBlock.height = Math.max(
+					blockLimits.minHeight,
+					Math.min(blockLimits.maxHeight, selectedBlock.height + delta)
+				);
+			} else if (selectedBlock.alignTo !== undefined && selectedBlock.alignTo !== 'none') {
+				handled = false;
+			} else if (event.key === 'ArrowLeft')
 				selectedBlock.width = Math.max(blockLimits.minWidth, selectedBlock.width - amount);
 			else if (event.key === 'ArrowRight')
 				selectedBlock.width = Math.min(
@@ -1290,10 +1383,10 @@
 								<article
 									class="canvas-block positioned {block.kind} theme-{block.theme}"
 									class:selected={!isPreview && selectedId === block.id}
-									style:left="{block.x}px"
-									style:top="{block.y}px"
-									style:width="{block.width}px"
-									style:height="{block.height}px"
+									style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
+									style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
+									style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
+									style:height="{blockLayout.get(block.id)?.height ?? block.height}px"
 									{@attach contextMenu.attach(() => blockEntries(block))}
 								>
 									<BlockContent
@@ -1306,7 +1399,8 @@
 										<button
 											type="button"
 											class="selection-overlay"
-											class:movable={selectedId === block.id}
+											class:movable={selectedId === block.id &&
+												(block.alignTo ?? 'none') === 'none'}
 											aria-label="Select {componentInfo[block.kind].label}: {block.title}"
 											aria-pressed={selectedId === block.id}
 											onclick={() => (selectedId = block.id)}
@@ -1320,7 +1414,7 @@
 										></button>
 										{#if selectedId === block.id}
 											<div class="selection-frame" aria-hidden="true">
-												{#each resizeHandles as dir (dir)}
+												{#each resizeHandlesFor(block) as dir (dir)}
 													<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
 													<!-- svelte-ignore a11y_no_static_element_interactions -->
 													<span
@@ -1355,7 +1449,9 @@
 					mark={selectedBlock ? componentInfo[selectedBlock.kind].mark : ''}
 					{linkPages}
 					compositeEdit={selectedComposite}
+					hasFillBlock={anotherBlockUsesFill}
 					onchange={markUnsaved}
+					onalign={updateSelectedAlignment}
 					onposition={updateSelectedPosition}
 					onreorder={reorderSelected}
 					onduplicate={duplicateSelected}

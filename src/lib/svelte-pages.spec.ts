@@ -31,6 +31,33 @@ function block(kind: BlockKind, index: number, overrides: Record<string, unknown
 }
 
 describe('svelte page export/import', () => {
+	it('exports and restores alignment metadata and resolved page geometry', () => {
+		const page: EditorPage = {
+			id: 'p',
+			name: 'Aligned',
+			slug: 'aligned',
+			width: 800,
+			height: 600,
+			blocks: [
+				block('widget-button', 0, { alignTo: 'left', width: 120 }),
+				block('widget-alert', 1, { alignTo: 'top', height: 80 }),
+				block('widget-card', 2, { alignTo: 'fill' })
+			]
+		};
+
+		const source = renderPageSource(page);
+		expect(source).toContain('data-align-to="left"');
+		expect(source).toContain('data-align-to="top"');
+		expect(source).toContain('data-align-to="fill"');
+		expect(source).toContain('left: 120px; top: 0px; width: 680px; height: 80px');
+		expect(source).toContain('left: 120px; top: 80px; width: 680px; height: 520px');
+		const parsed = parsePageSource(source, 'aligned');
+		expect(parsed?.blocks.map((item) => item.alignTo)).toEqual(['left', 'top', 'fill']);
+		expect(
+			parsePageSource(source.replace('data-align-to="left"', ''), 'aligned')?.blocks[0].alignTo
+		).toBe('none');
+	});
+
 	it('round-trips every block kind', () => {
 		const kinds = Object.keys(componentNames) as BlockKind[];
 		const page: EditorPage = {
@@ -113,6 +140,26 @@ describe('svelte page export/import', () => {
 			['https://example.com/x?a=1&b=2', true],
 			['/about', false]
 		]);
+	});
+
+	it('round-trips alignment metadata and resolved geometry in composite source', () => {
+		const composite = {
+			id: 'c',
+			name: 'Docked',
+			width: 800,
+			height: 600,
+			blocks: [
+				block('widget-button', 0, { alignTo: 'right', width: 120 }),
+				block('widget-alert', 1, { alignTo: 'fill' })
+			]
+		};
+		const source = renderCompositeSource(composite);
+		expect(source).toContain('data-align-to="right"');
+		expect(source).toContain('data-align-to="fill"');
+		expect(source).toContain('left: 85%; top: 0%; width: 15%; height: 100%');
+		expect(source).toContain('left: 0%; top: 0%; width: 85%; height: 100%');
+		const parsed = parseCompositeSource(source);
+		expect(parsed?.blocks.map((item) => item.alignTo)).toEqual(['right', 'fill']);
 	});
 
 	it('drops pages whose imported button link is unsafe', () => {

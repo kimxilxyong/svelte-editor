@@ -8,7 +8,7 @@
 	 *
 	 * Which content controls appear is decided only by {@link inspectorFields} (the capability map in
 	 * `inspector-fields.ts`), so a control exists only when the widget renders that field. Universal
-	 * controls (layer order, fixed position/size, theme) are always shown for a selection.
+	 * controls (layer order, Align To, fixed position/size, theme) are always shown for a selection.
 	 *
 	 * Link Navigation (`widget-link`, `widget-button`, `widget-card` CTA) edits the existing
 	 * `href` / `newTab` block fields with page-route suggestions and {@link isValidLinkHref} validation.
@@ -16,7 +16,8 @@
 	 * Data flow: the block is mutated in place through `bind:` (the host passes a function binding to
 	 * its derived selection) and every text/option edit calls `onchange` so the host marks the
 	 * document unsaved. Geometry edits additionally call `onposition(field)` so the host can clamp
-	 * the value and record history.
+	 * the value and record history. Alignment edits call `onalign`; the host disables Fill when a
+	 * different block on the same canvas already owns it.
 	 *
 	 * Coordinates: pixels relative to the canvas top-left corner (see {@link blockLimits}).
 	 *
@@ -26,6 +27,8 @@
 	 * @prop {{ id: string; name: string; slug: string }[]} [linkPages=[]] - Internal pages offered as link suggestions.
 	 * @prop {{ id: string; name: string }} [compositeEdit] - Composite a `composite:` block instantiates; shows an "Edit composite" link.
 	 * @prop {() => void} onchange - A content value was edited (mark unsaved).
+	 * @prop {boolean} [hasFillBlock=false] - Another block on this canvas already uses Fill.
+	 * @prop {(alignment: AlignTo) => void} onalign - Align To was changed.
 	 * @prop {(field: 'x' | 'y' | 'width' | 'height') => void} onposition - A geometry value was edited.
 	 * @prop {(action: 'front' | 'back' | 'forward' | 'backward') => void} onreorder - Change the layer order.
 	 * @prop {() => void} onduplicate - Duplicate the selected block.
@@ -37,7 +40,13 @@
 	 *   onduplicate={duplicate} ondelete={remove} />
 	 */
 	import { resolve } from '$app/paths';
-	import { blockLimits, isValidLinkHref, type BuilderBlock, type Theme } from '../editor.js';
+	import {
+		blockLimits,
+		isValidLinkHref,
+		type AlignTo,
+		type BuilderBlock,
+		type Theme
+	} from '../editor.js';
 	import { inspectorFields } from '../inspector-fields.js';
 	import { widgetCatalog } from '../widget-catalog.js';
 
@@ -50,7 +59,9 @@
 		mark,
 		linkPages = [],
 		compositeEdit,
+		hasFillBlock = false,
 		onchange,
+		onalign,
 		onposition,
 		onreorder,
 		onduplicate,
@@ -61,7 +72,9 @@
 		mark: string;
 		linkPages?: { id: string; name: string; slug: string }[];
 		compositeEdit?: { id: string; name: string };
+		hasFillBlock?: boolean;
 		onchange: () => void;
+		onalign: (alignment: AlignTo) => void;
 		onposition: (field: GeometryField) => void;
 		onreorder: (action: LayerAction) => void;
 		onduplicate: () => void;
@@ -143,8 +156,34 @@
 			<button type="button" onclick={() => onreorder('forward')}>Forward</button>
 			<button type="button" onclick={() => onreorder('front')}>To front</button>
 		</div>
+		<label class="field-label" for="{uid}-align-to">Align To</label>
+		<select
+			id="{uid}-align-to"
+			class="field-control"
+			aria-label="Align To"
+			value={current.alignTo ?? 'none'}
+			onchange={(event) => onalign(event.currentTarget.value as AlignTo)}
+		>
+			<option value="none">None</option>
+			<option value="left">Left</option>
+			<option value="right">Right</option>
+			<option value="top">Top</option>
+			<option value="bottom">Bottom</option>
+			<option value="fill" disabled={hasFillBlock}>Fill</option>
+		</select>
+		<p class="panel-hint align-hint">
+			{#if current.alignTo === 'left' || current.alignTo === 'right'}
+				Width sets the docked strip thickness; its height fills the remaining canvas.
+			{:else if current.alignTo === 'top' || current.alignTo === 'bottom'}
+				Height sets the docked strip thickness; its width fills the remaining canvas.
+			{:else if current.alignTo === 'fill'}
+				This block fills the remaining canvas area. Only one Fill block is allowed.
+			{:else}
+				Keep the block at its fixed position, or dock it to a canvas edge.
+			{/if}
+		</p>
 		<span class="field-label">Fixed position</span>
-		<p class="position-hint">Drag the move handle or adjust these values.</p>
+		<p class="position-hint">Adjust the block geometry, or its strip thickness when docked.</p>
 		<div class="position-fields">
 			<div>
 				<label class="field-label" for="{uid}-x">Left (px)</label>
@@ -156,6 +195,7 @@
 					max={blockLimits.maxX - current.width}
 					step="1"
 					bind:value={current.x}
+					disabled={current.alignTo !== undefined && current.alignTo !== 'none'}
 					oninput={() => onposition('x')}
 				/>
 			</div>
@@ -169,6 +209,7 @@
 					max={blockLimits.maxY}
 					step="1"
 					bind:value={current.y}
+					disabled={current.alignTo !== undefined && current.alignTo !== 'none'}
 					oninput={() => onposition('y')}
 				/>
 			</div>
@@ -179,9 +220,13 @@
 					class="field-control"
 					type="number"
 					min={blockLimits.minWidth}
-					max={blockLimits.maxWidth - current.x}
+					max={blockLimits.maxWidth -
+						(current.alignTo === 'left' || current.alignTo === 'right' ? 0 : current.x)}
 					step="1"
 					bind:value={current.width}
+					disabled={current.alignTo === 'top' ||
+						current.alignTo === 'bottom' ||
+						current.alignTo === 'fill'}
 					oninput={() => onposition('width')}
 				/>
 			</div>
@@ -195,6 +240,9 @@
 					max={blockLimits.maxHeight}
 					step="1"
 					bind:value={current.height}
+					disabled={current.alignTo === 'left' ||
+						current.alignTo === 'right' ||
+						current.alignTo === 'fill'}
 					oninput={() => onposition('height')}
 				/>
 			</div>

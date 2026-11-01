@@ -3,7 +3,8 @@
 	 * @component PageView
 	 *
 	 * Read-only rendering of a whole {@link EditorPage} using the real widget and composite components,
-	 * positioned exactly like on the editor canvas (`left`/`top`/`width`/`height` in px) and themed
+	 * positioned like the editor canvas (resolved Align To geometry and explicit `none` bounds in
+	 * CSS pixels) and themed
 	 * with the site theme through {@link ThemeScope}.
 	 * It is what the home page shows for the selected page, so the overview always matches the
 	 * editor, and what the home page's Preview mode shows at full size.
@@ -35,6 +36,7 @@
 	import ThemeScope from './editor/ThemeScope.svelte';
 	import { defaultSiteTheme, type SiteTheme } from '../theme.js';
 	import { provideComposites } from '../composite-context.js';
+	import { resolveBlockLayout } from '../block-layout.js';
 	import type { BuilderBlock, EditorComposite, EditorPage } from '../editor.js';
 
 	let {
@@ -66,9 +68,17 @@
 		blocks = $state.snapshot(page.blocks) as BuilderBlock[];
 	});
 
+	/** Use the page's declared dimensions as the alignment bounds, not its expanded render height. */
+	const blockLayout = $derived(resolveBlockLayout(blocks, page.width, page.height));
 	// Same height rule as the editor canvas: tall enough for the lowest block plus a margin.
 	const height = $derived(
-		Math.max(page.height, ...page.blocks.map((block) => block.y + block.height + 40))
+		Math.max(
+			page.height,
+			...blocks.map((block) => {
+				const geometry = blockLayout.get(block.id)!;
+				return geometry.y + geometry.height + 40;
+			})
+		)
 	);
 	const scale = $derived(fit && availableWidth > 0 ? Math.min(1, availableWidth / page.width) : 1);
 </script>
@@ -90,12 +100,13 @@
 				aria-label="Preview of {page.name}"
 			>
 				{#each blocks as block, index (block.id)}
+					{@const geometry = blockLayout.get(block.id)!}
 					<article
 						class="block {block.kind} theme-{block.theme}"
-						style:left="{block.x}px"
-						style:top="{block.y}px"
-						style:width="{block.width}px"
-						style:height="{block.height}px"
+						style:left="{geometry.x}px"
+						style:top="{geometry.y}px"
+						style:width="{geometry.width}px"
+						style:height="{geometry.height}px"
 					>
 						<BlockContent bind:block={blocks[index]} {onlink} />
 					</article>

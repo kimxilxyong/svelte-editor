@@ -6,7 +6,7 @@
  * - Block kinds (atomic widgets, composite components and imported custom components).
  * - Composite components: reusable groups of widgets (and other composites) that are edited on a
  *   visual canvas exactly like pages and exported as native `.svelte` components.
- * - Layout and positioning models (absolute pixel geometry).
+ * - Layout and positioning models (absolute pixel geometry plus edge/fill alignment).
  * - Site structure (`EditorSite` -> `EditorPage` -> `BuilderBlock`).
  * - Runtime validation and sanitization for block attributes, routes, and link targets.
  */
@@ -130,6 +130,11 @@ export function isValidCustomKind(kind: string): boolean {
 export type Theme = 'light' | 'lavender' | 'dark';
 
 /**
+ * Docking behavior for a block relative to the remaining rectangle of its containing canvas.
+ */
+export type AlignTo = 'none' | 'left' | 'right' | 'top' | 'bottom' | 'fill';
+
+/**
  * Represents a single visual component or widget placed onto an editor page.
  *
  * All geometry is in absolute CSS pixels relative to the canvas top-left corner:
@@ -153,6 +158,11 @@ export type BuilderBlock = {
 	theme: Theme;
 	/** Whether the block is positioned with coordinates (always true in current version). */
 	positioned: boolean;
+	/**
+	 * Optional canvas docking behavior. Missing values from older saved projects are normalized to
+	 * `none`. Side alignments use width (left/right) or height (top/bottom) as strip thickness.
+	 */
+	alignTo?: AlignTo;
 	/** Horizontal coordinate in pixels from the canvas left edge. */
 	x: number;
 	/** Vertical coordinate in pixels from canvas top. */
@@ -408,6 +418,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 	const ids = new Set<string>();
 	const blocks: BuilderBlock[] = [];
 	let nextFlowPosition = 40;
+	let fillCount = 0;
 
 	for (const item of value) {
 		if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
@@ -424,6 +435,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		const href = block.href ?? '';
 		const newTab = block.newTab ?? false;
 		const items = block.items ?? '';
+		const alignTo = block.alignTo ?? 'none';
 
 		if (
 			typeof block.id !== 'string' ||
@@ -443,6 +455,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			typeof block.theme !== 'string' ||
 			!themes.includes(block.theme as Theme) ||
 			typeof positioned !== 'boolean' ||
+			typeof alignTo !== 'string' ||
+			!['none', 'left', 'right', 'top', 'bottom', 'fill'].includes(alignTo) ||
 			typeof x !== 'number' ||
 			!Number.isFinite(x) ||
 			x < 0 ||
@@ -474,6 +488,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		) {
 			return null;
 		}
+		if (alignTo === 'fill' && ++fillCount > 1) return null;
 
 		const positionedY = positioned ? y : nextFlowPosition;
 		ids.add(block.id);
@@ -503,6 +518,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			action: block.action,
 			theme: block.theme as Theme,
 			positioned: true,
+			alignTo: alignTo as AlignTo,
 			x,
 			y: positionedY,
 			width,

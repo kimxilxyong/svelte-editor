@@ -10,7 +10,8 @@
  *    - Emits component imports using either the legacy `$lib` alias or the `#lib` package
  *      subpath, depending on the target project's import configuration.
  *    - Renders `<svelte:head><title>...</title></svelte:head>`.
- *    - Wraps components in absolute-positioned containers styled with percentage coordinates.
+ *    - Resolves docked geometry against declared page/composite dimensions and stores alignment
+ *      metadata on each absolute-positioned wrapper (pixels for pages, percentages for composites).
  *
  * 2. Importer (`parsePageSource`):
  *    - Parses `+page.svelte` using `svelte/compiler` `parse({ modern: true })`.
@@ -21,6 +22,7 @@
  */
 
 import { parse } from 'svelte/compiler';
+import { resolveBlockLayout } from './block-layout.js';
 import {
 	componentNames,
 	getComponentName,
@@ -177,7 +179,14 @@ function renderProp(block: BuilderBlock, prop: PropName): string {
  * @returns Height in pixels accommodating the lowest block plus margin.
  */
 export function pageHeight(page: EditorPage): number {
-	return Math.max(page.height, ...page.blocks.map((block) => block.y + block.height + 40));
+	const layout = resolveBlockLayout(page.blocks, page.width, page.height);
+	return Math.max(
+		page.height,
+		...page.blocks.map((block) => {
+			const geometry = layout.get(block.id)!;
+			return geometry.y + geometry.height + 40;
+		})
+	);
 }
 
 /**
@@ -192,16 +201,18 @@ export function renderPageSource(
 	importStyle: LibImportStyle = 'sveltekit'
 ): string {
 	const names = usedComponentNames([page]);
+	const layout = resolveBlockLayout(page.blocks, page.width, page.height);
 	const imports = names
 		.map((name) => `\timport ${name} from '${componentImportPath(importStyle)}/${name}.svelte';`)
 		.join('\n');
 	const blocks = page.blocks
-		.map((block) =>
-			renderBlockElement(
+		.map((block) => {
+			const geometry = layout.get(block.id)!;
+			return renderBlockElement(
 				block,
-				`left: ${block.x}px; top: ${block.y}px; width: ${block.width}px; height: ${block.height}px`
-			)
-		)
+				`left: ${geometry.x}px; top: ${geometry.y}px; width: ${geometry.width}px; height: ${geometry.height}px`
+			);
+		})
 		.join('\n');
 
 	return `${generatedMarker}
@@ -271,7 +282,7 @@ function renderBlockElement(block: BuilderBlock, geometry: string): string {
 		const allowed = kindProps[block.kind as WidgetKind] || [];
 		propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
 	}
-	return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tstyle="${geometry}"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
+	return `\t\t<div\n\t\t\tclass="editor-block"\n\t\t\tdata-align-to="${block.alignTo ?? 'none'}"\n\t\t\tstyle="${geometry}"\n\t\t>\n\t\t\t<${name}${propsStr ? ' ' + propsStr : ''} />\n\t\t</div>`;
 }
 
 /** Rounds to two decimals so percentage geometry stays readable in generated files. */
@@ -293,6 +304,7 @@ export function renderCompositeSource(
 	composite: EditorComposite,
 	importStyle: LibImportStyle = 'sveltekit'
 ): string {
+	const layout = resolveBlockLayout(composite.blocks, composite.width, composite.height);
 	const names = [
 		...new Set(
 			composite.blocks
@@ -304,12 +316,13 @@ export function renderCompositeSource(
 		.map((name) => `\timport ${name} from '${componentImportPath(importStyle)}/${name}.svelte';`)
 		.join('\n');
 	const blocks = composite.blocks
-		.map((block) =>
-			renderBlockElement(
+		.map((block) => {
+			const geometry = layout.get(block.id)!;
+			return renderBlockElement(
 				block,
-				`left: ${round2((block.x / composite.width) * 100)}%; top: ${round2((block.y / composite.height) * 100)}%; width: ${round2((block.width / composite.width) * 100)}%; height: ${round2((block.height / composite.height) * 100)}%`
-			)
-		)
+				`left: ${round2((geometry.x / composite.width) * 100)}%; top: ${round2((geometry.y / composite.height) * 100)}%; width: ${round2((geometry.width / composite.width) * 100)}%; height: ${round2((geometry.height / composite.height) * 100)}%`
+			);
+		})
 		.join('\n');
 
 	return `${generatedMarker}
@@ -467,9 +480,11 @@ function readBlocks(
 			}
 		}
 
+		const alignmentAttribute = wrapper.attributes?.find((a) => a.name === 'data-align-to');
 		blocks.push({
 			id: globalThis.crypto.randomUUID(),
 			kind,
+			alignTo: alignmentAttribute ? attributeValue(alignmentAttribute as AstAttribute) : 'none',
 			title: '',
 			body: '',
 			action: '',

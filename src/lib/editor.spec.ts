@@ -36,6 +36,19 @@ describe('parseBuilderBlocks pixel geometry', () => {
 		expect(parseBuilderBlocks([{ ...base, height: blockLimits.maxHeight + 1 }])).toBeNull();
 		expect(parseBuilderBlocks([{ ...base, x: -1 }])).toBeNull();
 	});
+
+	it('defaults old blocks to None and validates alignment with one Fill maximum', () => {
+		const parsed = parseBuilderBlocks([base]);
+		expect(parsed?.[0].alignTo).toBe('none');
+		expect(parseBuilderBlocks([{ ...base, alignTo: 'left' }])?.[0].alignTo).toBe('left');
+		expect(parseBuilderBlocks([{ ...base, alignTo: 'diagonal' }])).toBeNull();
+		expect(
+			parseBuilderBlocks([
+				{ ...base, alignTo: 'fill' },
+				{ ...base, id: 'b', alignTo: 'fill' }
+			])
+		).toBeNull();
+	});
 });
 
 describe('isValidLinkHref', () => {

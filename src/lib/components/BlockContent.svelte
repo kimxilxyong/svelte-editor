@@ -4,7 +4,8 @@
 	 *
 	 * Renders the visible content of one {@link BuilderBlock}: the matching widget component for
 	 * its `kind`, the child blocks of a `composite:<Name>` composite component (resolved through
-	 * {@link useComposites} and scaled to the block's size), or a placeholder card for
+	 *   {@link useComposites}, edge/fill-aligned within its declared dimensions, and scaled to the
+	 *   block's size), or a placeholder card for
 	 * `custom:<Name>` imported components.
 	 * It is the single place that maps block kinds to components, shared by the editor canvas
 	 * (editable, with selection overlays added by the host) and by {@link PageView} (the
@@ -41,6 +42,7 @@
 	import WidgetLink from './editor/WidgetLink.svelte';
 	import BlockContent from './BlockContent.svelte';
 	import { componentNames, getComponentName, type BuilderBlock } from '../editor.js';
+	import { resolveBlockLayout } from '../block-layout.js';
 	import { maxCompositeDepth, useComposites } from '../composite-context.js';
 	import { widgetRuntime } from '../widget-runtime.svelte.js';
 
@@ -59,6 +61,10 @@
 	const lookupComposite = useComposites();
 	const composite = $derived(
 		block.kind.startsWith('composite:') ? lookupComposite(block.kind.slice(10)) : undefined
+	);
+	/** Child geometry is resolved in the composite's own declared pixel coordinate space. */
+	const compositeLayout = $derived(
+		composite ? resolveBlockLayout(composite.blocks, composite.width, composite.height) : new Map()
 	);
 
 	/** User-edited version of this block's built-in component (see widget-runtime), if any. */
@@ -196,12 +202,13 @@
 {:else if composite && depth < maxCompositeDepth}
 	<div class="composite" data-composite={composite.name}>
 		{#each composite.blocks as child (child.id)}
+			{@const geometry = compositeLayout.get(child.id) ?? child}
 			<div
 				class="composite-child"
-				style:left="{(child.x / composite.width) * 100}%"
-				style:top="{(child.y / composite.height) * 100}%"
-				style:width="{(child.width / composite.width) * 100}%"
-				style:height="{(child.height / composite.height) * 100}%"
+				style:left="{(geometry.x / composite.width) * 100}%"
+				style:top="{(geometry.y / composite.height) * 100}%"
+				style:width="{(geometry.width / composite.width) * 100}%"
+				style:height="{(geometry.height / composite.height) * 100}%"
 			>
 				<BlockContent block={child} depth={depth + 1} {onchange} {onlink} />
 			</div>

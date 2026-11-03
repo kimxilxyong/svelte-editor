@@ -22,6 +22,14 @@
 	 *    whole-file positions back into the part editors (`problems`).
 	 * 4. Save sends `joined.source`. The server re-checks; with compile errors nothing is written
 	 *    until the developer confirms **Save anyway** (`force`). Warnings never block.
+	 * 5. Generate Base CSS (both project and widget modes) passes the full `joined.source` and
+	 *    current Style text to `generateBaseCss`. Only static native markup is sampled using
+	 *    loaded global CSS in the current base state; scripts and components are never executed.
+	 *    Defaults are a manual action, no autosave, and no generated text until sampling succeeds.
+	 *    Output uses `@layer base` to protect Tailwind responsive/hover/dark utilities.
+	 *    A revision plus captured file/source/style/mode/editor identity rejects results after edits
+	 *    (even edit-then-undo), navigation or editor replacement. Only the appended suffix enters
+	 *    Style through `CodeEditorApi.append`, as one isolated undo step; warnings appear in status.
 	 *
 	 * ## Notes
 	 * - The saved file is normalised: block order module script → script → markup → style, one
@@ -31,8 +39,9 @@
 	 *   Projects page). A folder chosen here is stored back into the project, so both pages agree.
 	 *   Widget edits (mode `widgets`) are stored per project as well.
 	 * - The route is client-driven; there are no load functions and no prerendering.
+	 * No component props or bindable inputs; route data comes from `$app/state`.
 	 */
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { beforeNavigate, invalidateAll } from '$app/navigation';
 	import { page as routePage } from '$app/state';
 	import { projectApi } from '../../lib/projects-client.js';
@@ -47,6 +56,7 @@
 	} from '../../lib/components/CodeEditor.svelte';
 	import { parseSvelteComponent } from '../../lib/svelte-component-parser.js';
 	import { checkSvelteSource } from '../../lib/svelte-diagnostics.js';
+	import { generateBaseCss } from '../../lib/base-css.js';
 	import {
 		distributeDiagnostics,
 		emptyParts,
@@ -99,6 +109,11 @@
 	let problems = $state<Record<PartId, PartDiagnostic[]>>(emptyProblems());
 	let status = $state('Choose a SvelteKit project folder to start.');
 	let busy = $state(false);
+	/** Sampling is separate from route I/O; neither operation clears the other's busy state. */
+	let generatingBaseCss = $state(false);
+	/** Monotonic invalidation, including edits reverted before an asynchronous sample finishes. */
+	let sourceRevision = 0;
+	const headerBusy = $derived(busy || generatingBaseCss);
 	let theme = $state<'light' | 'dark'>('light');
 	let fullView = $state(false);
 	let confirmForce = $state(false);
@@ -133,6 +148,8 @@
 	});
 	const hasModule = $derived(parts.moduleScript.trim() !== '' || showModule);
 
+	onDestroy(invalidateBaseCss);
+
 	onMount(() => {
 		projectRoot = routePage.data.project?.path ?? '';
 		theme = localStorage.getItem(themeKey) === 'dark' ? 'dark' : 'light';
@@ -164,6 +181,7 @@
 
 	// In-app navigation (links, Back button, browser history) asks before discarding edits.
 	beforeNavigate(({ cancel, willUnload }) => {
+		invalidateBaseCss();
 		if (dirty && !willUnload && !confirm('Discard your unsaved changes to this component?')) {
 			cancel();
 		}
@@ -223,6 +241,7 @@
 	async function setMode(next: 'project' | 'widgets') {
 		if (next === mode) return;
 		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
+		invalidateBaseCss();
 		mode = next;
 		selectedPath = null;
 		parts = emptyParts('ts');
@@ -303,6 +322,7 @@
 	}
 
 	function loadSource(path: string, content: string) {
+		invalidateBaseCss();
 		const split = splitSvelteSource(content);
 		parts = split.parts;
 		notes = split.notes;
@@ -319,7 +339,7 @@
 	 * @param force - Write even though the compiler reported errors.
 	 */
 	async function save(force = false) {
-		if (!selectedPath || busy) return;
+		if (!selectedPath || headerBusy) return;
 		if (errorCount > 0 && !force) {
 			confirmForce = true;
 			status = `${errorCount} error${errorCount === 1 ? '' : 's'} – fix them or choose "Save anyway".`;
@@ -373,8 +393,69 @@
 
 	/** Switches the script language; the module script follows so both blocks stay consistent. */
 	function setLanguage(lang: ScriptLang) {
+		invalidateBaseCss();
 		parts.scriptLang = lang;
 		parts.moduleLang = lang;
+	}
+
+	/** Invalidates in-flight sampling without cancelling ordinary editing or route I/O. */
+	function invalidateBaseCss() {
+		sourceRevision += 1;
+	}
+
+	/**
+	 * Samples static native markup only, then inserts the new CSS as one undoable edit.
+	 * Never saves or replaces the Style document. Snapshot comparisons and the revision
+	 * guard prevent asynchronous results/errors from overwriting a changed editing context.
+	 */
+	async function generateStyleBaseCss() {
+		const styleApi = apis.style;
+		if (headerBusy || !selectedPath || !styleApi) return;
+		const path = selectedPath;
+		const source = joined.source;
+		const existingCss = parts.style;
+		const sourceMode = mode;
+		const root = projectRoot;
+		const revision = sourceRevision;
+		const isCurrent = () =>
+			revision === sourceRevision &&
+			selectedPath === path &&
+			joined.source === source &&
+			parts.style === existingCss &&
+			mode === sourceMode &&
+			projectRoot === root &&
+			apis.style === styleApi &&
+			!fullView &&
+			!busy;
+
+		generatingBaseCss = true;
+		status = 'Generating Base CSS from static markup…';
+		try {
+			const result = await generateBaseCss(source, existingCss);
+			if (!isCurrent()) {
+				// Do not replace newer route status (for example, "Opened …").
+				if (status === 'Generating Base CSS from static markup…') {
+					status = 'Base CSS discarded because the editing context changed. Generate it again.';
+				}
+				return;
+			}
+			const warnings = result.warnings.length ? ` Warnings: ${result.warnings.join(' ')}` : '';
+			if (result.added === 0) {
+				status = `No new Base CSS needed; Style is unchanged.${warnings}`;
+				return;
+			}
+			// The helper's result is the exact original prefix plus an append-only suffix.
+			styleApi.append(result.css.slice(existingCss.length));
+			activePart = 'style';
+			styleApi.focus();
+			status = `Added ${result.added} Base CSS rule${result.added === 1 ? '' : 's'}. Review and save when ready.${warnings}`;
+		} catch (error) {
+			if (isCurrent()) {
+				status = `Base CSS could not be generated: ${error instanceof Error ? error.message : String(error)}`;
+			}
+		} finally {
+			generatingBaseCss = false;
+		}
 	}
 
 	function setTheme(next: 'light' | 'dark') {
@@ -423,7 +504,7 @@
 		eyebrow="COMPONENT EDITOR"
 		title={selectedPath ?? 'No file open'}
 		{status}
-		{busy}
+		busy={headerBusy}
 		unsaved={dirty}
 		canSave={selectedPath !== null && dirty}
 		onsave={() => save()}
@@ -652,6 +733,7 @@
 									ariaLabel="Module script"
 									onsave={() => save()}
 									onfocus={() => (activePart = 'moduleScript')}
+									onchange={invalidateBaseCss}
 								/>
 							</div>
 						</div>
@@ -694,6 +776,7 @@
 								diagnostics={forEditor('script')}
 								onsave={() => save()}
 								onfocus={() => (activePart = 'script')}
+								onchange={invalidateBaseCss}
 							/>
 						</div>
 					</div>
@@ -713,6 +796,7 @@
 								diagnostics={forEditor('markup')}
 								onsave={() => save()}
 								onfocus={() => (activePart = 'markup')}
+								onchange={invalidateBaseCss}
 							/>
 						</div>
 					</div>
@@ -720,6 +804,16 @@
 						<header>
 							<h3>Style <small>CSS, scoped to the component</small></h3>
 							<span class="badges">{@render badges('style')}</span>
+							<button
+								type="button"
+								class="link"
+								disabled={headerBusy || !apis.style}
+								aria-busy={generatingBaseCss}
+								title="Sample static native markup with current global CSS; scripts and components are not executed"
+								onclick={generateStyleBaseCss}
+							>
+								{generatingBaseCss ? 'Generating Base CSS…' : 'Generate Base CSS'}
+							</button>
 						</header>
 						<div class="editor-slot">
 							<CodeEditor
@@ -732,6 +826,7 @@
 								diagnostics={forEditor('style')}
 								onsave={() => save()}
 								onfocus={() => (activePart = 'style')}
+								onchange={invalidateBaseCss}
 							/>
 						</div>
 					</div>
@@ -1067,6 +1162,7 @@
 
 	.card header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.6rem;
 		padding: 0.4rem 0.8rem;
@@ -1122,6 +1218,17 @@
 		font: inherit;
 		font-size: 0.68rem;
 		cursor: pointer;
+	}
+
+	.link:hover:not(:disabled) {
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+
+	.link:focus-visible {
+		outline: 2px solid var(--purple);
+		outline-offset: 3px;
+		border-radius: 2px;
 	}
 
 	.editor-slot {

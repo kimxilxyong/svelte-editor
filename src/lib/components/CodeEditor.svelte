@@ -27,11 +27,18 @@
 		code?: string;
 	};
 
-	/** Imperative handle exposed through the bindable `api` prop. */
+	/**
+	 * Imperative handle exposed through the bindable `api` prop.
+	 * `append` inserts at the document end without replacing existing text or selection.
+	 * It propagates through the normal value/onchange listener as one undo step,
+	 * isolated from edits both before and after the insertion.
+	 */
 	export type CodeEditorApi = {
 		focus(): void;
 		undo(): boolean;
 		redo(): boolean;
+		/** Append text as one isolated undo step; empty text is a no-op. */
+		append(text: string): void;
 		/** move cursor+scroll to 1-based line/0-based column and focus */
 		goTo(line: number, column?: number): void;
 	};
@@ -47,6 +54,14 @@
 	 * selections and externally supplied diagnostics (squiggles, lint gutter and
 	 * hover tooltips). It does **not** ship a linter: the host computes
 	 * diagnostics and passes them in via `diagnostics`.
+	 *
+	 * Class hovers in Svelte, HTML and CSS resolve contextual class tokens against
+	 * actual loaded browser CSS. Source expressions are never executed. Lookup
+	 * covers loaded global CSS only, not unsaved local source styles; missing
+	 * rules and blocked stylesheet access are reported honestly, not inferred.
+	 * JavaScript and TypeScript do not install class hovers. Language changes
+	 * close old hover tooltips and swap language support and hover lookup together
+	 * without recreating the view or its history.
 	 *
 	 * Layout: the host element is `width: 100%; height: 100%` with a
 	 * `min-height` of `minHeight`. Give the component a parent cell with a
@@ -64,6 +79,9 @@
 	 * reconfiguration for `language`, `theme`, `readonly`, `placeholder` and
 	 * `ariaLabel`, via a transaction for `value` and `diagnostics` — so the
 	 * document, selection and undo history survive all prop changes.
+	 * Generated text should use `api.append(text)`, not an external value replacement:
+	 * insertion at the document end preserves selection, updates the binding through
+	 * the normal listener and isolates undo/redo from adjacent typing on both sides.
 	 *
 	 * @prop {string} value - Document text. `$bindable`, default `''`. Updated on every user edit;
 	 *   assigning from outside replaces the document (without firing `onchange`).
@@ -77,7 +95,7 @@
 	 * @prop {string} ariaLabel - Accessible name of the editing surface. Reactive. Required.
 	 * @prop {string} [placeholder] - Text shown while the document is empty. Reactive.
 	 * @prop {string} [minHeight='8rem'] - CSS `min-height` of the host element.
-	 * @prop {(value: string) => void} [onchange] - Called with the full new text after each user edit
+	 * @prop {(value: string) => void} [onchange] - Called with the full new text after each user edit or API append
 	 *   (never for external `value` assignments).
 	 * @prop {() => void} [onsave] - Called on Mod-s (Ctrl/Cmd+S). The browser's default "save page"
 	 *   action is always suppressed while the editor has focus.
@@ -124,6 +142,7 @@
 	} from '@codemirror/state';
 	import {
 		EditorView,
+		closeHoverTooltips,
 		crosshairCursor,
 		drawSelection,
 		dropCursor,
@@ -148,6 +167,7 @@
 		history,
 		historyKeymap,
 		indentWithTab,
+		isolateHistory,
 		redo as cmRedo,
 		undo as cmUndo
 	} from '@codemirror/commands';
@@ -165,6 +185,7 @@
 	import { svelte } from '@replit/codemirror-lang-svelte';
 	import { oneDark } from '@codemirror/theme-one-dark';
 	import { tags as t } from '@lezer/highlight';
+	import { classHoverExtension } from '../class-hover.js';
 
 	let {
 		value = $bindable(''),
@@ -222,17 +243,17 @@
 	 */
 	let view = $state.raw<EditorView>();
 
-	/** Maps a language id to its CodeMirror language support extension. */
+	/** Bundles language support with contextual class hovers where supported. */
 	function languageExtension(lang: CodeLanguage): Extension {
 		switch (lang) {
 			case 'svelte':
-				return svelte();
+				return [svelte(), classHoverExtension('svelte')];
 			case 'html':
-				return html();
+				return [html(), classHoverExtension('html')];
 			case 'typescript':
 				return javascript({ typescript: true });
 			case 'css':
-				return css();
+				return [css(), classHoverExtension('css')];
 			case 'javascript':
 			default:
 				return javascript();
@@ -463,6 +484,15 @@
 			focus: () => instance.focus(),
 			undo: () => cmUndo(instance),
 			redo: () => cmRedo(instance),
+			append: (text) => {
+				if (!text) return;
+				// No selection override or External annotation: CodeMirror maps the
+				// selection and the normal listener updates value/onchange.
+				instance.dispatch({
+					changes: { from: instance.state.doc.length, insert: text },
+					annotations: isolateHistory.of('full')
+				});
+			},
 			goTo: (line, column = 0) => {
 				const doc = instance.state.doc;
 				const target = doc.line(Math.min(Math.max(Math.trunc(line), 1), doc.lines));
@@ -509,7 +539,12 @@
 	$effect(() => {
 		const v = view;
 		const lang = language;
-		if (v) reconfigure(v, languageCompartment.reconfigure(languageExtension(lang)));
+		// Clear stale hovers in the same transaction as the language/hover swap.
+		// The existing view, document, selection and history remain intact.
+		if (v)
+			v.dispatch({
+				effects: [closeHoverTooltips, languageCompartment.reconfigure(languageExtension(lang))]
+			});
 	});
 
 	$effect(() => {

@@ -109,7 +109,7 @@ test('composite and page previews preserve child styles and positions', async ({
 	expect(compositePreview.button.geometry).toEqual({ left: 64, top: 152, width: 168, height: 48 });
 
 	await page.getByRole('button', { name: 'Back to editor', exact: true }).click();
-	await page.goto('/');
+	await page.goto('/pages');
 	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await page.getByRole('button', { name: 'Save', exact: true }).click();

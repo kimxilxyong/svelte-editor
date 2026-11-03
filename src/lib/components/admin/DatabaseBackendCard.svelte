@@ -16,6 +16,9 @@
 	 *   the button stays disabled until both are given (the server re-validates).
 	 * - Pressing Enter inside a field submits via the *first* submit button, which is the harmless
 	 *   "Test connection".
+	 * - "Create tables…" opens a confirmation panel (tick the box and type RESET); its submit posts
+	 *   to `?/createTables`, which deletes and recreates all tables of the *active* backend and then
+	 *   redirects to `/setup`.
 	 *
 	 * ## Connection builder
 	 * Host / port / database / user / password / TLS mode fields and the URL field are kept in sync
@@ -53,6 +56,8 @@
 
 	/** Word the admin must type to allow overwriting the target (mirrors the server constant). */
 	const REPLACE_WORD = 'REPLACE';
+	/** Word the admin must type to delete and recreate all tables (mirrors the server constant). */
+	const RESET_WORD = 'RESET';
 
 	// Initial form state is intentionally a one-time snapshot of the props; afterwards the user's
 	// input is the source of truth (a switch invalidates the page, which must not reset the form).
@@ -71,13 +76,17 @@
 	let dataMode = $state<DataMode>(untrack(() => form?.values.dataMode ?? 'copy'));
 	let confirmReplace = $state(false);
 	let confirmText = $state('');
-	let pending = $state<'testConnection' | 'switch' | null>(null);
+	let pending = $state<'testConnection' | 'switch' | 'createTables' | null>(null);
+	let resetOpen = $state(false);
+	let confirmReset = $state(false);
+	let resetText = $state('');
 	let latest = $state<DatabaseFeedback | null>(null);
 
 	const feedback = $derived(latest ?? form);
 	const replaceReady = $derived(
 		dataMode !== 'replace' || (confirmReplace && confirmText.trim() === REPLACE_WORD)
 	);
+	const resetReady = $derived(confirmReset && resetText.trim() === RESET_WORD);
 	const sourceLabels = {
 		'config-file': 'saved configuration',
 		env: 'DATABASE_URL environment variable',
@@ -113,7 +122,11 @@
 	}
 
 	const handleSubmit: SubmitFunction = ({ action }) => {
-		pending = action.search.startsWith('?/switch') ? 'switch' : 'testConnection';
+		pending = action.search.startsWith('?/switch')
+			? 'switch'
+			: action.search.startsWith('?/createTables')
+				? 'createTables'
+				: 'testConnection';
 		latest = null;
 		return async ({ result, update }) => {
 			pending = null;
@@ -327,6 +340,16 @@
 				{pending === 'testConnection' ? 'Testing…' : 'Test connection'}
 			</button>
 			<button
+				class="btn"
+				type="button"
+				aria-expanded={resetOpen}
+				aria-controls="db-reset-panel"
+				disabled={pending !== null}
+				onclick={() => (resetOpen = !resetOpen)}
+			>
+				Create tables…
+			</button>
+			<button
 				class="btn primary"
 				type="submit"
 				formaction="?/switch"
@@ -335,12 +358,60 @@
 				{pending === 'switch' ? 'Switching…' : 'Switch backend'}
 			</button>
 		</div>
+
+		{#if resetOpen}
+			<div
+				class="notice error"
+				id="db-reset-panel"
+				role="group"
+				aria-label="Confirm deleting all tables"
+			>
+				<strong>
+					This deletes every table of the <em>active</em> database ({backend.location}) and creates
+					them again, empty.
+				</strong>
+				<p class="hint">
+					All users (including you), sessions, settings, the audit log and all projects are erased.
+					Edited widgets and SvelteKit folders on disk are kept. Afterwards you are sent to the
+					first-run setup to create the first administrator.
+				</p>
+				<label class="choice">
+					<input type="checkbox" name="confirmReset" bind:checked={confirmReset} />
+					<span>I understand that all data in the active database will be deleted.</span>
+				</label>
+				<label class="field">
+					<span class="field-label">Type {RESET_WORD} to confirm</span>
+					<input
+						class="field-control"
+						name="resetText"
+						bind:value={resetText}
+						autocomplete="off"
+						spellcheck="false"
+						maxlength="20"
+					/>
+				</label>
+				<div class="row">
+					<button
+						class="btn danger"
+						type="submit"
+						formaction="?/createTables"
+						disabled={pending !== null || !resetReady}
+					>
+						{pending === 'createTables' ? 'Deleting…' : 'Delete all data and create tables'}
+					</button>
+				</div>
+			</div>
+		{/if}
 	</form>
 
 	<div aria-live="polite">
 		{#if feedback?.error}
 			<p class="notice error" role="alert">
-				{feedback.action === 'switch' ? 'Switch failed: ' : 'Connection failed: '}{feedback.error}
+				{feedback.action === 'switch'
+					? 'Switch failed: '
+					: feedback.action === 'createTables'
+						? 'Create tables failed: '
+						: 'Connection failed: '}{feedback.error}
 			</p>
 		{:else if feedback?.test}
 			<div class="notice ok" role="status">

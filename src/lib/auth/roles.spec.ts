@@ -26,6 +26,13 @@ describe('requiredRoleFor', () => {
 		expect(requiredRoleFor('/', 'GET')).toBe('guest');
 	});
 
+	it('gives the project API and the pages route their own rules', () => {
+		expect(requiredRoleFor('/projects/api', 'GET')).toBe('guest');
+		expect(requiredRoleFor('/projects/api', 'POST')).toBe('user');
+		expect(requiredRoleFor('/pages', 'GET')).toBe('guest');
+		expect(requiredRoleFor('/pages/', 'GET')).toBe('guest');
+	});
+
 	it('ignores trailing and duplicate slashes', () => {
 		expect(requiredRoleFor('/admin/', 'GET')).toBe('admin');
 		expect(requiredRoleFor('//admin', 'GET')).toBe('admin');

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Tests for Composite Components: legacy-site migration, validation, cycle
+ * @fileoverview Tests for Composite Components: validation, cycle
  * detection and the `.svelte` generate/parse round trip.
  */
 import { describe, expect, it } from 'vitest';
@@ -7,10 +7,8 @@ import {
 	compositeKind,
 	findCompositeCycle,
 	parseComposites,
-	parseEditorSite,
 	type EditorComposite
 } from './editor.js';
-import { migrateSiteData } from './site-migration.js';
 import { seedComposites } from './composite-seeds.js';
 import {
 	parseCompositeSource,
@@ -36,44 +34,6 @@ const rawBlock = (kind: string, id = 'b1') => ({
 	level: 60,
 	href: '',
 	newTab: false
-});
-
-const legacySite = {
-	pages: [
-		{
-			id: 'home',
-			name: 'Home',
-			slug: 'home',
-			width: 800,
-			height: 600,
-			blocks: [rawBlock('hero'), rawBlock('quote', 'b2'), rawBlock('widget-card', 'b3')]
-		}
-	]
-};
-
-describe('migrateSiteData', () => {
-	it('rewrites legacy section kinds to composites and adds the seeds', () => {
-		const { data, changed } = migrateSiteData(legacySite);
-		expect(changed).toBe(true);
-		const site = parseEditorSite(data);
-		expect(site).not.toBeNull();
-		expect(site!.pages[0].blocks.map((b) => b.kind)).toEqual([
-			'composite:Hero',
-			'composite:Testimonial',
-			'widget-card'
-		]);
-		expect(site!.composites.map((c) => c.name)).toContain('Hero');
-	});
-
-	it('leaves current data and the input object untouched', () => {
-		const current = migrateSiteData(legacySite).data;
-		expect(migrateSiteData(current).changed).toBe(false);
-		expect(legacySite.pages[0].blocks[0].kind).toBe('hero');
-	});
-
-	it('passes through unrelated shapes', () => {
-		expect(migrateSiteData(null)).toEqual({ data: null, changed: false });
-	});
 });
 
 describe('composite validation', () => {

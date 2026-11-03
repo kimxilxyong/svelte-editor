@@ -4,7 +4,7 @@
  * Settings:
  * - `auth.allowRegistration` (`'true'|'false'`, default `true`): may visitors create accounts
  *   themselves (password, OAuth or wallet)?
- * - `auth.defaultRole` (default `guest`): role given to self-registered accounts. `admin` is
+ * - `auth.defaultRole` (default `poweruser`): role given to self-registered accounts. `admin` is
  *   rejected on purpose – open registration must never mint administrators.
  */
 
@@ -21,7 +21,7 @@ export type AuthSettings = {
 /** Settings applied when nothing is stored yet. */
 export const defaultAuthSettings: Readonly<AuthSettings> = {
 	allowRegistration: true,
-	defaultRole: 'guest'
+	defaultRole: 'poweruser'
 };
 
 const KEY_ALLOW_REGISTRATION = 'auth.allowRegistration';

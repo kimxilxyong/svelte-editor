@@ -27,11 +27,15 @@
 	 * - The saved file is normalised: block order module script → script → markup → style, one
 	 *   blank line between blocks, indentation preserved. The "dirty" flag compares against the
 	 *   normalised form of the loaded file, so merely opening a file does not mark it changed.
-	 * - The project path is shared with the pages route through `localStorage['editor-project-root']`.
+	 * - The folder is the SvelteKit folder of the **active project** (`data.project.path`, set on the
+	 *   Projects page). A folder chosen here is stored back into the project, so both pages agree.
+	 *   Widget edits (mode `widgets`) are stored per project as well.
 	 * - The route is client-driven; there are no load functions and no prerendering.
 	 */
 	import { onMount } from 'svelte';
-	import { beforeNavigate } from '$app/navigation';
+	import { beforeNavigate, invalidateAll } from '$app/navigation';
+	import { page as routePage } from '$app/state';
+	import { projectApi } from '../../lib/projects-client.js';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
 	import { loadWidgetOverrides } from '../../lib/widget-runtime.svelte.js';
 	import { useNavContext } from '../../lib/navigation.svelte.js';
@@ -65,7 +69,6 @@
 	/** A problem prepared for the right-hand list. */
 	type ProblemRow = PartDiagnostic & { part: PartId };
 
-	const projectKey = 'editor-project-root';
 	const themeKey = 'component-editor-theme';
 	const partLabels: Record<PartId, string> = {
 		moduleScript: 'Module script',
@@ -131,7 +134,7 @@
 	const hasModule = $derived(parts.moduleScript.trim() !== '' || showModule);
 
 	onMount(() => {
-		projectRoot = localStorage.getItem(projectKey) ?? '';
+		projectRoot = routePage.data.project?.path ?? '';
 		theme = localStorage.getItem(themeKey) === 'dark' ? 'dark' : 'light';
 		if (projectRoot) void loadFiles();
 	});
@@ -266,10 +269,22 @@
 		}
 		files = result.files;
 		truncated = result.truncated === true;
-		localStorage.setItem(projectKey, projectRoot.trim());
+		void rememberFolder(projectRoot.trim());
 		status = files.length
 			? `${files.length} component${files.length === 1 ? '' : 's'} found.`
 			: 'No components yet in src/lib/components – create one.';
+	}
+
+	/** Stores a folder that worked as the active project's SvelteKit folder (best effort). */
+	async function rememberFolder(folder: string) {
+		const project = routePage.data.project;
+		if (!project || !folder || folder === project.path) return;
+		try {
+			await projectApi({ action: 'update', id: project.id, path: folder });
+			await invalidateAll();
+		} catch {
+			// The folder still works for this session; remembering it is optional.
+		}
 	}
 
 	/** Loads a file into the editors; asks first if the current one has unsaved edits. */

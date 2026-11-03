@@ -2,14 +2,14 @@
 	/**
 	 * @component ThemePage
 	 *
-	 * `/theme` – edits the site-wide theme: colour preset or custom primary colour, background and foreground colour, corner radius,
+	 * `/theme` – edits the theme of the active project: colour preset or custom primary colour, background and foreground colour, corner radius,
 	 * font family, dark mode, secondary colour, form-control style/size/border/focus ring, card shadow
 	 * and one-click looks. The preview on the right renders real widgets inside a
 	 * {@link ThemeScope}, so what you see is exactly what the editor canvas, page previews and exported
-	 * projects will use. Saving stores the theme in the database (power users and above); the root
+	 * projects will use. Saving stores the theme with the active project (power users and above); the root
 	 * layout then reloads it for every page.
 	 *
-	 * Data flow: `data.siteTheme` (root layout) is the saved theme; `draft` is the local edit state;
+	 * Data flow: `data.siteTheme` (root layout, = the active project's theme) is the saved theme; `draft` is the local edit state;
 	 * the preview and the save form both read `draft`.
 	 *
 	 * @prop {import('./$types').PageData} data - `siteTheme` (saved theme) and `canEdit`.
@@ -17,6 +17,7 @@
 	 */
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import BlockContent from '../../lib/components/BlockContent.svelte';
 	import ThemeScope from '../../lib/components/editor/ThemeScope.svelte';
 	import { widgetCatalog } from '../../lib/widget-catalog.js';
@@ -46,6 +47,15 @@
 	// svelte-ignore state_referenced_locally
 	let draft = $state<SiteTheme>({ ...data.siteTheme });
 	let saving = $state(false);
+	// Another project became active: its theme replaces the draft.
+	// svelte-ignore state_referenced_locally
+	let draftProjectId = data.project?.id;
+	$effect(() => {
+		const id = data.project?.id;
+		if (id === draftProjectId) return;
+		draftProjectId = id;
+		draft = { ...data.siteTheme };
+	});
 	const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(data.siteTheme));
 
 	/** Widgets shown in the preview, in display order. */
@@ -117,10 +127,16 @@
 
 <div class="theme-page">
 	<section class="panel" aria-labelledby="theme-heading">
-		<h1 id="theme-heading">Site theme</h1>
+		<h1 id="theme-heading">
+			Site theme{#if data.project}<small class="project-name"> · {data.project.name}</small>{/if}
+		</h1>
 		<p class="hint">
-			Applies to widgets on the canvas, in previews and in exported projects. The editor's own
-			interface keeps its look.
+			{#if data.project}
+				Applies to widgets on the canvas, in previews and in exported projects of
+				<strong>{data.project.name}</strong>. The editor's own interface keeps its look.
+			{:else}
+				Create or open a project on the <a href={resolve('/')}>Projects</a> page to edit its theme.
+			{/if}
 		</p>
 
 		<form
@@ -342,6 +358,11 @@
 		border: 1px solid #e3e1f4;
 		border-radius: 12px;
 		background: #fff;
+	}
+
+	.project-name {
+		font-weight: 400;
+		opacity: 0.7;
 	}
 
 	h1 {

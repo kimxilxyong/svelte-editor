@@ -2,9 +2,14 @@
  * @fileoverview Server-side storage for user-edited built-in widgets.
  *
  * The built-in components in `src/lib/components/editor/*.svelte` are the defaults. A power user can
- * edit any of them on the Components page; the edited source is stored as
- * `<cwd>/.data/widgets/<Name>.svelte` (the `.data` folder is git-ignored runtime data). An override
- * always wins over the default:
+ * edit any of them on the Components page; the edited source belongs to the **active project** and is
+ * stored as `<cwd>/.data/widgets/<projectId>/<Name>.svelte` (the `.data` folder is git-ignored runtime
+ * data), so projects – and users – never see each other's edits.
+ *
+ * Lookup order for a project: its own override → the shared legacy file
+ * `<cwd>/.data/widgets/<Name>.svelte` (edits made before projects existed; read-only fallback that is
+ * never written any more when a project id is given) → the built-in default. An override always wins
+ * over the default:
  * - the canvas/preview compile the override in the browser (see `widget-runtime.svelte.ts`),
  * - `exportSite` / `exportSingleComponent` write the override instead of the default.
  *
@@ -54,8 +59,28 @@ function assertName(name: unknown): string {
 	return name;
 }
 
-function fileFor(name: string): string {
-	return path.join(widgetsDirectory(), `${name}.svelte`);
+/** Project ids are UUIDs; anything else must never reach the file system. */
+const projectIdPattern = /^[A-Za-z0-9-]{1,100}$/;
+
+/**
+ * Directory of one project's overrides.
+ *
+ * @param projectId - Project id; `undefined` addresses the shared legacy directory itself.
+ * @throws {WidgetError} When the id could change the path (traversal).
+ */
+export function projectWidgetsDirectory(projectId?: string): string {
+	if (projectId === undefined) return widgetsDirectory();
+	if (!projectIdPattern.test(projectId)) throw new WidgetError('Invalid project.');
+	return path.join(widgetsDirectory(), projectId);
+}
+
+function fileFor(name: string, projectId?: string): string {
+	return path.join(projectWidgetsDirectory(projectId), `${name}.svelte`);
+}
+
+/** Deletes all widget overrides of a project (called when the project is deleted). */
+export async function removeProjectWidgets(projectId: string): Promise<void> {
+	await rm(projectWidgetsDirectory(projectId), { recursive: true, force: true });
 }
 
 /** Returns the built-in default source of a component. */
@@ -64,7 +89,9 @@ export function defaultWidgetSource(name: string): string | undefined {
 }
 
 /** Returns the override source, or `undefined` when the component is unmodified. */
-async function readOverride(name: string): Promise<string | undefined> {
+async function readOverride(name: string, projectId?: string): Promise<string | undefined> {
+	const own = await readFile(fileFor(name, projectId), 'utf8').catch(() => undefined);
+	if (own !== undefined || projectId === undefined) return own;
 	return readFile(fileFor(name), 'utf8').catch(() => undefined);
 }
 
@@ -72,18 +99,26 @@ async function readOverride(name: string): Promise<string | undefined> {
  * Returns the effective source (override if present, otherwise default). Used by the exporters.
  *
  * @param name - Component name from {@link componentNames}.
+ * @param projectId - Project whose overrides apply (omit for the shared legacy layer only).
  */
-export async function effectiveWidgetSource(name: string): Promise<string | undefined> {
+export async function effectiveWidgetSource(
+	name: string,
+	projectId?: string
+): Promise<string | undefined> {
 	// Only known names reach the file system (no path traversal through `name`).
 	if (!editableNames.has(name)) return undefined;
-	return (await readOverride(name)) ?? defaultWidgetSource(name);
+	return (await readOverride(name, projectId)) ?? defaultWidgetSource(name);
 }
 
-/** Lists every editable component with its modified flag. */
-export async function listWidgets(): Promise<WidgetInfo[]> {
-	const present = new Set(
-		(await readdir(widgetsDirectory()).catch(() => [])).map((file) => file.replace(/\.svelte$/, ''))
-	);
+/** Lists every editable component with its modified flag (own or inherited override). */
+export async function listWidgets(projectId?: string): Promise<WidgetInfo[]> {
+	const directories = projectId === undefined ? [undefined] : [projectId, undefined];
+	const present = new Set<string>();
+	for (const directory of directories) {
+		for (const file of await readdir(projectWidgetsDirectory(directory)).catch(() => [])) {
+			if (file.endsWith('.svelte')) present.add(file.replace(/\.svelte$/, ''));
+		}
+	}
 	return [...editableNames]
 		.sort()
 		.filter((name) => defaultWidgetSource(name) !== undefined)
@@ -91,20 +126,20 @@ export async function listWidgets(): Promise<WidgetInfo[]> {
 }
 
 /** Returns all overrides as `{ [name]: source }` for the canvas. */
-export async function readOverrides(): Promise<Record<string, string>> {
+export async function readOverrides(projectId?: string): Promise<Record<string, string>> {
 	const result: Record<string, string> = {};
-	for (const { name, modified } of await listWidgets()) {
+	for (const { name, modified } of await listWidgets(projectId)) {
 		if (!modified) continue;
-		const source = await readOverride(name);
+		const source = await readOverride(name, projectId);
 		if (source !== undefined) result[name] = source;
 	}
 	return result;
 }
 
 /** Reads the effective source of one component. */
-export async function readWidget(nameInput: unknown): Promise<string> {
+export async function readWidget(nameInput: unknown, projectId?: string): Promise<string> {
 	const name = assertName(nameInput);
-	const source = await effectiveWidgetSource(name);
+	const source = await effectiveWidgetSource(name, projectId);
 	if (source === undefined) throw new WidgetError('Unknown widget.');
 	return source;
 }
@@ -120,19 +155,20 @@ export type WidgetSaveResult = { saved: boolean; diagnostics: CheckResult['diagn
 export async function saveWidget(
 	nameInput: unknown,
 	content: unknown,
-	force = false
+	force = false,
+	projectId?: string
 ): Promise<WidgetSaveResult> {
 	const name = assertName(nameInput);
 	if (typeof content !== 'string') throw new WidgetError('The content must be text.');
 	if (Buffer.byteLength(content) > maxWidgetBytes) throw new WidgetError('The file is too large.');
 	const check = checkSvelteSource(content, `${name}.svelte`);
 	if (!check.ok && !force) return { saved: false, diagnostics: check.diagnostics };
-	await mkdir(widgetsDirectory(), { recursive: true });
-	await writeFile(fileFor(name), content);
+	await mkdir(projectWidgetsDirectory(projectId), { recursive: true });
+	await writeFile(fileFor(name, projectId), content);
 	return { saved: true, diagnostics: check.diagnostics };
 }
 
-/** Deletes the override so the built-in default applies again. */
-export async function resetWidget(nameInput: unknown): Promise<void> {
-	await rm(fileFor(assertName(nameInput)), { force: true });
+/** Deletes the project's own override (the inherited legacy file, if any, applies again). */
+export async function resetWidget(nameInput: unknown, projectId?: string): Promise<void> {
+	await rm(fileFor(assertName(nameInput), projectId), { force: true });
 }

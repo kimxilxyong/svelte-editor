@@ -110,7 +110,7 @@ describe('signInWithProfile', () => {
 			email: 'octo@example.com',
 			emailVerified: true,
 			name: 'Octo Cat',
-			role: 'guest',
+			role: 'poweruser',
 			hasPassword: false
 		});
 		expect(result.user.identities[0]).toMatchObject({ provider: 'github', label: 'octocat' });
@@ -193,7 +193,7 @@ describe('signInWithProfile', () => {
 		expect(result.created).toBe(true);
 		expect(result.user.id).not.toBe(existing.id);
 		expect(result.user.email).toBeNull();
-		expect(result.user.role).toBe('guest');
+		expect(result.user.role).toBe('poweruser');
 	});
 
 	it('pre-hijack defence: linking into an unverified account drops its password and sessions', async () => {

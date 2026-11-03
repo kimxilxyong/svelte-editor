@@ -7,7 +7,8 @@
  *    header that differs from the server origin are refused (SvelteKit protects form posts; this
  *    also covers JSON endpoints).
  * 3. **Session** – the `session` cookie is resolved to `event.locals.user` / `locals.sessionId`;
- *    sliding renewal re-issues the cookie; stale cookies are removed.
+ *    sliding renewal re-issues the cookie; stale cookies are removed. For a signed-in user the
+ *    `active_project` cookie is validated (owner or admin) into `event.locals.project`.
  * 4. **First run** – while no user exists everything except `/setup` leads to `/setup`.
  * 5. **Access policy** – `requiredRoleFor` (roles.ts) decides: anonymous page → `303 /login?next=…`,
  *    anonymous API → `401 JSON`, too low a role → `403` (error page or JSON).
@@ -32,6 +33,7 @@ import {
 } from './lib/server/auth/sessions.js';
 import type { SqlClient } from './lib/server/database/types.js';
 import { getDatabase } from './lib/server/database/manager.js';
+import { resolveActiveProject } from './lib/server/active-project.js';
 
 // `.env` values are not copied into process.env by Vite; the database manager reads process.env,
 // so expose the validated value there unless a real environment variable already wins.
@@ -96,6 +98,7 @@ function loginRedirect(url: URL): string {
 async function attachSession(db: SqlClient, event: Parameters<Handle>[0]['event']): Promise<void> {
 	event.locals.user = null;
 	event.locals.sessionId = null;
+	event.locals.project = null;
 	const token = event.cookies.get(sessionCookieName);
 	if (!token) return;
 	const session = await validateSessionToken(db, token);
@@ -105,6 +108,12 @@ async function attachSession(db: SqlClient, event: Parameters<Handle>[0]['event'
 	}
 	event.locals.user = session.user;
 	event.locals.sessionId = session.sessionId;
+	event.locals.project = await resolveActiveProject(
+		db,
+		session.user,
+		event.cookies,
+		event.url.protocol === 'https:'
+	);
 	if (session.renewed) {
 		setSessionCookie(event.cookies, token, session.expiresAt, event.url.protocol === 'https:');
 	}
@@ -117,6 +126,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (building || isFrameworkAsset(url.pathname)) {
 		event.locals.user = null;
 		event.locals.sessionId = null;
+		event.locals.project = null;
 		return resolve(event);
 	}
 

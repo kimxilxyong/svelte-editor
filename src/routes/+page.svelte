@@ -1,118 +1,200 @@
 <script lang="ts">
 	/**
-	 * @fileoverview Site & Multi-Page Management Home View (`/`).
+	 * @component ProjectsPage
 	 *
-	 * Serves as the central administration cockpit for website projects:
-	 * - Multi-page management: Add, duplicate, delete, and configure pages and slugs.
-	 * - SQLite persistence: Save creates the tables on first use and saves/loads entire `EditorSite` models.
-	 * - Canvas settings: Configure page widths (mobile/tablet/desktop) and minimum heights.
-	 * - SvelteKit project sync:
-	 *   - Browse server filesystem via `DirectoryPickerModal`.
-	 *   - Two-way export & import of native `.svelte` components and route pages.
-	 *   - "Create new project": scaffolds a complete SvelteKit app in an empty folder (optionally
-	 *     running `npm install`) and exports every page, composite and the theme into it.
-	 * - Visual overview: the selected page rendered with the real components via `PageView`
-	 *   (same content as the editor, reloaded from SQLite on every visit), plus an interactive
-	 *   Preview mode with working internal links.
-	 * - Direct navigation to the visual WYSIWYG editor (`/editor?page=<id>`).
-	 * - Right-click menus (see `editor-menus.ts`): a page row offers Edit / Preview / Duplicate /
-	 *   Delete / Copy route, the list background Add / Save / Reload, the preview Edit / Preview /
-	 *   Save. Right-clicking a row also selects it, so the action targets what the user pointed at.
+	 * `/` – the application's home: the user's **projects**. A project sits above the pages: it owns
+	 * its pages, composite components, theme and the path of the SvelteKit folder it is exported to.
+	 * The layout deliberately mirrors the Pages view (list · overview · settings).
+	 *
+	 * - **Left – project list.** Users see their own projects; admins see the projects of *all* users
+	 *   (with owner badge and an owner filter). Search, "New" / "Duplicate" / "Delete" buttons, and a
+	 *   context menu per row and for the list background (right-click, or the "⋯" button on a row).
+	 *   Selecting a row only inspects it; **Open** (button, double-click, Enter) makes it the active
+	 *   project that Pages, Editor, Composites, Code and Theme work on.
+	 * - **Centre – overview.** Facts about the selected project, a getting-started checklist and
+	 *   shortcuts to Pages / Editor / Composites / Theme. A brand-new project is empty on purpose.
+	 * - **Right – settings.** Name, description, SvelteKit folder (with browse button and validity
+	 *   badge), theme summary, Export / Import / Create SvelteKit app (for the active project; power
+	 *   users and above) and the delete zone (typed confirmation; files on disk are never deleted).
+	 *
+	 * Data flow: `data.projects` (server load) is the source of truth; `draft` holds the unsaved edits of
+	 * the selected project. Every mutation calls `/projects/api` through `projectApi` and then
+	 * `invalidateAll()`, which reloads this page and the layout (active project, theme, switcher).
+	 * Guests are read-only (the server rejects their writes as well).
+	 *
+	 * @prop {import('./$types').PageData} data - `projects` (visible projects) plus the layout's
+	 *   `user`, `project` (active) and `siteTheme`.
 	 */
-
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
-	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
+	import { formatTimestamp } from '../lib/admin/format.js';
+	import { hasRole } from '../lib/auth/roles.js';
 	import BuilderHeader from '../lib/components/BuilderHeader.svelte';
-	import PageView from '../lib/components/PageView.svelte';
-	import { nav, useNavContext } from '../lib/navigation.svelte.js';
-	import CanvasSizePicker from '../lib/components/CanvasSizePicker.svelte';
+	import DirectoryPickerModal from '../lib/components/DirectoryPickerModal.svelte';
+	import { normalizeEntries } from '../lib/context-menu.js';
 	import { useContextMenu } from '../lib/context-menu.svelte.js';
-	import { pageItemMenu, pageListMenu, pagePreviewMenu } from '../lib/editor-menus.js';
-	import {
-		canvasLimits,
-		defaultCanvasSize,
-		type BuilderBlock,
-		type EditorComposite,
-		type EditorPage,
-		type EditorSite
-	} from '../lib/editor.js';
+	import { projectItemMenu, projectListMenu } from '../lib/editor-menus.js';
+	import { resetProjectContext, useNavContext } from '../lib/navigation.svelte.js';
+	import { projectLimits, type ProjectSummary } from '../lib/projects.js';
+	import { projectApi } from '../lib/projects-client.js';
+	import { defaultSiteTheme } from '../lib/theme.js';
+	import type { PageProps } from './$types';
 
-	type ApiResponse = { created?: boolean; site?: EditorSite | null; error?: string };
+	let { data }: PageProps = $props();
 
-	/**
-	 * Set for `guest` users, who may view but not change the site (the server rejects their writes
-	 * as well; this only explains and disables the Save button). Read from the root layout data.
-	 */
-	const readOnlyNotice = $derived(
-		routePage.data.user?.role === 'guest' ? 'Read-only: your role cannot save' : undefined
+	/** State of the folder check next to the path field. */
+	type FolderState = 'unset' | 'checking' | 'sveltekit' | 'empty' | 'other' | 'missing';
+	type FileNote = { file: string; reason: string };
+
+	const role = $derived(routePage.data.user?.role ?? null);
+	const userId = $derived(routePage.data.user?.id ?? '');
+	const isAdmin = $derived(hasRole(role, 'admin'));
+	/** Guests are read-only. */
+	const canEdit = $derived(hasRole(role, 'user'));
+	/** Folder access (browse, export, import, create) is for power users and above. */
+	const canUseFolders = $derived(hasRole(role, 'poweruser'));
+	const activeId = $derived(routePage.data.project?.id ?? '');
+	const ownCount = $derived(data.projects.filter((item) => item.ownerId === userId).length);
+	const canCreate = $derived(canEdit && ownCount < projectLimits.perUser);
+
+	let selectedId = $state('');
+	let query = $state('');
+	let ownerFilter = $state('all');
+	let busy = $state(false);
+	let status = $state('');
+	let creating = $state(false);
+	let newName = $state('');
+	let deleteOpen = $state(false);
+	let deleteText = $state('');
+	let showPicker = $state(false);
+	let installDependencies = $state(false);
+	let folderState = $state<FolderState>('unset');
+	let folderMessage = $state('');
+	let folderDetails = $state<string[]>([]);
+	let draft = $state({ name: '', description: '', path: '' });
+	let nameInput = $state<HTMLInputElement | null>(null);
+	let newNameInput = $state<HTMLInputElement | null>(null);
+
+	const selected = $derived(
+		data.projects.find((item) => item.id === selectedId) ??
+			data.projects.find((item) => item.id === activeId) ??
+			data.projects[0]
+	);
+	const isActive = $derived(!!selected && selected.id === activeId);
+	const isOwn = $derived(!!selected && selected.ownerId === userId);
+	const dirty = $derived(
+		!!selected &&
+			(draft.name !== selected.name ||
+				draft.description !== selected.description ||
+				draft.path !== selected.path)
+	);
+	/** Owners of the visible projects (for the admin filter). */
+	const owners = $derived(
+		[...new Map(data.projects.map((item) => [item.ownerId, item.ownerName])).entries()].sort(
+			(a, b) => a[1].localeCompare(b[1])
+		)
+	);
+	const visible = $derived(
+		data.projects.filter((item) => {
+			if (ownerFilter === 'mine' && item.ownerId !== userId) return false;
+			if (ownerFilter !== 'all' && ownerFilter !== 'mine' && item.ownerId !== ownerFilter) {
+				return false;
+			}
+			const needle = query.trim().toLowerCase();
+			return (
+				!needle ||
+				item.name.toLowerCase().includes(needle) ||
+				item.ownerName.toLowerCase().includes(needle) ||
+				item.path.toLowerCase().includes(needle)
+			);
+		})
+	);
+	const checklist = $derived(
+		selected
+			? [
+					{ label: 'Name your project', done: true },
+					{ label: 'Choose the SvelteKit folder', done: selected.path !== '' },
+					{ label: 'Add the first page', done: selected.pageCount > 0 },
+					{ label: 'Pick a theme', done: selected.theme.preset !== defaultSiteTheme.preset }
+				]
+			: []
 	);
 
-	let pages = $state<EditorPage[]>([]);
-	// Kept so saving/exporting from this view never drops the composites edited on /composites.
-	let composites = $state<EditorComposite[]>([]);
-	let selectedId = $state('');
-	let databaseReady = $state(false);
-	let busy = $state(true);
-	let status = $state('Checking database…');
-	let dirty = $state(false);
-	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
-	useNavContext(() => ({ pages, unsavedChanges: dirty }));
-	let slugBeforeEdit = '';
-	let projectRoot = $state('');
-	let projectMessage = $state('');
-	let projectDetails = $state<string[]>([]);
-	/** Whether "Create new project" also runs `npm install` (slow, needs network). */
-	let installDependencies = $state(false);
-	let showPickerModal = $state(false);
-	let isPreview = $state(false);
-	let routeError = $state('');
-
-	let selected = $derived(pages.find((page) => page.id === selectedId) ?? pages[0]);
 	const contextMenu = useContextMenu();
-	const canSave = $derived(!readOnlyNotice && (dirty || !databaseReady));
+	// The unsaved-changes guard of the shared navigation covers edits to the settings.
+	useNavContext(() => ({ unsavedChanges: dirty }));
 
-	onMount(() => {
-		projectRoot = localStorage.getItem('editor-project-root') ?? '';
-		void load();
+	// Keep the selection valid and (re)load the draft whenever the selected project or its stored
+	// values change (after a save, a switch or a reload) – but never while the user is typing in it.
+	let draftKey = '';
+	let draftProjectId = '';
+	$effect(() => {
+		const current = selected;
+		const key = current ? `${current.id}|${current.updatedAt}` : '';
+		if (key === draftKey) return;
+		draftKey = key;
+		if (current) {
+			selectedId = current.id;
+			draft = { name: current.name, description: current.description, path: current.path };
+		}
+		// Messages and the delete confirmation belong to one project; a refresh of the same project
+		// (for example after an export remembered the folder) must not wipe them.
+		if ((current?.id ?? '') !== draftProjectId) {
+			draftProjectId = current?.id ?? '';
+			deleteOpen = false;
+			deleteText = '';
+			folderMessage = '';
+			folderDetails = [];
+		}
 	});
 
-	async function request(
-		method: 'GET' | 'POST',
-		payload?: { action: 'create-tables' } | { action: 'save'; site: EditorSite }
-	): Promise<ApiResponse> {
-		const response = await fetch('/editor/api', {
-			method,
-			cache: 'no-store',
-			...(payload
-				? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }
-				: {})
-		});
-		const result = (await response.json()) as ApiResponse;
-		if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
-		return result;
-	}
-
-	function apply(result: ApiResponse) {
-		databaseReady = result.created === true;
-		if (!databaseReady) {
-			status = 'Not saved yet · Save creates the database';
+	// Validate the folder on selection and after edits (power users only: it uses the file browser API).
+	let checkTimer: ReturnType<typeof setTimeout> | undefined;
+	$effect(() => {
+		const path = draft.path.trim();
+		clearTimeout(checkTimer);
+		if (!path) {
+			folderState = 'unset';
 			return;
 		}
-		if (result.site) {
-			pages = result.site.pages;
-			composites = result.site.composites;
-			// Show the page that was just edited in the editor, so recent changes are visible.
-			selectedId = pages.find((p) => p.id === nav.lastEditorPageId)?.id ?? pages[0].id;
-			dirty = false;
-			status = 'Saved site loaded from the database';
-		} else {
-			status = 'Database ready · site not saved';
+		if (!canUseFolders) {
+			folderState = 'other';
+			return;
+		}
+		folderState = 'checking';
+		checkTimer = setTimeout(() => void checkFolder(path), 350);
+		return () => clearTimeout(checkTimer);
+	});
+
+	async function checkFolder(path: string) {
+		try {
+			const response = await fetch(`/editor/api/fs?path=${encodeURIComponent(path)}`);
+			const result = (await response.json()) as { isSvelteKit?: boolean; isEmpty?: boolean };
+			if (draft.path.trim() !== path) return;
+			folderState = !response.ok
+				? 'missing'
+				: result.isSvelteKit
+					? 'sveltekit'
+					: result.isEmpty
+						? 'empty'
+						: 'other';
+		} catch {
+			folderState = 'missing';
 		}
 	}
 
+	const folderBadge: Record<FolderState, { text: string; tone: 'muted' | 'ok' | 'warn' }> = {
+		unset: { text: 'No folder chosen', tone: 'muted' },
+		checking: { text: 'Checking…', tone: 'muted' },
+		sveltekit: { text: '✔ SvelteKit project', tone: 'ok' },
+		empty: { text: '✔ Empty folder – ready for “Create SvelteKit app”', tone: 'ok' },
+		other: { text: 'Folder exists but is not a SvelteKit project', tone: 'warn' },
+		missing: { text: 'Folder not found (created by “Create SvelteKit app”)', tone: 'warn' }
+	};
+
+	/** Runs `task` with the busy flag and a status text; errors become the status. */
 	async function run(label: string, task: () => Promise<void>) {
 		busy = true;
 		status = label;
@@ -125,310 +207,179 @@
 		}
 	}
 
-	async function load() {
-		await run('Checking database…', async () => apply(await request('GET')));
+	async function openCreate() {
+		if (!canCreate) return;
+		creating = true;
+		newName = '';
+		await tick();
+		newNameInput?.focus();
 	}
 
-	async function save() {
-		if (readOnlyNotice) return;
-		await run('Saving site…', async () => {
-			// First save on a fresh database: create the schema transparently.
-			if (!databaseReady) {
-				await request('POST', { action: 'create-tables' });
-				databaseReady = true;
+	async function createProject() {
+		const name = newName.trim();
+		if (!name) return;
+		await run('Creating project…', async () => {
+			const { project } = await projectApi({ action: 'create', name });
+			creating = false;
+			resetProjectContext();
+			await invalidateAll();
+			if (project) selectedId = project.id;
+			status = `Created “${name}” – it is empty, add the first page when you are ready.`;
+		});
+	}
+
+	/** Makes `project` the active one, optionally continuing to another route. */
+	async function openProject(project: ProjectSummary, destination?: string) {
+		await run(`Opening ${project.name}…`, async () => {
+			if (project.id !== activeId) {
+				await projectApi({ action: 'open', id: project.id });
+				resetProjectContext();
+				await invalidateAll();
 			}
-			await request('POST', {
-				action: 'save',
-				site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
-			});
-			dirty = false;
-			status = 'Saved to the database';
+			status = `${project.name} is open`;
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- destination is a resolved route
+			if (destination) await goto(destination);
 		});
 	}
 
-	type FileNote = { file: string; reason: string };
-
-	async function projectRequest(
-		payload:
-			| { action: 'export'; root: string; site: EditorSite }
-			| { action: 'create'; root: string; site: EditorSite; install: boolean }
-			| { action: 'import'; root: string }
-	) {
-		const response = await fetch('/editor/api/project', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(payload)
-		});
-		const result = await response.json();
-		if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
-		return result;
-	}
-
-	async function exportProject() {
-		const root = projectRoot.trim();
-		localStorage.setItem('editor-project-root', root);
-		await run('Exporting…', async () => {
-			const result: { written: string[]; skipped: FileNote[]; warnings?: string[] } =
-				await projectRequest({
-					action: 'export',
-					root,
-					site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
-				});
-			projectMessage = `Exported ${result.written.length} files${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
-			projectDetails = [
-				...result.written.map((file) => `wrote ${file}`),
-				...(result.warnings ?? []).map((warning) => `warning: ${warning}`),
-				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
-			];
-			status = projectMessage;
-		});
-	}
-
-	async function createNewProject() {
-		const root = projectRoot.trim();
-		localStorage.setItem('editor-project-root', root);
-		await run(
-			installDependencies ? 'Creating project and installing…' : 'Creating project…',
-			async () => {
-				const result: {
-					written: string[];
-					skipped: FileNote[];
-					warnings?: string[];
-					root: string;
-					installed: boolean;
-				} = await projectRequest({
-					action: 'create',
-					root,
-					install: installDependencies,
-					site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
-				});
-				projectRoot = result.root;
-				localStorage.setItem('editor-project-root', result.root);
-				projectMessage = `Created a new SvelteKit project with ${result.written.length} files${result.installed ? ' (dependencies installed)' : ''}.`;
-				projectDetails = [
-					`project folder ${result.root}`,
-					result.installed
-						? 'next: npm run dev'
-						: 'next: npm install, then npm run dev (or npm run build)',
-					...result.written.map((file) => `wrote ${file}`),
-					...(result.warnings ?? []).map((warning) => `warning: ${warning}`),
-					...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
-				];
-				status = projectMessage;
-			}
-		);
-	}
-
-	async function importProject() {
-		const root = projectRoot.trim();
-		localStorage.setItem('editor-project-root', root);
-		await run('Importing…', async () => {
-			const result: {
-				pages: EditorPage[];
-				composites?: EditorComposite[];
-				components: { name: string; fileName: string; props: unknown[] }[];
-				skipped: FileNote[];
-			} = await projectRequest({
-				action: 'import',
-				root
-			});
-			const merged = [...pages];
-			for (const page of result.pages) {
-				const index = merged.findIndex((item) => item.slug === page.slug);
-				if (index >= 0) merged[index] = { ...page, id: merged[index].id };
-				else if (merged.length < 20) merged.push(page);
-			}
-			pages = merged;
-			// Imported composites replace same-named ones; at most 50 are kept.
-			const mergedComposites = [...composites];
-			for (const composite of result.composites ?? []) {
-				const index = mergedComposites.findIndex((item) => item.name === composite.name);
-				if (index >= 0) mergedComposites[index] = { ...composite, id: mergedComposites[index].id };
-				else if (mergedComposites.length < 50) mergedComposites.push(composite);
-			}
-			composites = mergedComposites;
-			if (!pages.some((page) => page.id === selectedId)) selectedId = pages[0]?.id ?? '';
-			if (
-				result.pages.length > 0 ||
-				(result.composites?.length ?? 0) > 0 ||
-				(result.components && result.components.length > 0)
-			)
-				touch();
-			const compCount = result.components?.length ?? 0;
-			projectMessage = `Imported ${result.pages.length} pages, ${result.composites?.length ?? 0} composites, ${compCount} components${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`;
-			projectDetails = [
-				...(result.components?.map((c) => `component ${c.name} (${c.fileName})`) ?? []),
-				...result.pages.map((page) => `read /${page.slug}`),
-				...result.skipped.map((item) => `skipped ${item.file} (${item.reason})`)
-			];
-			status = projectMessage;
-		});
-	}
-
-	function touch() {
-		dirty = true;
-		if (databaseReady) status = 'Unsaved changes';
-	}
-
-	function slugify(value: string) {
-		return value
-			.toLowerCase()
-			.replace(/[^a-z0-9-]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.slice(0, 40);
-	}
-
-	function uniqueSlug(value: string, ignoreId?: string) {
-		const root = slugify(value) || 'page';
-		let slug = root;
-		let suffix = 2;
-		while (pages.some((page) => page.id !== ignoreId && page.slug === slug)) {
-			slug = `${root.slice(0, 36)}-${suffix++}`;
-		}
-		return slug;
-	}
-
-	function addPage() {
-		if (pages.length >= 20) return;
-		const number = pages.length + 1;
-		const page: EditorPage = {
-			id: globalThis.crypto.randomUUID(),
-			name: `Page ${number}`,
-			slug: uniqueSlug(`page-${number}`),
-			width: defaultCanvasSize.width,
-			height: defaultCanvasSize.height,
-			blocks: []
-		};
-		pages.push(page);
-		selectedId = page.id;
-		touch();
-	}
-
-	function duplicatePage() {
-		if (pages.length >= 20 || !selected) return;
-		const source: EditorPage = $state.snapshot(selected);
-		const page: EditorPage = {
-			...source,
-			id: globalThis.crypto.randomUUID(),
-			name: `${source.name} copy`.slice(0, 40),
-			slug: uniqueSlug(`${source.slug}-copy`),
-			blocks: source.blocks.map((block) => ({ ...block, id: globalThis.crypto.randomUUID() }))
-		};
-		pages.push(page);
-		selectedId = page.id;
-		touch();
-	}
-
-	function deletePage() {
-		if (pages.length <= 1 || !selected) return;
-		const index = pages.findIndex((page) => page.id === selected.id);
-		pages = pages.filter((page) => page.id !== selected.id);
-		selectedId = pages[Math.min(index, pages.length - 1)].id;
-		touch();
-	}
-
-	function commitName() {
-		if (!selected.name.trim()) selected.name = 'Untitled';
-		touch();
-	}
-
-	function commitSlug() {
-		const previous = slugBeforeEdit;
-		selected.slug = uniqueSlug(selected.slug, selected.id);
-		if (previous && previous !== selected.slug) {
-			// Keep internal links pointing at the renamed route.
-			for (const item of pages) {
-				for (const block of item.blocks) {
-					if (block.href === `/${previous}`) block.href = `/${selected.slug}`;
-					else if (block.href.startsWith(`/${previous}#`) || block.href.startsWith(`/${previous}?`))
-						block.href = `/${selected.slug}${block.href.slice(previous.length + 1)}`;
-				}
-			}
-		}
-		slugBeforeEdit = selected.slug;
-		touch();
-	}
-
-	function clampSize(field: 'width' | 'height') {
-		const [min, max] =
-			field === 'width'
-				? [canvasLimits.minWidth, canvasLimits.maxWidth]
-				: [canvasLimits.minHeight, canvasLimits.maxHeight];
-		selected[field] = Math.round(Math.max(min, Math.min(max, Number(selected[field]) || min)));
-		touch();
-	}
-
-	function editPage(id: string) {
-		// eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied to the base path
-		void goto(`${resolve('/editor')}?page=${encodeURIComponent(id)}`);
-	}
-
-	/** Menu of one page row; selecting it first makes Duplicate / Delete act on that page. */
-	function pageRowEntries(target: EditorPage) {
-		selectedId = target.id;
-		return pageItemMenu({
-			name: target.name,
-			canDuplicate: pages.length < 20,
-			canDelete: pages.length > 1,
-			edit: () => editPage(target.id),
-			preview: () => {
-				isPreview = true;
-				routeError = '';
-			},
-			duplicate: duplicatePage,
-			remove: deletePage,
-			copyRoute: () => void navigator.clipboard?.writeText(`/${target.slug}`).catch(() => {})
-		});
-	}
-
-	function pageListEntries() {
-		return pageListMenu({
-			canAdd: pages.length < 20 && !!selected,
-			canSave,
-			add: addPage,
-			save: () => void save(),
-			reload: () => {
-				if (!dirty || confirm('Discard unsaved changes and reload the saved site?')) void load();
-			},
-			openComposites: () => void goto(resolve('/composites'))
-		});
-	}
-
-	function pagePreviewEntries() {
-		if (!selected) return [];
+	async function saveSettings() {
+		if (!selected || !dirty || !canEdit) return;
 		const target = selected;
-		return pagePreviewMenu({
-			previewing: isPreview,
-			canSave,
-			edit: () => editPage(target.id),
-			togglePreview,
-			save: () => void save()
+		await run('Saving…', async () => {
+			await projectApi({
+				action: 'update',
+				id: target.id,
+				name: draft.name,
+				description: draft.description,
+				path: draft.path.trim()
+			});
+			await invalidateAll();
+			status = 'Project saved';
 		});
 	}
 
-	function togglePreview() {
-		isPreview = !isPreview;
-		routeError = '';
+	async function duplicateProject(project: ProjectSummary) {
+		if (!canCreate) return;
+		await run('Duplicating…', async () => {
+			const { project: copy } = await projectApi({ action: 'duplicate', id: project.id });
+			resetProjectContext();
+			await invalidateAll();
+			if (copy) selectedId = copy.id;
+			status = `Created “${copy?.name ?? 'copy'}”`;
+		});
 	}
 
-	// In Preview, internal links jump to the matching page like they would on the live site.
-	function followLink(event: MouseEvent, block: BuilderBlock) {
-		if (!block.href.startsWith('/')) return;
-		event.preventDefault();
-		const slug = block.href.slice(1).split(/[?#]/)[0];
-		const target = slug === '' ? pages[0] : pages.find((page) => page.slug === slug);
-		if (target) {
-			selectedId = target.id;
-			routeError = '';
-		} else {
-			routeError = `No page found at ${block.href}`;
+	async function deleteProject() {
+		if (!selected || deleteText.trim() !== selected.name) return;
+		const target = selected;
+		await run('Deleting…', async () => {
+			await projectApi({ action: 'delete', id: target.id });
+			deleteOpen = false;
+			deleteText = '';
+			selectedId = '';
+			resetProjectContext();
+			await invalidateAll();
+			status = `Deleted “${target.name}”. Files in its SvelteKit folder were not touched.`;
+		});
+	}
+
+	/** Sends an export / import / create request for the active project and reports the result. */
+	async function folderRequest(label: string, body: Record<string, unknown>) {
+		await run(label, async () => {
+			const response = await fetch('/editor/api/project', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ root: draft.path.trim(), ...body })
+			});
+			const result = await response.json();
+			if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
+			const written: string[] = result.written ?? [];
+			const skipped: FileNote[] = result.skipped ?? [];
+			const warnings: string[] = result.warnings ?? [];
+			if (body.action === 'import') {
+				folderMessage = `Imported ${result.pages.length} pages, ${result.composites?.length ?? 0} composites, ${result.components?.length ?? 0} components${skipped.length ? `, skipped ${skipped.length}` : ''}.`;
+				folderDetails = [
+					...result.pages.map((item: { slug: string }) => `read /${item.slug}`),
+					...skipped.map((item) => `skipped ${item.file} (${item.reason})`)
+				];
+			} else {
+				folderMessage =
+					body.action === 'create'
+						? `Created a new SvelteKit project with ${written.length} files${result.installed ? ' (dependencies installed)' : ''}.`
+						: `Exported ${written.length} files${skipped.length ? `, skipped ${skipped.length}` : ''}.`;
+				folderDetails = [
+					...written.map((file) => `wrote ${file}`),
+					...warnings.map((warning) => `warning: ${warning}`),
+					...skipped.map((item) => `skipped ${item.file} (${item.reason})`)
+				];
+			}
+			status = folderMessage;
+			await invalidateAll();
+		});
+	}
+
+	function focusName() {
+		void tick().then(() => nameInput?.focus());
+	}
+
+	function askDelete(project: ProjectSummary) {
+		selectedId = project.id;
+		deleteOpen = true;
+		deleteText = '';
+	}
+
+	/** Menu of one project row; selecting it first makes the settings panel show that project. */
+	function rowEntries(project: ProjectSummary) {
+		selectedId = project.id;
+		return projectItemMenu({
+			name: project.name,
+			isActive: project.id === activeId,
+			canDuplicate: canCreate,
+			canEdit,
+			hasPath: project.path !== '',
+			open: () => void openProject(project),
+			openPages: () => void openProject(project, resolve('/pages')),
+			openEditor: () => void openProject(project, resolve('/editor')),
+			rename: focusName,
+			duplicate: () => void duplicateProject(project),
+			copyPath: () => void navigator.clipboard?.writeText(project.path).catch(() => {}),
+			remove: () => askDelete(project)
+		});
+	}
+
+	function listEntries() {
+		return projectListMenu({
+			canAdd: canCreate,
+			add: () => void openCreate(),
+			reload: () => void invalidateAll()
+		});
+	}
+
+	/** Left-click access to the row menu (same entries as right-click). */
+	function openRowMenu(event: MouseEvent, project: ProjectSummary) {
+		event.stopPropagation();
+		const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		contextMenu.openAt(box.left, box.bottom + 4, normalizeEntries(rowEntries(project)));
+	}
+
+	function rowKeydown(event: KeyboardEvent, project: ProjectSummary) {
+		if (event.key === 'F2' && canEdit) {
+			event.preventDefault();
+			selectedId = project.id;
+			focusName();
+		} else if (event.key === 'Delete' && canEdit) {
+			event.preventDefault();
+			askDelete(project);
 		}
 	}
+
+	const themeSummary = (project: ProjectSummary) =>
+		`${project.theme.preset} · ${project.theme.dark ? 'dark' : 'light'} · ${project.theme.font}`;
 </script>
 
 <svelte:head>
-	<title>Pages</title>
-	<meta name="description" content="Manage the pages, routes and canvas sizes of your site" />
+	<title>Projects</title>
+	<meta name="description" content="Create and manage your page builder projects" />
 </svelte:head>
 
 <div class="editor-shell">
@@ -436,221 +387,454 @@
 		{status}
 		{busy}
 		unsaved={dirty}
-		canSave={dirty || !databaseReady}
-		{readOnlyNotice}
-		onsave={save}
-		previewing={isPreview}
-		onpreview={selected ? togglePreview : undefined}
+		canSave={canEdit && dirty}
+		readOnlyNotice={canEdit ? undefined : 'Read-only: your role cannot change projects'}
+		eyebrow="PROJECTS"
+		title={isAdmin ? 'All projects' : 'Your projects'}
+		saveLabel="Save settings"
+		onsave={saveSettings}
 	/>
 
-	<div class="workspace" class:preview-mode={isPreview}>
-		{#if !isPreview}
-			<aside class="palette-panel" aria-label="Pages" {@attach contextMenu.attach(pageListEntries)}>
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">YOUR SITE</p>
-						<h2>Pages</h2>
-					</div>
-					<span class="count-pill">{pages.length}</span>
-				</div>
-				<p class="panel-hint">Select a page to edit its route and canvas size.</p>
-				<ul class="page-list" aria-label="Pages">
-					{#each pages as page (page.id)}
-						<li>
-							<button
-								type="button"
-								class="page-item"
-								class:active={selected && page.id === selected.id}
-								aria-current={selected && page.id === selected.id ? 'page' : undefined}
-								onclick={() => (selectedId = page.id)}
-								{@attach contextMenu.attach(() => pageRowEntries(page))}
-							>
-								<strong>{page.name}</strong>
-								<small>/{page.slug} · {page.width}px · {page.blocks.length} items</small>
-							</button>
-						</li>
-					{/each}
-				</ul>
-				<div class="actions">
-					<button type="button" disabled={pages.length >= 20 || !selected} onclick={addPage}>
-						Add
-					</button>
-					<button type="button" disabled={pages.length >= 20 || !selected} onclick={duplicatePage}>
-						Duplicate
-					</button>
-					<button type="button" class="danger" disabled={pages.length <= 1} onclick={deletePage}>
-						Delete
-					</button>
-				</div>
-			</aside>
-		{/if}
-
-		<section
-			class="canvas-panel"
-			aria-label="Page overview"
-			{@attach contextMenu.attach(pagePreviewEntries)}
+	<div class="workspace">
+		<aside
+			class="palette-panel"
+			aria-label="Projects"
+			{@attach contextMenu.attach(listEntries)}
+			data-testid="project-list-panel"
 		>
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">{isAdmin ? 'ALL USERS' : 'YOUR WORK'}</p>
+					<h2>Projects</h2>
+				</div>
+				<span class="count-pill">{data.projects.length}</span>
+			</div>
+			<p class="panel-hint">
+				{#if data.projects.length === 0}
+					A project holds the pages, composites and theme of one website.
+				{:else}
+					Select a project to see its settings. <strong>Open</strong> it to work on its pages.
+				{/if}
+			</p>
+
+			{#if data.projects.length > 4 || isAdmin}
+				<div class="filters">
+					<input
+						class="field-control"
+						type="search"
+						placeholder="Search projects…"
+						aria-label="Search projects"
+						bind:value={query}
+					/>
+					{#if isAdmin && owners.length > 1}
+						<select class="field-control" aria-label="Filter by owner" bind:value={ownerFilter}>
+							<option value="all">All owners</option>
+							<option value="mine">My projects</option>
+							{#each owners as [ownerId, ownerName] (ownerId)}
+								<option value={ownerId}>{ownerName}</option>
+							{/each}
+						</select>
+					{/if}
+				</div>
+			{/if}
+
+			{#if creating}
+				<form
+					class="create-form"
+					onsubmit={(event) => {
+						event.preventDefault();
+						void createProject();
+					}}
+				>
+					<label class="field-label" for="new-project-name">New project name</label>
+					<input
+						id="new-project-name"
+						class="field-control"
+						maxlength={projectLimits.nameLength}
+						placeholder="e.g. Portfolio site"
+						bind:this={newNameInput}
+						bind:value={newName}
+						onkeydown={(event) => event.key === 'Escape' && (creating = false)}
+					/>
+					<div class="actions">
+						<button type="submit" class="primary" disabled={busy || !newName.trim()}>Create</button>
+						<button type="button" onclick={() => (creating = false)}>Cancel</button>
+					</div>
+				</form>
+			{/if}
+
+			<ul class="project-list" aria-label="Projects">
+				{#each visible as project (project.id)}
+					<li class="project-row">
+						<button
+							type="button"
+							class="project-item"
+							class:selected={selected && project.id === selected.id}
+							aria-current={selected && project.id === selected.id ? 'true' : undefined}
+							data-testid="project-item"
+							onclick={() => (selectedId = project.id)}
+							ondblclick={() => void openProject(project)}
+							onkeydown={(event) => rowKeydown(event, project)}
+							{@attach contextMenu.attach(() => rowEntries(project))}
+						>
+							<strong>
+								{project.name}
+								{#if project.id === activeId}<span class="badge active">Open</span>{/if}
+							</strong>
+							<small class="path">{project.path || 'No folder chosen'}</small>
+							<small>
+								{project.pageCount}
+								{project.pageCount === 1 ? 'page' : 'pages'} · {project.compositeCount}
+								{project.compositeCount === 1 ? 'composite' : 'composites'}
+								{#if isAdmin && project.ownerId !== userId}
+									· <span class="badge owner">{project.ownerName}</span>
+								{/if}
+							</small>
+						</button>
+						<button
+							type="button"
+							class="row-menu"
+							aria-label="Actions for {project.name}"
+							aria-haspopup="menu"
+							onclick={(event) => openRowMenu(event, project)}
+						>
+							⋯
+						</button>
+					</li>
+				{:else}
+					<li class="list-empty">
+						{data.projects.length === 0 ? 'No projects yet.' : 'No project matches your search.'}
+					</li>
+				{/each}
+			</ul>
+			<div class="actions">
+				<button
+					type="button"
+					data-testid="new-project"
+					disabled={!canCreate || busy}
+					onclick={openCreate}
+				>
+					New
+				</button>
+				<button
+					type="button"
+					disabled={!canCreate || busy || !selected}
+					onclick={() => selected && duplicateProject(selected)}
+				>
+					Duplicate
+				</button>
+				<button
+					type="button"
+					class="danger"
+					disabled={!canEdit || busy || !selected}
+					onclick={() => selected && askDelete(selected)}
+				>
+					Delete
+				</button>
+			</div>
+		</aside>
+
+		<section class="canvas-panel" aria-label="Project overview">
 			<div class="canvas-toolbar">
 				<div class="canvas-label">
 					<span class="live-dot" aria-hidden="true"></span>
-					<span>{isPreview ? 'Live preview' : 'Page overview'}</span>
-					{#if selected}<span class="canvas-path">/{selected.slug}</span>{/if}
+					<span>Project overview</span>
+					{#if selected}<span class="canvas-path">{selected.name}</span>{/if}
 				</div>
-				{#if selected && !isPreview}
-					<a class="edit-link" href="{resolve('/editor')}?page={selected.id}">Edit this page →</a>
+				{#if selected && !isActive}
+					<button
+						type="button"
+						class="link-button"
+						disabled={busy}
+						onclick={() => void openProject(selected)}
+					>
+						Open this project →
+					</button>
+				{:else if selected}
+					<a class="edit-link" href={resolve('/pages')}>Open pages →</a>
 				{/if}
 			</div>
 			<div class="canvas-stage">
-				{#if selected}
-					<PageView
-						page={selected}
-						{composites}
-						theme={routePage.data.siteTheme}
-						interactive={isPreview}
-						onlink={followLink}
-					/>
+				{#if !selected}
+					<div class="empty-state" data-testid="projects-empty">
+						<h3>Create your first project</h3>
+						<p>
+							A project bundles the pages, reusable composites, theme and SvelteKit folder of one
+							website. New projects start empty – every widget is available right away.
+						</p>
+						<button type="button" class="primary-action" disabled={!canCreate} onclick={openCreate}>
+							New project
+						</button>
+					</div>
+				{:else}
+					<article class="overview" data-testid="project-overview">
+						<header>
+							<h3>{selected.name}</h3>
+							{#if isActive}<span class="badge active">Open</span>{/if}
+							{#if !isOwn}<span class="badge owner">Owner: {selected.ownerName}</span>{/if}
+						</header>
+						{#if selected.description}<p class="description">{selected.description}</p>{/if}
+
+						<dl class="facts">
+							<div>
+								<dt>Pages</dt>
+								<dd>{selected.pageCount}</dd>
+							</div>
+							<div>
+								<dt>Composites</dt>
+								<dd>{selected.compositeCount}</dd>
+							</div>
+							<div>
+								<dt>Last change</dt>
+								<dd>{formatTimestamp(selected.updatedAt)}</dd>
+							</div>
+							<div>
+								<dt>Created</dt>
+								<dd>{formatTimestamp(selected.createdAt)}</dd>
+							</div>
+							<div class="wide">
+								<dt>SvelteKit folder</dt>
+								<dd class="mono">{selected.path || '— not set —'}</dd>
+							</div>
+							<div class="wide">
+								<dt>Theme</dt>
+								<dd class="theme-line">
+									<span class="swatch" style:background={selected.theme.primary} aria-hidden="true"
+									></span>
+									<span
+										class="swatch"
+										style:background={selected.theme.secondary}
+										aria-hidden="true"
+									></span>
+									{themeSummary(selected)}
+								</dd>
+							</div>
+						</dl>
+
+						{#if selected.pageCount === 0}
+							<div class="callout" data-testid="project-empty-callout">
+								<strong>This project is empty.</strong>
+								<span>
+									It has no pages and no composites yet – only the widgets. Add the first page to
+									start building.
+								</span>
+							</div>
+						{/if}
+
+						<h4>Getting started</h4>
+						<ul class="checklist">
+							{#each checklist as item (item.label)}
+								<li class:done={item.done}>
+									<span aria-hidden="true">{item.done ? '✔' : '○'}</span>
+									{item.label}
+								</li>
+							{/each}
+						</ul>
+
+						<div class="shortcuts">
+							<button
+								type="button"
+								class="primary-action"
+								disabled={busy}
+								onclick={() => void openProject(selected, resolve('/pages'))}
+							>
+								{selected.pageCount === 0 ? 'Add the first page' : 'Open pages'}
+							</button>
+							<button
+								type="button"
+								disabled={busy || selected.pageCount === 0}
+								onclick={() => void openProject(selected, resolve('/editor'))}
+							>
+								Open editor
+							</button>
+							<button
+								type="button"
+								disabled={busy}
+								onclick={() => void openProject(selected, resolve('/composites'))}
+							>
+								Composites
+							</button>
+							<button
+								type="button"
+								disabled={busy}
+								onclick={() => void openProject(selected, resolve('/theme'))}
+							>
+								Edit theme
+							</button>
+						</div>
+					</article>
 				{/if}
 			</div>
 			<p class="canvas-footnote">
-				{selected ? `${selected.width} × ${selected.height} px` : ''}
-				{#if routeError}<span class="route-error" role="alert"> · {routeError}</span>{/if}
+				Projects are private: you only see your own{isAdmin
+					? ' – and, as an admin, everybody’s'
+					: ''}.
 			</p>
 		</section>
 
-		{#if !isPreview}
-			<aside class="inspector-panel" aria-label="Page settings">
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">MAKE IT YOURS</p>
-						<h2>Page settings</h2>
-					</div>
+		<aside class="inspector-panel" aria-label="Project settings">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">MAKE IT YOURS</p>
+					<h2>Project settings</h2>
 				</div>
-				{#if selected}
-					<div class="inspector-content">
-						<label class="field-label" for="page-name">Name</label>
+			</div>
+			{#if selected}
+				<fieldset class="inspector-content" disabled={!canEdit}>
+					<label class="field-label" for="project-name">Name</label>
+					<input
+						id="project-name"
+						class="field-control"
+						maxlength={projectLimits.nameLength}
+						bind:this={nameInput}
+						bind:value={draft.name}
+					/>
+					<label class="field-label" for="project-description">Description</label>
+					<textarea
+						id="project-description"
+						class="field-control"
+						rows="3"
+						maxlength={projectLimits.descriptionLength}
+						placeholder="What is this site for?"
+						bind:value={draft.description}></textarea>
+
+					<label class="field-label" for="project-path">SvelteKit folder</label>
+					<div class="project-input-row">
 						<input
-							id="page-name"
+							id="project-path"
 							class="field-control"
-							maxlength="40"
-							bind:value={selected.name}
-							oninput={touch}
-							onchange={commitName}
+							placeholder="/home/me/my-app"
+							maxlength={projectLimits.pathLength}
+							bind:value={draft.path}
 						/>
-						<label class="field-label" for="page-slug">Route</label>
-						<div class="slug">
-							<span aria-hidden="true">/</span>
-							<input
-								id="page-slug"
-								class="field-control"
-								maxlength="40"
-								bind:value={selected.slug}
-								onfocus={() => (slugBeforeEdit = selected.slug)}
-								onchange={commitSlug}
-							/>
+						{#if canUseFolders}
+							<button type="button" class="browse-button" onclick={() => (showPicker = true)}>
+								Browse…
+							</button>
+						{/if}
+					</div>
+					<p class="folder-badge {folderBadge[folderState].tone}" data-testid="folder-state">
+						{folderBadge[folderState].text}
+					</p>
+					<DirectoryPickerModal
+						open={showPicker}
+						initialPath={draft.path}
+						onselect={(path) => (draft.path = path)}
+						onclose={() => (showPicker = false)}
+					/>
+
+					<div class="actions settings-actions">
+						<button type="button" class="primary" disabled={busy || !dirty} onclick={saveSettings}>
+							Save settings
+						</button>
+						<button
+							type="button"
+							disabled={!dirty}
+							onclick={() =>
+								selected &&
+								(draft = {
+									name: selected.name,
+									description: selected.description,
+									path: selected.path
+								})}
+						>
+							Revert
+						</button>
+					</div>
+				</fieldset>
+
+				{#if canUseFolders}
+					<div class="inspector-content project-section">
+						<span class="field-label">Export &amp; import</span>
+						<p class="panel-hint">
+							<strong>Create SvelteKit app</strong> sets up a complete app in an empty folder (it is
+							created if missing). <strong>Export</strong> writes the pages, composites, theme and
+							widgets of this project into the folder; <strong>Import</strong> reads pages the editor
+							exported earlier and merges them in.
+						</p>
+						{#if !isActive}
+							<p class="panel-hint note">
+								Open this project first – export and import work on the open project.
+							</p>
+						{/if}
+						<div class="actions folder-actions">
+							<button
+								type="button"
+								disabled={busy || !isActive || !draft.path.trim() || selected.pageCount === 0}
+								onclick={() => folderRequest('Exporting…', { action: 'export' })}
+							>
+								Export
+							</button>
+							<button
+								type="button"
+								disabled={busy || !isActive || !draft.path.trim()}
+								onclick={() => folderRequest('Importing…', { action: 'import' })}
+							>
+								Import
+							</button>
+							<button
+								type="button"
+								data-testid="create-project"
+								disabled={busy || !isActive || !draft.path.trim()}
+								onclick={() =>
+									folderRequest(
+										installDependencies ? 'Creating app and installing…' : 'Creating app…',
+										{ action: 'create', install: installDependencies }
+									)}
+							>
+								Create SvelteKit app
+							</button>
 						</div>
-						<label class="field-label" for="canvas-size">Canvas size</label>
-						<CanvasSizePicker
-							id="canvas-size"
-							bind:width={selected.width}
-							bind:height={selected.height}
-							onchange={touch}
-						/>
-						<div class="position-fields">
-							<div>
-								<label class="field-label" for="canvas-width">Width (px)</label>
-								<input
-									id="canvas-width"
-									class="field-control"
-									type="number"
-									min={canvasLimits.minWidth}
-									max={canvasLimits.maxWidth}
-									step="10"
-									bind:value={selected.width}
-									onchange={() => clampSize('width')}
-								/>
-							</div>
-							<div>
-								<label class="field-label" for="canvas-height">Min height (px)</label>
-								<input
-									id="canvas-height"
-									class="field-control"
-									type="number"
-									min={canvasLimits.minHeight}
-									max={canvasLimits.maxHeight}
-									step="10"
-									bind:value={selected.height}
-									onchange={() => clampSize('height')}
-								/>
-							</div>
-						</div>
+						<label class="install-option">
+							<input type="checkbox" bind:checked={installDependencies} />
+							<span>Run <code>npm install</code> after creating (slow, needs network)</span>
+						</label>
+						{#if folderMessage}
+							<p class="panel-hint" role="status" data-testid="folder-message">{folderMessage}</p>
+							<ul class="project-details">
+								{#each folderDetails as line (line)}<li>{line}</li>{/each}
+							</ul>
+						{/if}
 					</div>
 				{/if}
 
-				<div class="inspector-content project-section">
-					<span class="field-label">SvelteKit project folder</span>
-					<p class="panel-hint">
-						<strong>Create new project</strong> sets up a complete SvelteKit app in an empty folder
-						(it is created if missing). Export writes
-						<code>src/routes/&lt;route&gt;/+page.svelte</code>
-						and
-						<code>src/lib/components/editor/*.svelte</code>. Import reads the pages the editor
-						exported.
-					</p>
-					<label class="field-label" for="project-root">Project path</label>
-					<div class="project-input-row">
-						<input
-							id="project-root"
-							class="field-control"
-							placeholder="/home/me/my-app"
-							maxlength="500"
-							bind:value={projectRoot}
-						/>
-						<button type="button" class="browse-button" onclick={() => (showPickerModal = true)}>
-							Browse…
-						</button>
+				{#if canEdit}
+					<div class="inspector-content project-section danger-zone">
+						<span class="field-label">Danger zone</span>
+						{#if !deleteOpen}
+							<button type="button" class="danger-button" onclick={() => askDelete(selected)}>
+								Delete project…
+							</button>
+						{:else}
+							<p class="panel-hint">
+								This deletes <strong>{selected.name}</strong> with its pages, composites and widget edits.
+								Files in the SvelteKit folder stay. Type the project name to confirm.
+							</p>
+							<input
+								class="field-control"
+								aria-label="Type the project name to confirm"
+								bind:value={deleteText}
+								autocomplete="off"
+							/>
+							<div class="actions">
+								<button
+									type="button"
+									class="danger-button solid"
+									data-testid="confirm-delete"
+									disabled={busy || deleteText.trim() !== selected.name}
+									onclick={deleteProject}
+								>
+									Delete forever
+								</button>
+								<button type="button" onclick={() => (deleteOpen = false)}>Cancel</button>
+							</div>
+						{/if}
 					</div>
-					<DirectoryPickerModal
-						open={showPickerModal}
-						initialPath={projectRoot}
-						onselect={(path) => {
-							projectRoot = path;
-							localStorage.setItem('editor-project-root', path);
-						}}
-						onclose={() => (showPickerModal = false)}
-					/>
-					<div class="actions">
-						<button
-							type="button"
-							disabled={busy || !projectRoot.trim() || pages.length === 0}
-							onclick={exportProject}
-						>
-							Export
-						</button>
-						<button type="button" disabled={busy || !projectRoot.trim()} onclick={importProject}>
-							Import
-						</button>
-						<button
-							type="button"
-							data-testid="create-project"
-							disabled={busy || !projectRoot.trim()}
-							onclick={createNewProject}
-						>
-							Create new project
-						</button>
-					</div>
-					<label class="install-option">
-						<input type="checkbox" bind:checked={installDependencies} />
-						Run <code>npm install</code> after creating (slow, needs network)
-					</label>
-					{#if projectMessage}
-						<p class="panel-hint" role="status">{projectMessage}</p>
-						<ul class="project-details">
-							{#each projectDetails as line (line)}<li>{line}</li>{/each}
-						</ul>
-					{/if}
-				</div>
-			</aside>
-		{/if}
+				{/if}
+			{:else}
+				<p class="panel-hint">Select or create a project to edit its settings.</p>
+			{/if}
+		</aside>
 	</div>
 </div>
 
@@ -732,6 +916,11 @@
 		line-height: 1.55;
 	}
 
+	.panel-hint.note {
+		margin: 0 0 0.7rem;
+		color: #8a5a00;
+	}
+
 	.canvas-panel {
 		display: flex;
 		min-width: 0;
@@ -752,6 +941,8 @@
 	}
 
 	.canvas-label {
+		display: flex;
+		align-items: center;
 		gap: 0.5rem;
 	}
 
@@ -765,18 +956,19 @@
 		font-weight: 500;
 	}
 
+	.live-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: #69c89d;
+	}
+
 	.field-label {
 		display: block;
 		margin: 0.85rem 0 0.4rem;
 		color: #686a80;
 		font-size: 0.67rem;
 		font-weight: 650;
-	}
-
-	.position-fields {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.15rem 0.6rem;
 	}
 
 	.field-control {
@@ -791,6 +983,11 @@
 		font: inherit;
 		font-size: 0.7rem;
 		outline: none;
+		box-sizing: border-box;
+	}
+
+	textarea.field-control {
+		resize: vertical;
 	}
 
 	.field-control:focus {
@@ -798,29 +995,38 @@
 		box-shadow: 0 0 0 3px rgb(119 102 223 / 12%);
 	}
 
-	.canvas-label {
-		display: flex;
-		align-items: center;
-	}
-
-	.live-dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		background: #69c89d;
-	}
-
-	.actions button:disabled {
-		cursor: not-allowed;
-		opacity: 0.5;
-	}
-
 	h2,
 	p {
 		margin-top: 0;
 	}
 
-	.page-list {
+	.eyebrow {
+		margin-bottom: 0.15rem;
+		color: var(--muted);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+	}
+
+	.filters {
+		display: grid;
+		gap: 0.35rem;
+		margin-bottom: 0.7rem;
+	}
+
+	.create-form {
+		margin-bottom: 0.7rem;
+		padding: 0.2rem 0.7rem 0.7rem;
+		border: 1px dashed #c9c1ff;
+		border-radius: 10px;
+		background: #faf9ff;
+	}
+
+	.create-form .actions {
+		margin-top: 0.5rem;
+	}
+
+	.project-list {
 		list-style: none;
 		margin: 0 0 0.6rem;
 		padding: 0;
@@ -832,30 +1038,94 @@
 		overflow-y: auto;
 	}
 
-	.page-item {
+	.project-row {
+		position: relative;
+	}
+
+	.project-item {
 		width: 100%;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
 		gap: 0.1rem;
-		padding: 0.6rem 0.7rem;
+		padding: 0.6rem 2.2rem 0.6rem 0.7rem;
 		border: 1px solid var(--line);
 		border-radius: 10px;
 		background: #fff;
 		color: var(--ink);
 		font: inherit;
 		font-size: 0.78rem;
+		text-align: left;
 		cursor: pointer;
 	}
 
-	.page-item small {
+	.project-item small {
 		color: var(--muted);
 		font-size: 0.65rem;
 	}
 
-	.page-item.active {
+	.project-item .path {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.project-item.selected {
 		border-color: #c9c1ff;
 		background: #faf9ff;
+	}
+
+	.project-item:focus-visible,
+	.row-menu:focus-visible {
+		outline: 2px solid var(--purple);
+		outline-offset: 2px;
+	}
+
+	.row-menu {
+		position: absolute;
+		top: 0.4rem;
+		right: 0.4rem;
+		width: 26px;
+		height: 26px;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: var(--muted);
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.row-menu:hover {
+		background: #eeeaff;
+		color: var(--purple);
+	}
+
+	.list-empty {
+		padding: 0.8rem 0.3rem;
+		color: var(--muted);
+		font-size: 0.72rem;
+	}
+
+	.badge {
+		display: inline-block;
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		font-size: 0.58rem;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		vertical-align: middle;
+	}
+
+	.badge.active {
+		background: #e3f6ec;
+		color: #217a4d;
+	}
+
+	.badge.owner {
+		background: #eeeaff;
+		color: var(--purple);
 	}
 
 	.actions {
@@ -863,7 +1133,8 @@
 		gap: 0.35rem;
 	}
 
-	.actions button {
+	.actions button,
+	.shortcuts button {
 		flex: 1;
 		min-height: 34px;
 		border: 1px solid #e6e3f5;
@@ -876,50 +1147,40 @@
 		cursor: pointer;
 	}
 
+	.actions button.primary {
+		border-color: var(--purple);
+		background: var(--purple);
+		color: #fff;
+	}
+
 	.actions .danger {
 		color: #b3261e;
 	}
 
-	.slug {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
+	.actions button:disabled,
+	.shortcuts button:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
 	}
 
-	.edit-link {
-		color: #7a70c4;
-		font-size: 0.72rem;
-		font-weight: 650;
+	.folder-actions {
+		flex-wrap: wrap;
 	}
 
-	.canvas-stage {
-		display: flex;
-		min-height: 520px;
-		flex: 1;
-		align-items: flex-start;
-		justify-content: center;
-		padding: 1.2rem;
-		overflow: auto;
-		border: 1px solid #ebebf1;
-		border-radius: 12px;
-		background-color: #efeff4;
-		background-image: radial-gradient(#d8d8e2 0.7px, transparent 0.7px);
-		background-size: 14px 14px;
+	.folder-actions button {
+		flex: 1 1 auto;
+		padding: 0 0.7rem;
 	}
 
-	.workspace.preview-mode {
-		grid-template-columns: minmax(0, 1fr);
+	.settings-actions {
+		margin-top: 0.9rem;
 	}
 
-	.route-error {
-		color: #c0392b;
-	}
-
-	.canvas-footnote {
-		margin: 0.7rem 0 0;
-		color: #999aab;
-		font-size: 0.66rem;
-		text-align: center;
+	.inspector-content {
+		min-width: 0;
+		margin: 0;
+		padding: 0;
+		border: 0;
 	}
 
 	.project-section {
@@ -953,15 +1214,30 @@
 		background: #faf9ff;
 	}
 
-	.project-section .actions {
-		margin-top: 0.7rem;
+	.folder-badge {
+		margin: 0.4rem 0 0;
+		font-size: 0.66rem;
+		line-height: 1.4;
+	}
+
+	.folder-badge.muted {
+		color: var(--muted);
+	}
+
+	.folder-badge.ok {
+		color: #217a4d;
+	}
+
+	.folder-badge.warn {
+		color: #8a5a00;
 	}
 
 	.install-option {
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
-		font-size: 0.8rem;
+		margin-top: 0.6rem;
+		font-size: 0.74rem;
 	}
 
 	.project-details {
@@ -971,6 +1247,238 @@
 		font-size: 0.62rem;
 		line-height: 1.6;
 		overflow-wrap: anywhere;
+	}
+
+	.danger-button {
+		min-height: 34px;
+		padding: 0 0.9rem;
+		border: 1px solid #f1c7c3;
+		border-radius: 8px;
+		background: #fff;
+		color: #b3261e;
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.danger-button.solid {
+		border-color: #b3261e;
+		background: #b3261e;
+		color: #fff;
+	}
+
+	.danger-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+
+	.link-button,
+	.edit-link {
+		border: 0;
+		background: transparent;
+		color: #7a70c4;
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 650;
+		cursor: pointer;
+	}
+
+	.canvas-stage {
+		display: flex;
+		min-height: 520px;
+		flex: 1;
+		align-items: flex-start;
+		justify-content: center;
+		padding: 1.2rem;
+		overflow: auto;
+		border: 1px solid #ebebf1;
+		border-radius: 12px;
+		background-color: #efeff4;
+		background-image: radial-gradient(#d8d8e2 0.7px, transparent 0.7px);
+		background-size: 14px 14px;
+	}
+
+	.canvas-footnote {
+		margin: 0.7rem 0 0;
+		color: #999aab;
+		font-size: 0.66rem;
+		text-align: center;
+	}
+
+	.overview {
+		width: min(100%, 34rem);
+		padding: 1.4rem 1.5rem;
+		border: 1px solid #ebebf1;
+		border-radius: 14px;
+		background: #fff;
+		box-shadow: 0 8px 28px rgb(32 35 58 / 6%);
+	}
+
+	.overview header {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.overview h3 {
+		margin: 0;
+		font-size: 1.15rem;
+		letter-spacing: -0.02em;
+		overflow-wrap: anywhere;
+	}
+
+	.overview h4 {
+		margin: 1.2rem 0 0.4rem;
+		font-size: 0.78rem;
+	}
+
+	.description {
+		margin: 0.5rem 0 0;
+		color: #65677e;
+		font-size: 0.78rem;
+		line-height: 1.55;
+	}
+
+	.facts {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.7rem 1rem;
+		margin: 1.1rem 0 0;
+	}
+
+	.facts .wide {
+		grid-column: 1 / -1;
+	}
+
+	.facts dt {
+		color: var(--muted);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+	}
+
+	.facts dd {
+		margin: 0.15rem 0 0;
+		font-size: 0.8rem;
+		overflow-wrap: anywhere;
+	}
+
+	.mono {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 0.74rem;
+	}
+
+	.theme-line {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.swatch {
+		width: 14px;
+		height: 14px;
+		border: 1px solid rgb(0 0 0 / 12%);
+		border-radius: 50%;
+	}
+
+	.callout {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		margin-top: 1.1rem;
+		padding: 0.7rem 0.9rem;
+		border: 1px solid #ddd8ff;
+		border-radius: 10px;
+		background: #faf9ff;
+		color: #4b456f;
+		font-size: 0.76rem;
+		line-height: 1.5;
+	}
+
+	.checklist {
+		display: grid;
+		gap: 0.3rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: 0.76rem;
+	}
+
+	.checklist li {
+		color: #65677e;
+	}
+
+	.checklist li.done {
+		color: #217a4d;
+	}
+
+	.shortcuts {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin-top: 1.3rem;
+	}
+
+	.shortcuts button {
+		flex: 0 1 auto;
+		padding: 0 0.9rem;
+	}
+
+	.shortcuts .primary-action {
+		border: 0;
+		background: var(--purple);
+		color: #fff;
+	}
+
+	.empty-state {
+		display: flex;
+		max-width: 26rem;
+		flex-direction: column;
+		align-items: center;
+		align-self: center;
+		gap: 0.2rem;
+		padding: 2rem 1.5rem;
+		border: 1px dashed #d4cff3;
+		border-radius: 14px;
+		background: #fff;
+		color: #65677e;
+		text-align: center;
+	}
+
+	.empty-state h3 {
+		margin: 0;
+		color: var(--ink);
+		font-size: 1rem;
+	}
+
+	.empty-state p {
+		margin: 0.2rem 0 0.9rem;
+		font-size: 0.76rem;
+		line-height: 1.55;
+	}
+
+	.primary-action {
+		display: inline-flex;
+		min-height: 36px;
+		align-items: center;
+		padding: 0 1.1rem;
+		border: 0;
+		border-radius: 9px;
+		background: var(--purple);
+		color: #fff;
+		font: inherit;
+		font-size: 0.76rem;
+		font-weight: 700;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.primary-action:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
 	}
 
 	@media (max-width: 1050px) {

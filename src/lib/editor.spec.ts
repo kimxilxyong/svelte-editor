@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { blockColorStyle, blockLimits, isValidLinkHref, parseBuilderBlocks } from './editor.js';
+import {
+	blockColorStyle,
+	blockLimits,
+	isValidLinkHref,
+	parseBuilderBlocks,
+	parseEditorSite
+} from './editor.js';
 
 const base = {
 	id: 'a',
@@ -90,5 +96,29 @@ describe('isValidLinkHref', () => {
 		]) {
 			expect(isValidLinkHref(href), href).toBe(false);
 		}
+	});
+});
+
+describe('parseEditorSite', () => {
+	it('accepts a new project without pages and composites', () => {
+		expect(parseEditorSite({ pages: [], composites: [] })).toEqual({ pages: [], composites: [] });
+		expect(parseEditorSite({ pages: [] })).toEqual({ pages: [], composites: [] });
+	});
+
+	it('still rejects non-arrays and more than 20 pages', () => {
+		expect(parseEditorSite({})).toBeNull();
+		expect(parseEditorSite({ pages: 'x' })).toBeNull();
+		const page = (i: number) => ({
+			id: `p${i}`,
+			name: `P${i}`,
+			slug: `p${i}`,
+			width: 800,
+			height: 600,
+			blocks: []
+		});
+		expect(parseEditorSite({ pages: Array.from({ length: 21 }, (_, i) => page(i)) })).toBeNull();
+		expect(
+			parseEditorSite({ pages: Array.from({ length: 20 }, (_, i) => page(i)) })
+		).not.toBeNull();
 	});
 });

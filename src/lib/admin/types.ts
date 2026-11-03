@@ -20,11 +20,11 @@ export type DatabaseFormValues = {
 	dataMode: DataMode;
 };
 
-/** Outcome of the "Test connection" / "Switch backend" actions. */
+/** Outcome of the "Test connection" / "Switch backend" / "Create tables" actions. */
 export type DatabaseFeedback = {
 	section: 'database';
 	/** Which button was pressed. */
-	action: 'testConnection' | 'switch';
+	action: 'testConnection' | 'switch' | 'createTables';
 	ok: boolean;
 	/** Scrubbed, user-presentable error (never contains credentials or stack traces). */
 	error?: string;

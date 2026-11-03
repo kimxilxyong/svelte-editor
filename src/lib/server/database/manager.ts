@@ -12,7 +12,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseConfig, SqlClient, SqlParam, SqlRow } from './types.js';
-import { copyOrder, ensureSchema } from './schema.js';
+import { copyOrder, ensureSchema, recreateSchema } from './schema.js';
 import { openPostgresClient } from './postgres-client.js';
 import { openSqliteClient } from './sqlite-client.js';
 
@@ -26,7 +26,8 @@ export type BackendInfo = {
 	source: BackendConfigSource;
 	serverVersion?: string;
 	userCount: number;
-	pageSaved: boolean;
+	/** Number of projects stored on the backend. */
+	projectCount: number;
 };
 
 /** Public result from a connection test. It intentionally contains no connection URL. */
@@ -334,10 +335,10 @@ export async function describeActiveBackend(): Promise<BackendInfo> {
 	const client = await getDatabase();
 	const config = activeConfig ?? (await resolveConfig()).config;
 	const source = activeSource ?? (await resolveConfig()).source;
-	const [serverVersion, counts, savedPage] = await Promise.all([
+	const [serverVersion, counts, projects] = await Promise.all([
 		queryVersion(client),
 		readCounts(client),
-		client.get<SqlRow>("SELECT id FROM editor_page WHERE id IN ('site', 'home') LIMIT 1")
+		client.get<SqlRow>('SELECT CAST(COUNT(*) AS INTEGER) AS count FROM projects')
 	]);
 	return {
 		backend: config.backend,
@@ -345,7 +346,7 @@ export async function describeActiveBackend(): Promise<BackendInfo> {
 		source,
 		serverVersion,
 		userCount: counts.userCount,
-		pageSaved: savedPage !== undefined
+		projectCount: Number(projects?.count ?? 0)
 	};
 }
 
@@ -520,6 +521,28 @@ export function switchBackend(
 	options: DatabaseSwitchOptions
 ): Promise<DatabaseSwitchResult> {
 	const operation = switchQueue.then(() => performSwitch(config, options));
+	switchQueue = operation.then(
+		() => undefined,
+		() => undefined
+	);
+	return operation;
+}
+
+/**
+ * Deletes every application table of the **active** backend and creates them again, empty
+ * ("Create Tables" on `/admin`). All users, sessions, settings, audit entries and projects are
+ * erased, so the next visitor has to run the first-run setup. Widget overrides and project folders
+ * on disk are not touched.
+ *
+ * Runs after any switch that is in progress and before the next one starts.
+ *
+ * @returns A promise that resolves after the empty schema exists.
+ * @throws {Error} If the active database cannot be opened or altered.
+ * @example
+ * await resetDatabase();
+ */
+export async function resetDatabase(): Promise<void> {
+	const operation = switchQueue.then(async () => recreateSchema(await getDatabase()));
 	switchQueue = operation.then(
 		() => undefined,
 		() => undefined

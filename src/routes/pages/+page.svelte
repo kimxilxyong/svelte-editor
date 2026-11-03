@@ -566,6 +566,14 @@
 		font-weight: 700;
 	}
 
+	.eyebrow {
+		margin-bottom: 0.15rem;
+		color: var(--muted);
+		font-size: 0.6rem;
+		font-weight: 700;
+		letter-spacing: 0.08em;
+	}
+
 	.panel-hint {
 		margin: 0.8rem 0 1.15rem;
 		color: var(--muted);

@@ -7,6 +7,8 @@
 	 * - `beforeNavigate` asks for confirmation when the active route reports unsaved changes
 	 *   and the navigation would leave that route (page switches inside the editor are fine).
 	 *
+	 * It reloads the widget overrides of the active project whenever the project changes.
+	 *
 	 * It also creates the one app-wide right-click menu ({@link ContextMenu}), shares it through
 	 * context (`useContextMenu()`) and renders it once, so any route can offer context-aware
 	 * actions without mounting its own menu.
@@ -22,16 +24,21 @@
 	import { loadWidgetOverrides } from '../lib/widget-runtime.svelte.js';
 	import './layout.css';
 
-	let { children }: LayoutProps = $props();
+	let { children, data }: LayoutProps = $props();
 
 	const contextMenu = new ContextMenu();
 	provideContextMenu(contextMenu);
 
-	// Edited built-in widgets (Components page) are compiled in the browser for canvas/preview.
 	onMount(() => {
 		// Marks the document as interactive: E2E tests wait for it, because clicks and drops made
 		// on the server-rendered markup before hydration are silently ignored.
 		document.documentElement.dataset.hydrated = 'true';
+	});
+
+	// Edited built-in widgets belong to the active project and are compiled in the browser for
+	// canvas/preview, so they are (re)loaded whenever another project becomes active.
+	$effect(() => {
+		void data.project?.id;
 		void loadWidgetOverrides();
 	});
 

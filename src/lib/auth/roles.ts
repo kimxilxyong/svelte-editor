@@ -7,7 +7,7 @@
  * ## Roles (ascending privilege; each role includes everything below it)
  * | role        | may                                                                              |
  * |-------------|----------------------------------------------------------------------------------|
- * | `guest`     | sign in, view pages and previews (read-only), manage own account                  |
+ * | `guest`     | sign in, view their own projects, pages and previews (read-only), manage own account |
  * | `user`      | additionally edit & save pages in the page builder                                |
  * | `poweruser` | additionally use the component (source) editor and project export/import, i.e. work with server files |
  * | `admin`     | additionally open `/admin`: database backend, authentication settings, user management |
@@ -100,7 +100,11 @@ export const accessRules: readonly AccessRule[] = [
 	{ prefix: '/component-editor', read: 'poweruser' },
 	{ prefix: '/editor/api/project', read: 'poweruser' },
 	{ prefix: '/editor/api/fs', read: 'poweruser' },
-	// Saved site: everybody signed-in may read it, editors may change it.
+	// Projects (list, open, create, edit, delete): signed-in users read, editors change. The API itself
+	// restricts every project to its owner (admins: all); see `server/project-store.ts`.
+	{ prefix: '/projects/api', read: 'guest', write: 'user' },
+	{ prefix: '/pages', read: 'guest' },
+	// Saved site of the active project: everybody signed-in may read it, editors may change it.
 	{ prefix: '/editor/api', read: 'guest', write: 'user' },
 	{ prefix: '/editor', read: 'user' },
 	{ prefix: '/composites', read: 'user' },

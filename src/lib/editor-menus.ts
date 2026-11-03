@@ -1,6 +1,6 @@
 /**
- * @fileoverview Builders for the right-click menus used by the Pages overview (`/`) and the
- * shared visual editor (`/editor`, `/composites`).
+ * @fileoverview Builders for the right-click menus used by the Projects page (`/`), the Pages
+ * overview (`/pages`) and the shared visual editor (`/editor`, `/composites`).
  *
  * Each builder is a **pure function**: it receives the current state plus the callbacks to run
  * and returns entries for the {@link ContextMenu} controller (`context-menu.svelte.ts`). Keeping
@@ -11,6 +11,8 @@
  *
  * | Target                       | Builder              | Typical entries                       |
  * | ---------------------------- | -------------------- | ------------------------------------- |
+ * | A project row                | {@link projectItemMenu} | Open, Pages, Editor, Rename, Duplicate, Delete |
+ * | The project list background  | {@link projectListMenu} | New project, Reload                |
  * | A page row                   | {@link pageItemMenu} | Edit, Preview, Duplicate, Delete      |
  * | The page list background     | {@link pageListMenu} | Add, Save, Reload, Open composites    |
  * | The page preview             | {@link pagePreviewMenu} | Edit, Preview, Save                |
@@ -307,5 +309,88 @@ export function paletteItemMenu(options: PaletteItemMenuOptions): MenuEntryInput
 			label: `Edit composite “${options.compositeName}”`,
 			run: options.editComposite
 		}
+	];
+}
+
+/** Callbacks and state for a project row of the Projects page. */
+export interface ProjectItemMenuOptions {
+	/** Display name, used in labels. */
+	name: string;
+	/** The project is already the active one (Open is then pointless). */
+	isActive: boolean;
+	/** Another project may be created (per-user limit not reached). */
+	canDuplicate: boolean;
+	/** The viewer may change projects (not a read-only guest). */
+	canEdit: boolean;
+	/** A SvelteKit folder is set, so its path can be copied. */
+	hasPath: boolean;
+	/** Makes the project active. */
+	open: () => void;
+	/** Makes the project active and opens its pages. */
+	openPages: () => void;
+	/** Makes the project active and opens the visual editor. */
+	openEditor: () => void;
+	/** Focuses the name field in the settings panel. */
+	rename: () => void;
+	duplicate: () => void;
+	copyPath: () => void;
+	/** Asks for the typed delete confirmation. */
+	remove: () => void;
+}
+
+/**
+ * Menu of a single project in the Projects list.
+ *
+ * @param options - State and callbacks, see {@link ProjectItemMenuOptions}.
+ * @returns Entries for {@link ContextMenu.show}.
+ */
+export function projectItemMenu(options: ProjectItemMenuOptions): MenuEntryInput[] {
+	return [
+		{
+			id: 'open',
+			label: options.isActive ? `“${options.name}” is open` : `Open “${options.name}”`,
+			disabled: options.isActive,
+			run: options.open
+		},
+		{ id: 'open-pages', label: 'Open pages', run: options.openPages },
+		{ id: 'open-editor', label: 'Open editor', run: options.openEditor },
+		separator,
+		{ id: 'rename', label: 'Rename…', disabled: !options.canEdit, run: options.rename },
+		{
+			id: 'duplicate',
+			label: 'Duplicate',
+			disabled: !options.canEdit || !options.canDuplicate,
+			run: options.duplicate
+		},
+		{ id: 'copy-path', label: 'Copy folder path', hidden: !options.hasPath, run: options.copyPath },
+		separator,
+		{
+			id: 'delete',
+			label: 'Delete…',
+			danger: true,
+			disabled: !options.canEdit,
+			run: options.remove
+		}
+	];
+}
+
+/** Callbacks and state for the background of the Projects list. */
+export interface ProjectListMenuOptions {
+	/** Another project may be created (per-user limit not reached) and the role may write. */
+	canAdd: boolean;
+	add: () => void;
+	reload: () => void;
+}
+
+/**
+ * Menu of the empty area of the Projects list: list-level actions.
+ *
+ * @param options - State and callbacks, see {@link ProjectListMenuOptions}.
+ * @returns Entries for {@link ContextMenu.show}.
+ */
+export function projectListMenu(options: ProjectListMenuOptions): MenuEntryInput[] {
+	return [
+		{ id: 'new-project', label: 'New project…', disabled: !options.canAdd, run: options.add },
+		{ id: 'reload', label: 'Reload projects', run: options.reload }
 	];
 }

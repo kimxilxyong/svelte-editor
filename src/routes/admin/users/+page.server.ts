@@ -15,7 +15,8 @@
  * - Passwords come from the POST body only and are never echoed back (`values` has no password).
  *
  * ## Audit (who records what)
- * `updateUser` → `user_update`, `deleteUser` → `user_delete` (recorded inside `users.ts`);
+ * `updateUser` → `user_update`, `deleteUser` → `user_delete` (recorded inside `users.ts`; it also deletes the
+ * user's projects, and this module removes their widget overrides);
  * this module records `user_create` and `password_reset`.
  */
 
@@ -41,6 +42,8 @@ import {
 	type UserPatch
 } from '../../../lib/server/auth/users.js';
 import { getDatabase } from '../../../lib/server/database/manager.js';
+import { listProjects } from '../../../lib/server/project-store.js';
+import { removeProjectWidgets } from '../../../lib/server/widget-files.js';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Short display label of a user for messages and audit targets. */
@@ -245,7 +248,12 @@ export const actions: Actions = {
 		try {
 			const db = await getDatabase();
 			const target = await getUserById(db, id);
+			const ownedProjects = await listProjects(db, { id, role: 'user' });
 			await deleteUser(db, id, actor.id);
+			// The projects went with the user; their widget overrides live on disk and go too.
+			for (const project of ownedProjects) {
+				await removeProjectWidgets(project.id).catch(() => undefined);
+			}
 			return done('delete', `Deleted ${target ? labelOf(target) : 'the user'}.`, id);
 		} catch (error) {
 			return failure('delete', error, { userId: id });

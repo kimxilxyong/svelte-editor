@@ -4,19 +4,14 @@
  * The former fixed "section" blocks (hero, text, call to action, features, image, testimonial)
  * are ordinary {@link EditorComposite}s built from widgets, so users can open and change them on
  * the visual canvas like any composite they create themselves. {@link seedComposites} provides
- * them for new sites and for the one-time data migration in `site-migration.ts`.
+ * them on demand ("Add starter composites" in an empty project); new projects start without composites.
  *
  * Geometry is in pixels relative to the composite canvas top-left corner.
  */
 
-import {
-	compositeKind,
-	type BuilderBlock,
-	type EditorComposite,
-	type WidgetKind
-} from './editor.js';
+import { type BuilderBlock, type EditorComposite, type WidgetKind } from './editor.js';
 
-/** Stable ids of the seed composites (migration maps the legacy kinds onto these names). */
+/** Stable ids and names of the seed composites. */
 export const seedCompositeNames = [
 	'Hero',
 	'TextBlock',
@@ -25,16 +20,6 @@ export const seedCompositeNames = [
 	'ImageBlock',
 	'Testimonial'
 ] as const;
-
-/** Legacy block kind (before composites existed) → name of the seed composite replacing it. */
-export const legacySectionComposites: Record<string, (typeof seedCompositeNames)[number]> = {
-	hero: 'Hero',
-	text: 'TextBlock',
-	button: 'CallToAction',
-	features: 'FeatureCards',
-	image: 'ImageBlock',
-	quote: 'Testimonial'
-};
 
 /** Creates a fully populated, positioned widget block. */
 function widget(
@@ -211,15 +196,4 @@ export function seedComposites(): EditorComposite[] {
 			]
 		}
 	];
-}
-
-/**
- * Looks up the block kind of a seed composite by its legacy section kind.
- *
- * @param legacyKind - Pre-composite kind such as `hero` or `quote`.
- * @returns `composite:<Name>`, or `undefined` when the kind was never a section.
- */
-export function legacyKindToComposite(legacyKind: string) {
-	const name = legacySectionComposites[legacyKind];
-	return name ? compositeKind(name) : undefined;
 }

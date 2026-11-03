@@ -74,6 +74,8 @@ export type CreateProjectResult = ExportResult & {
 export type CreateProjectOptions = {
 	/** Run `npm install` after writing the files (slow, needs network access). */
 	install?: boolean;
+	/** Project whose widget overrides are written into the new app. */
+	widgetProjectId?: string;
 };
 
 /**
@@ -472,7 +474,10 @@ export async function createProject(
 		await writeFile(file, content, { flag: 'wx' });
 	}
 
-	const result = await exportSite(root, site, theme, { libImportStyle: 'subpath' });
+	const result = await exportSite(root, site, theme, {
+		libImportStyle: 'subpath',
+		widgetProjectId: options.widgetProjectId
+	});
 	const written = [...Object.keys(scaffold), ...result.written];
 
 	let installed = false;

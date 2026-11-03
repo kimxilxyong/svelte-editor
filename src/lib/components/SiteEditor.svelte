@@ -10,6 +10,11 @@
 	 * `provideComposites` (see `composite-context.ts`); placing a composite inside another is
 	 * cycle-checked here and on the server.
 	 *
+	 * The editor always works on the **active project** (`/editor/api`, see `server/project-store.ts`).
+	 * A fresh project has neither pages nor composites: `hasDocuments` is then `false` and an empty
+	 * state ("Add first page", "New composite…", "Add starter composites") replaces the workspace.
+	 * Switching the project (navigation chip) reloads the site. Only the widgets are always available.
+	 *
 	 * Architecture & Features:
 	 * 1. Palette:
 	 *    - Categorized tabs: "Composites" (reusable widget groups), "Widgets" (atomic GUI
@@ -95,8 +100,8 @@
 	type ResizeDir = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 	type DragPayload = { source: 'palette'; kind: BlockKind };
 	type EditorApiResponse = {
-		created?: boolean;
-		site?: EditorSite | null;
+		project?: { id: string; name: string } | null;
+		site?: EditorSite;
 		success?: boolean;
 		error?: string;
 	};
@@ -172,47 +177,14 @@
 		})
 	) as Record<WidgetKind, BlockDefaults>;
 
-	/** The sample page shown before anything is saved: composite instances of the starters. */
-	const initialPage: EditorPage = {
-		id: 'home',
-		name: 'Home',
-		slug: 'home',
-		width: defaultCanvasSize.width,
-		height: defaultCanvasSize.height,
-		blocks: (
-			[
-				['sample-hero', 'Hero', 24, 720, 220],
-				['sample-features', 'FeatureCards', 264, 720, 260],
-				['sample-quote', 'Testimonial', 544, 720, 200]
-			] as const
-		).map(([id, name, y, width, height]) => ({
-			id,
-			kind: compositeKind(name),
-			title: '',
-			body: '',
-			action: '',
-			theme: 'light' as const,
-			positioned: true,
-			x: 24,
-			y,
-			width,
-			height,
-			value: '',
-			checked: false,
-			level: 60,
-			href: '',
-			newTab: false
-		}))
-	};
-
 	/**
 	 * The active documents keep their domain shapes: pages retain their slug and composites have
 	 * none. The untouched collection is stashed and merged back on save.
 	 */
-	const initialDocuments: EditorDocument[] = composing ? seedComposites() : [initialPage];
+	const initialDocuments: EditorDocument[] = [];
 	let documents = $state<EditorDocument[]>(initialDocuments);
-	let stashedPages = $state.raw<EditorPage[]>(composing ? [initialPage] : []);
-	let stashedComposites = $state.raw<EditorComposite[]>(composing ? [] : seedComposites());
+	let stashedPages = $state.raw<EditorPage[]>([]);
+	let stashedComposites = $state.raw<EditorComposite[]>([]);
 	/** Composites that `composite:<Name>` blocks render from (live while editing one). */
 	const composites = $derived(
 		composing
@@ -221,21 +193,36 @@
 	);
 	provideComposites(() => composites);
 
-	let currentDocumentId = $state(composing ? 'seed-hero' : 'home');
-	let currentDocument = $derived(
-		documents.find((document) => document.id === currentDocumentId) ?? documents[0]
+	let currentDocumentId = $state('');
+	/**
+	 * Stand-in while the active project has no page/composite yet. The workspace is not rendered in
+	 * that state (see `hasDocuments`), so this object is only there to keep the derived values total.
+	 */
+	const emptyDocument: EditorPage = {
+		id: '',
+		name: '',
+		slug: '',
+		width: defaultCanvasSize.width,
+		height: defaultCanvasSize.height,
+		blocks: []
+	};
+	let currentDocument = $derived<EditorDocument>(
+		documents.find((document) => document.id === currentDocumentId) ?? documents[0] ?? emptyDocument
 	);
+	/** `false` for a fresh project: the editor then shows its empty state instead of the canvas. */
+	const hasDocuments = $derived(documents.length > 0);
 	let blocks = $derived(currentDocument.blocks);
 	/** Computed CSS-pixel positions, using the declared size of the active page or composite. */
 	const blockLayout = $derived(
 		resolveBlockLayout(blocks, currentDocument.width, currentDocument.height)
 	);
-	let selectedId = $state<string | null>(composing ? 'seed-hero-0' : 'sample-hero');
-	let paletteTab = $state<PaletteTab>(composing ? 'widgets' : 'composites');
+	let selectedId = $state<string | null>(null);
+	let paletteTab = $state<PaletteTab>('widgets');
 	let isPreview = $state(false);
-	let databaseReady = $state(false);
+	/** The active project (`null` while the user has none); saving needs one. */
+	let project = $state<{ id: string; name: string } | null>(null);
 	let databaseBusy = $state(true);
-	let databaseStatus = $state('Checking database…');
+	let databaseStatus = $state('Loading project…');
 	/**
 	 * Set for `guest` users, who may view but not change the site (the server rejects their writes
 	 * as well; this only explains and disables the Save button). Read from the root layout data.
@@ -244,7 +231,7 @@
 		routePage.data.user?.role === 'guest' ? 'Read-only: your role cannot save' : undefined
 	);
 
-	let hasUnsavedChanges = $state(true);
+	let hasUnsavedChanges = $state(false);
 	const linkPages = $derived(linkPagesForMode(editorMode, documents, stashedPages));
 	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
 	useNavContext(() => ({
@@ -338,9 +325,18 @@
 		return () => clearTimeout(historyTimer);
 	});
 
+	// Another project became active (project chip): load its site instead.
+	let loadedProjectId = routePage.data.project?.id;
+	$effect(() => {
+		const id = routePage.data.project?.id;
+		if (id === loadedProjectId) return;
+		loadedProjectId = id;
+		void loadDatabaseState();
+	});
+
 	async function requestApi(
 		method: 'GET' | 'POST',
-		payload?: { action: 'create-tables' } | { action: 'save'; site: EditorSite }
+		payload?: { action: 'save'; site: EditorSite }
 	): Promise<EditorApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
@@ -362,35 +358,26 @@
 	}
 
 	function applyDatabaseState(result: EditorApiResponse) {
-		databaseReady = result.created === true;
-		if (!databaseReady) {
-			databaseStatus = 'Not saved yet · Save creates the database';
-			return;
-		}
-
-		if (result.site) {
-			// A site without composites yet: offer the starters so there is something to edit.
-			const site =
-				composing && result.site.composites.length === 0
-					? { ...result.site, composites: seedComposites() }
-					: result.site;
-			if (composing) {
-				stashedPages = site.pages;
-			} else {
-				stashedComposites = site.composites;
-			}
-			documents = editorDocumentsForMode(editorMode, site);
-			currentDocumentId =
-				documents.find((item) => item.id === routePage.url.searchParams.get(paramName))?.id ??
-				documents[0].id;
-			selectedId = currentDocument.blocks[0]?.id ?? null;
-			resetHistory();
-			hasUnsavedChanges = false;
-			databaseStatus = 'Saved site loaded from the database';
+		project = result.project ?? null;
+		const site = result.site ?? { pages: [], composites: [] };
+		if (composing) {
+			stashedPages = site.pages;
 		} else {
-			hasUnsavedChanges = true;
-			databaseStatus = 'Database ready · page not saved';
+			stashedComposites = site.composites;
 		}
+		documents = editorDocumentsForMode(editorMode, site);
+		currentDocumentId =
+			documents.find((item) => item.id === routePage.url.searchParams.get(paramName))?.id ??
+			documents[0]?.id ??
+			'';
+		selectedId = currentDocument.blocks[0]?.id ?? null;
+		resetHistory();
+		hasUnsavedChanges = false;
+		databaseStatus = !project
+			? 'No project yet · create one on the Projects page'
+			: documents.length === 0
+				? `${project.name} · no ${docLabel}s yet`
+				: `${project.name} · loaded from the database`;
 	}
 
 	async function loadDatabaseState() {
@@ -406,7 +393,7 @@
 	}
 
 	async function savePageToDatabase() {
-		if (databaseBusy || readOnlyNotice) return;
+		if (databaseBusy || readOnlyNotice || !project) return;
 
 		if (
 			documents.some((document) => document.blocks.some((block) => !isValidLinkHref(block.href)))
@@ -427,11 +414,6 @@
 		databaseStatus = 'Saving site to the database…';
 
 		try {
-			// First save on a fresh database: create the schema transparently.
-			if (!databaseReady) {
-				await requestApi('POST', { action: 'create-tables' });
-				databaseReady = true;
-			}
 			await requestApi('POST', { action: 'save', site: siteSnapshot });
 			hasUnsavedChanges = revision !== savedRevision;
 			databaseStatus = hasUnsavedChanges
@@ -447,7 +429,7 @@
 	function markUnsaved() {
 		revision += 1;
 		hasUnsavedChanges = true;
-		if (databaseReady) databaseStatus = 'Unsaved changes';
+		databaseStatus = 'Unsaved changes';
 		historyPending = true;
 		clearTimeout(historyTimer);
 		historyTimer = setTimeout(commitHistory, 350);
@@ -478,13 +460,13 @@
 	function restoreSnapshot(snapshot: string) {
 		documents = JSON.parse(snapshot) as EditorDocument[];
 		if (!documents.some((document) => document.id === currentDocumentId)) {
-			currentDocumentId = documents[0].id;
+			currentDocumentId = documents[0]?.id ?? '';
 		}
 		if (!currentDocument.blocks.some((block) => block.id === selectedId)) selectedId = null;
 		committedSnapshot = snapshot;
 		revision += 1;
 		hasUnsavedChanges = true;
-		if (databaseReady) databaseStatus = 'Unsaved changes';
+		databaseStatus = 'Unsaved changes';
 	}
 
 	function undo() {
@@ -617,9 +599,9 @@
 			previewing: isPreview,
 			canUndo,
 			canRedo,
-			canSave: !databaseBusy && !readOnlyNotice && (hasUnsavedChanges || !databaseReady),
+			canSave: !databaseBusy && !readOnlyNotice && !!project && hasUnsavedChanges,
 			isEmpty: blockCount === 0,
-			canDeleteComposite: documents.length > 1,
+			canDeleteComposite: documents.length > 0,
 			undo,
 			redo,
 			save: () => void savePageToDatabase(),
@@ -663,6 +645,31 @@
 		selectDocument(doc.id);
 	}
 
+	/** Creates the first (blank) page of a fresh project and opens it. */
+	function addFirstPage() {
+		if (!project || readOnlyNotice) return;
+		const page: EditorPage = {
+			id: globalThis.crypto.randomUUID(),
+			name: 'Home',
+			slug: 'home',
+			width: defaultCanvasSize.width,
+			height: defaultCanvasSize.height,
+			blocks: []
+		};
+		documents.push(page);
+		markUnsaved();
+		selectDocument(page.id);
+	}
+
+	/** Adds the ready-made starter composites (Hero, FeatureCards, Testimonial …) to an empty project. */
+	function addStarterComposites() {
+		if (!project || readOnlyNotice) return;
+		const starters = seedComposites();
+		documents.push(...starters);
+		markUnsaved();
+		selectDocument(starters[0].id);
+	}
+
 	/** Renames the open composite; instances elsewhere follow on the next save. */
 	function renameComposite() {
 		const name = window.prompt('New name:', currentDocument.name)?.trim();
@@ -685,10 +692,6 @@
 
 	/** Deletes the open composite after confirmation; blocks that used it keep a placeholder. */
 	function deleteComposite() {
-		if (documents.length < 2) {
-			routeError = 'Keep at least one composite, or create another first.';
-			return;
-		}
 		if (
 			!window.confirm(
 				`Delete composite "${currentDocument.name}"? Pages using it show a placeholder.`
@@ -697,7 +700,9 @@
 			return;
 		const index = documents.findIndex((doc) => doc.id === currentDocumentId);
 		documents.splice(index, 1);
-		selectDocument(documents[Math.max(0, index - 1)].id);
+		const next = documents[Math.max(0, index - 1)];
+		if (next) selectDocument(next.id);
+		else currentDocumentId = '';
 		markUnsaved();
 	}
 
@@ -1144,8 +1149,9 @@
 		status={databaseStatus}
 		busy={databaseBusy}
 		unsaved={hasUnsavedChanges}
-		canSave={hasUnsavedChanges || !databaseReady}
+		canSave={!!project && hasUnsavedChanges}
 		{readOnlyNotice}
+		title={project?.name ?? 'No project'}
 		previewing={isPreview}
 		onsave={savePageToDatabase}
 		{canUndo}
@@ -1155,103 +1161,173 @@
 		onpreview={() => (isPreview = !isPreview)}
 	/>
 
-	<div class="workspace" class:preview-mode={isPreview}>
-		{#if !isPreview}
-			<aside class="palette-panel" aria-label="Component palette">
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">{composing ? 'BUILD A COMPOSITE' : 'BUILD YOUR PAGE'}</p>
-						<h2>
-							{paletteTab === 'composites'
-								? 'Composite Components'
-								: paletteTab === 'widgets'
-									? 'Flowbite widgets'
-									: 'Imported components'}
-						</h2>
-					</div>
-					<span class="count-pill">
-						{paletteTab === 'composites'
-							? placeableComposites.length
-							: paletteTab === 'widgets'
-								? visibleWidgetCount
-								: customKinds.length}
-					</span>
+	{#if !hasDocuments}
+		<div class="editor-empty" data-testid="editor-empty">
+			{#if databaseBusy}
+				<p>Loading project…</p>
+			{:else if !project}
+				<h2>No project yet</h2>
+				<p>The editor works on a project. Create one on the Projects page first.</p>
+				<a class="empty-action" href={resolve('/')}>Go to Projects</a>
+			{:else if composing}
+				<h2>No composites in {project.name}</h2>
+				<p>
+					Composites are reusable groups of widgets. Create your own, or start from the ready-made
+					Hero, FeatureCards and Testimonial.
+				</p>
+				<div class="empty-actions">
+					<button
+						type="button"
+						class="empty-action"
+						disabled={!!readOnlyNotice}
+						onclick={addComposite}
+					>
+						New composite…
+					</button>
+					<button
+						type="button"
+						class="empty-action secondary"
+						disabled={!!readOnlyNotice}
+						onclick={addStarterComposites}
+					>
+						Add starter composites
+					</button>
 				</div>
-				<div class="palette-tabs" role="tablist" aria-label="Palette categories">
-					<button
-						type="button"
-						id="composites-tab"
-						role="tab"
-						aria-selected={paletteTab === 'composites'}
-						aria-controls="palette-items"
-						class:tab-active={paletteTab === 'composites'}
-						onclick={() => (paletteTab = 'composites')}
-					>
-						Composites
-					</button>
-					<button
-						type="button"
-						id="widgets-tab"
-						role="tab"
-						aria-selected={paletteTab === 'widgets'}
-						aria-controls="palette-items"
-						class:tab-active={paletteTab === 'widgets'}
-						onclick={() => (paletteTab = 'widgets')}
-					>
-						Widgets
-					</button>
-					{#if customKinds.length > 0}
+			{:else}
+				<h2>No pages in {project.name}</h2>
+				<p>This project starts empty. Add the first page, then drag widgets onto it.</p>
+				<button
+					type="button"
+					class="empty-action"
+					disabled={!!readOnlyNotice}
+					onclick={addFirstPage}
+				>
+					Add first page
+				</button>
+			{/if}
+		</div>
+	{:else}
+		<div class="workspace" class:preview-mode={isPreview}>
+			{#if !isPreview}
+				<aside class="palette-panel" aria-label="Component palette">
+					<div class="panel-heading">
+						<div>
+							<p class="eyebrow">{composing ? 'BUILD A COMPOSITE' : 'BUILD YOUR PAGE'}</p>
+							<h2>
+								{paletteTab === 'composites'
+									? 'Composite Components'
+									: paletteTab === 'widgets'
+										? 'Flowbite widgets'
+										: 'Imported components'}
+							</h2>
+						</div>
+						<span class="count-pill">
+							{paletteTab === 'composites'
+								? placeableComposites.length
+								: paletteTab === 'widgets'
+									? visibleWidgetCount
+									: customKinds.length}
+						</span>
+					</div>
+					<div class="palette-tabs" role="tablist" aria-label="Palette categories">
 						<button
 							type="button"
-							id="custom-tab"
+							id="composites-tab"
 							role="tab"
-							aria-selected={paletteTab === 'custom'}
+							aria-selected={paletteTab === 'composites'}
 							aria-controls="palette-items"
-							class:tab-active={paletteTab === 'custom'}
-							onclick={() => (paletteTab = 'custom')}
+							class:tab-active={paletteTab === 'composites'}
+							onclick={() => (paletteTab = 'composites')}
 						>
-							Custom
+							Composites
 						</button>
-					{/if}
-				</div>
-				<p class="panel-hint">
-					{paletteTab === 'composites'
-						? `Drag a composite component onto your ${docLabel} to place it.`
-						: `Drag a component onto your ${docLabel} to place it.`}
-				</p>
-
-				{#if paletteTab === 'widgets'}
-					<div class="widget-filter">
-						<input
-							class="field-control"
-							type="search"
-							placeholder="Search Flowbite widgets…"
-							aria-label="Search widgets"
-							bind:value={widgetQuery}
-						/>
-						<div class="widget-chips" role="group" aria-label="Widget categories">
-							{#each ['All', ...widgetCategories] as category (category)}
-								<button
-									type="button"
-									class:tab-active={widgetCategory === category}
-									aria-pressed={widgetCategory === category}
-									onclick={() => (widgetCategory = category as 'All' | WidgetCategory)}
-								>
-									{category}
-								</button>
-							{/each}
-						</div>
+						<button
+							type="button"
+							id="widgets-tab"
+							role="tab"
+							aria-selected={paletteTab === 'widgets'}
+							aria-controls="palette-items"
+							class:tab-active={paletteTab === 'widgets'}
+							onclick={() => (paletteTab = 'widgets')}
+						>
+							Widgets
+						</button>
+						{#if customKinds.length > 0}
+							<button
+								type="button"
+								id="custom-tab"
+								role="tab"
+								aria-selected={paletteTab === 'custom'}
+								aria-controls="palette-items"
+								class:tab-active={paletteTab === 'custom'}
+								onclick={() => (paletteTab = 'custom')}
+							>
+								Custom
+							</button>
+						{/if}
 					</div>
-				{/if}
+					<p class="panel-hint">
+						{paletteTab === 'composites'
+							? `Drag a composite component onto your ${docLabel} to place it.`
+							: `Drag a component onto your ${docLabel} to place it.`}
+					</p>
 
-				<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
 					{#if paletteTab === 'widgets'}
-						{#each widgetGroups as group (group.category)}
-							<h3 class="widget-group-title">{group.category}</h3>
-							<div class="component-list" role="list" aria-label="{group.category} widgets">
-								{#each group.kinds as kind (kind)}
+						<div class="widget-filter">
+							<input
+								class="field-control"
+								type="search"
+								placeholder="Search Flowbite widgets…"
+								aria-label="Search widgets"
+								bind:value={widgetQuery}
+							/>
+							<div class="widget-chips" role="group" aria-label="Widget categories">
+								{#each ['All', ...widgetCategories] as category (category)}
+									<button
+										type="button"
+										class:tab-active={widgetCategory === category}
+										aria-pressed={widgetCategory === category}
+										onclick={() => (widgetCategory = category as 'All' | WidgetCategory)}
+									>
+										{category}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<div id="palette-items" role="tabpanel" aria-labelledby="{paletteTab}-tab">
+						{#if paletteTab === 'widgets'}
+							{#each widgetGroups as group (group.category)}
+								<h3 class="widget-group-title">{group.category}</h3>
+								<div class="component-list" role="list" aria-label="{group.category} widgets">
+									{#each group.kinds as kind (kind)}
+										<div
+											class="palette-item widget-item"
+											draggable="true"
+											role="listitem"
+											aria-label="Drag {componentInfo[kind].label} onto the page"
+											ondragstart={(event) => handlePaletteDragStart(event, kind)}
+											{@attach contextMenu.attach(() => paletteEntries(kind))}
+										>
+											<span class="component-mark" aria-hidden="true"
+												>{componentInfo[kind].mark}</span
+											>
+											<span class="component-copy">
+												<strong>{componentInfo[kind].label}</strong>
+												<small>{componentInfo[kind].detail}</small>
+											</span>
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<p class="panel-hint">No widget matches “{widgetQuery}”.</p>
+							{/each}
+						{:else}
+							<div class="component-list" role="list" aria-label="Draggable components">
+								{#each paletteTab === 'composites' ? placeableComposites.map( (item) => compositeKind(item.name) ) : customKinds as kind (kind)}
 									<div
-										class="palette-item widget-item"
+										class="palette-item"
 										draggable="true"
 										role="listitem"
 										aria-label="Drag {componentInfo[kind].label} onto the page"
@@ -1267,221 +1343,204 @@
 									</div>
 								{/each}
 							</div>
-						{:else}
-							<p class="panel-hint">No widget matches “{widgetQuery}”.</p>
-						{/each}
-					{:else}
-						<div class="component-list" role="list" aria-label="Draggable components">
-							{#each paletteTab === 'composites' ? placeableComposites.map( (item) => compositeKind(item.name) ) : customKinds as kind (kind)}
-								<div
-									class="palette-item"
-									draggable="true"
-									role="listitem"
-									aria-label="Drag {componentInfo[kind].label} onto the page"
-									ondragstart={(event) => handlePaletteDragStart(event, kind)}
-									{@attach contextMenu.attach(() => paletteEntries(kind))}
-								>
-									<span class="component-mark" aria-hidden="true">{componentInfo[kind].mark}</span>
-									<span class="component-copy">
-										<strong>{componentInfo[kind].label}</strong>
-										<small>{componentInfo[kind].detail}</small>
-									</span>
-								</div>
-							{/each}
+						{/if}
+					</div>
+
+					<div class="palette-tip">
+						<span aria-hidden="true">✦</span>
+						<p>
+							<strong>Drag to place</strong> — select any block on the canvas to edit its content and
+							style.
+						</p>
+					</div>
+				</aside>
+			{/if}
+
+			<section
+				class="canvas-panel"
+				aria-label="{composing ? 'Composite' : 'Page'} canvas"
+				{@attach contextMenu.attach(canvasEntries)}
+			>
+				<div class="canvas-toolbar">
+					<div class="canvas-label">
+						<span class="live-dot" aria-hidden="true"></span>
+						<span
+							>{isPreview ? 'Live preview' : composing ? 'Composite canvas' : 'Page canvas'}</span
+						>
+						<label class="page-switch">
+							<span class="sr-only">{composing ? 'Composite' : 'Page'}</span>
+							<select
+								value={currentDocument.id}
+								onchange={(event) => selectDocument(event.currentTarget.value)}
+							>
+								{#each documents as document (document.id)}
+									<option value={document.id}>{editorDocumentLabel(document)}</option>
+								{/each}
+							</select>
+						</label>
+						{#if routeError}<span class="route-error" role="alert">{routeError}</span>{/if}
+					</div>
+					{#if !isPreview}
+						<div class="canvas-actions">
+							<span>{blockCount} {blockCount === 1 ? 'item' : 'items'}</span>
+							{#if composing}
+								<label class="size-field">
+									Width
+									<input
+										type="number"
+										min={compositeLimits.minWidth}
+										max={compositeLimits.maxWidth}
+										bind:value={currentDocument.width}
+										oninput={markUnsaved}
+									/>
+								</label>
+								<label class="size-field">
+									Height
+									<input
+										type="number"
+										min={compositeLimits.minHeight}
+										max={compositeLimits.maxHeight}
+										bind:value={currentDocument.height}
+										oninput={markUnsaved}
+									/>
+								</label>
+								<button type="button" class="text-button" onclick={addComposite}>New</button>
+								<button type="button" class="text-button" onclick={renameComposite}>Rename</button>
+								<button type="button" class="text-button" onclick={deleteComposite}>Delete</button>
+							{/if}
+							<button
+								type="button"
+								class="text-button"
+								disabled={blockCount === 0}
+								onclick={clearPage}
+							>
+								Clear page
+							</button>
 						</div>
 					{/if}
 				</div>
 
-				<div class="palette-tip">
-					<span aria-hidden="true">✦</span>
-					<p>
-						<strong>Drag to place</strong> — select any block on the canvas to edit its content and style.
-					</p>
-				</div>
-			</aside>
-		{/if}
-
-		<section
-			class="canvas-panel"
-			aria-label="{composing ? 'Composite' : 'Page'} canvas"
-			{@attach contextMenu.attach(canvasEntries)}
-		>
-			<div class="canvas-toolbar">
-				<div class="canvas-label">
-					<span class="live-dot" aria-hidden="true"></span>
-					<span>{isPreview ? 'Live preview' : composing ? 'Composite canvas' : 'Page canvas'}</span>
-					<label class="page-switch">
-						<span class="sr-only">{composing ? 'Composite' : 'Page'}</span>
-						<select
-							value={currentDocument.id}
-							onchange={(event) => selectDocument(event.currentTarget.value)}
-						>
-							{#each documents as document (document.id)}
-								<option value={document.id}>{editorDocumentLabel(document)}</option>
-							{/each}
-						</select>
-					</label>
-					{#if routeError}<span class="route-error" role="alert">{routeError}</span>{/if}
+				<div class="canvas-stage">
+					<div class="canvas-fit" bind:clientWidth={stageWidth}>
+						<ThemeScope theme={routePage.data.siteTheme}>
+							<div
+								class="canvas-frame"
+								style:width={previewScale === 1
+									? undefined
+									: `${currentDocument.width * previewScale}px`}
+								style:height={previewScale === 1 ? undefined : `${canvasHeight * previewScale}px`}
+							>
+								<div
+									class="page-canvas"
+									class:preview={isPreview}
+									style:width="{currentDocument.width}px"
+									style:min-height="{canvasHeight}px"
+									style:transform={previewScale === 1 ? undefined : `scale(${previewScale})`}
+									role="region"
+									aria-label="Page canvas drop zone"
+									{@attach attachCanvas}
+									ondragover={handleCanvasDragOver}
+									ondrop={handleDrop}
+								>
+									{#if blocks.length === 0}
+										<div class="empty-canvas">
+											<div class="empty-icon" aria-hidden="true">✳</div>
+											<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>
+											<p>
+												Drag widgets from the panel onto the canvas to start building something
+												great.
+											</p>
+										</div>
+									{:else}
+										{#each blocks as block, index (block.id)}
+											<article
+												class="canvas-block positioned {block.kind} theme-{block.theme}"
+												class:selected={!isPreview && selectedId === block.id}
+												class:custom-fg={!!block.foreground}
+												style:color={block.foreground || undefined}
+												style:background-color={block.background || undefined}
+												style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
+												style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
+												style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
+												style:height="{blockLayout.get(block.id)?.height ?? block.height}px"
+												{@attach contextMenu.attach(() => blockEntries(block))}
+											>
+												<BlockContent
+													bind:block={blocks[index]}
+													onchange={markUnsaved}
+													onlink={handleLinkClick}
+												/>
+												{#if !isPreview}
+													<span class="block-type-tag">{componentInfo[block.kind].label}</span>
+													<button
+														type="button"
+														class="selection-overlay"
+														class:movable={selectedId === block.id &&
+															(block.alignTo ?? 'none') === 'none'}
+														aria-label="Select {componentInfo[block.kind].label}: {block.title}"
+														aria-pressed={selectedId === block.id}
+														onclick={() => (selectedId = block.id)}
+														onpointerdown={(event) =>
+															startPointerInteraction(event, block.id, 'move')}
+														onkeydown={(event) => {
+															if (event.key.startsWith('Arrow')) {
+																selectedId = block.id;
+																handlePositionKeydown(event, event.altKey ? 'resize' : 'move');
+															}
+														}}
+													></button>
+													{#if selectedId === block.id}
+														<div class="selection-frame" aria-hidden="true">
+															{#each resizeHandlesFor(block) as dir (dir)}
+																<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
+																<!-- svelte-ignore a11y_no_static_element_interactions -->
+																<span
+																	class="frame-handle handle-{dir}"
+																	onpointerdown={(event) =>
+																		startPointerInteraction(event, block.id, 'resize', dir)}
+																></span>
+															{/each}
+														</div>
+													{/if}
+												{/if}
+											</article>
+										{/each}
+									{/if}
+								</div>
+							</div>
+						</ThemeScope>
+					</div>
 				</div>
 				{#if !isPreview}
-					<div class="canvas-actions">
-						<span>{blockCount} {blockCount === 1 ? 'item' : 'items'}</span>
-						{#if composing}
-							<label class="size-field">
-								Width
-								<input
-									type="number"
-									min={compositeLimits.minWidth}
-									max={compositeLimits.maxWidth}
-									bind:value={currentDocument.width}
-									oninput={markUnsaved}
-								/>
-							</label>
-							<label class="size-field">
-								Height
-								<input
-									type="number"
-									min={compositeLimits.minHeight}
-									max={compositeLimits.maxHeight}
-									bind:value={currentDocument.height}
-									oninput={markUnsaved}
-								/>
-							</label>
-							<button type="button" class="text-button" onclick={addComposite}>New</button>
-							<button type="button" class="text-button" onclick={renameComposite}>Rename</button>
-							<button type="button" class="text-button" onclick={deleteComposite}>Delete</button>
-						{/if}
-						<button
-							type="button"
-							class="text-button"
-							disabled={blockCount === 0}
-							onclick={clearPage}
-						>
-							Clear page
-						</button>
-					</div>
+					<p class="canvas-footnote">
+						<span aria-hidden="true">⌘</span> Drag components from the palette to place them
+						<span class="footnote-divider">·</span> Drag a selected component to move it · drag its
+						corners to resize · hold Alt to bypass the {SNAP_GRID}px grid
+					</p>
 				{/if}
-			</div>
+			</section>
 
-			<div class="canvas-stage">
-				<div class="canvas-fit" bind:clientWidth={stageWidth}>
-					<ThemeScope theme={routePage.data.siteTheme}>
-						<div
-							class="canvas-frame"
-							style:width={previewScale === 1
-								? undefined
-								: `${currentDocument.width * previewScale}px`}
-							style:height={previewScale === 1 ? undefined : `${canvasHeight * previewScale}px`}
-						>
-							<div
-								class="page-canvas"
-								class:preview={isPreview}
-								style:width="{currentDocument.width}px"
-								style:min-height="{canvasHeight}px"
-								style:transform={previewScale === 1 ? undefined : `scale(${previewScale})`}
-								role="region"
-								aria-label="Page canvas drop zone"
-								{@attach attachCanvas}
-								ondragover={handleCanvasDragOver}
-								ondrop={handleDrop}
-							>
-								{#if blocks.length === 0}
-									<div class="empty-canvas">
-										<div class="empty-icon" aria-hidden="true">✳</div>
-										<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>
-										<p>
-											Drag widgets from the panel onto the canvas to start building something great.
-										</p>
-									</div>
-								{:else}
-									{#each blocks as block, index (block.id)}
-										<article
-											class="canvas-block positioned {block.kind} theme-{block.theme}"
-											class:selected={!isPreview && selectedId === block.id}
-											class:custom-fg={!!block.foreground}
-											style:color={block.foreground || undefined}
-											style:background-color={block.background || undefined}
-											style:left="{blockLayout.get(block.id)?.x ?? block.x}px"
-											style:top="{blockLayout.get(block.id)?.y ?? block.y}px"
-											style:width="{blockLayout.get(block.id)?.width ?? block.width}px"
-											style:height="{blockLayout.get(block.id)?.height ?? block.height}px"
-											{@attach contextMenu.attach(() => blockEntries(block))}
-										>
-											<BlockContent
-												bind:block={blocks[index]}
-												onchange={markUnsaved}
-												onlink={handleLinkClick}
-											/>
-											{#if !isPreview}
-												<span class="block-type-tag">{componentInfo[block.kind].label}</span>
-												<button
-													type="button"
-													class="selection-overlay"
-													class:movable={selectedId === block.id &&
-														(block.alignTo ?? 'none') === 'none'}
-													aria-label="Select {componentInfo[block.kind].label}: {block.title}"
-													aria-pressed={selectedId === block.id}
-													onclick={() => (selectedId = block.id)}
-													onpointerdown={(event) =>
-														startPointerInteraction(event, block.id, 'move')}
-													onkeydown={(event) => {
-														if (event.key.startsWith('Arrow')) {
-															selectedId = block.id;
-															handlePositionKeydown(event, event.altKey ? 'resize' : 'move');
-														}
-													}}
-												></button>
-												{#if selectedId === block.id}
-													<div class="selection-frame" aria-hidden="true">
-														{#each resizeHandlesFor(block) as dir (dir)}
-															<!-- Pointer-only affordance; keyboard resizing is Alt+arrows on the overlay button. -->
-															<!-- svelte-ignore a11y_no_static_element_interactions -->
-															<span
-																class="frame-handle handle-{dir}"
-																onpointerdown={(event) =>
-																	startPointerInteraction(event, block.id, 'resize', dir)}
-															></span>
-														{/each}
-													</div>
-												{/if}
-											{/if}
-										</article>
-									{/each}
-								{/if}
-							</div>
-						</div>
-					</ThemeScope>
-				</div>
-			</div>
 			{#if !isPreview}
-				<p class="canvas-footnote">
-					<span aria-hidden="true">⌘</span> Drag components from the palette to place them
-					<span class="footnote-divider">·</span> Drag a selected component to move it · drag its
-					corners to resize · hold Alt to bypass the {SNAP_GRID}px grid
-				</p>
+				<aside class="inspector-panel" aria-label="Selection inspector">
+					<BlockInspector
+						bind:block={() => selectedBlock, () => {}}
+						label={selectedLabel}
+						mark={selectedBlock ? componentInfo[selectedBlock.kind].mark : ''}
+						{linkPages}
+						compositeEdit={selectedComposite}
+						hasFillBlock={anotherBlockUsesFill}
+						siteTheme={routePage.data.siteTheme}
+						onchange={markUnsaved}
+						onalign={updateSelectedAlignment}
+						onposition={updateSelectedPosition}
+						onreorder={reorderSelected}
+						onduplicate={duplicateSelected}
+						ondelete={deleteSelected}
+					/>
+				</aside>
 			{/if}
-		</section>
-
-		{#if !isPreview}
-			<aside class="inspector-panel" aria-label="Selection inspector">
-				<BlockInspector
-					bind:block={() => selectedBlock, () => {}}
-					label={selectedLabel}
-					mark={selectedBlock ? componentInfo[selectedBlock.kind].mark : ''}
-					{linkPages}
-					compositeEdit={selectedComposite}
-					hasFillBlock={anotherBlockUsesFill}
-					siteTheme={routePage.data.siteTheme}
-					onchange={markUnsaved}
-					onalign={updateSelectedAlignment}
-					onposition={updateSelectedPosition}
-					onreorder={reorderSelected}
-					onduplicate={duplicateSelected}
-					ondelete={deleteSelected}
-				/>
-			</aside>
-		{/if}
-	</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -1526,6 +1585,64 @@
 		height: 7px;
 		border-radius: 50%;
 		background: #69c89d;
+	}
+
+	.editor-empty {
+		display: flex;
+		min-height: calc(100vh - 12rem);
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.4rem;
+		padding: 2rem;
+		color: #65677e;
+		text-align: center;
+	}
+
+	.editor-empty h2 {
+		margin: 0;
+		color: var(--ink);
+		font-size: 1.1rem;
+	}
+
+	.editor-empty p {
+		max-width: 30rem;
+		margin: 0 0 0.8rem;
+		font-size: 0.8rem;
+		line-height: 1.55;
+	}
+
+	.empty-actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.5rem;
+	}
+
+	.empty-action {
+		display: inline-flex;
+		min-height: 36px;
+		align-items: center;
+		padding: 0 1.1rem;
+		border: 1px solid var(--purple);
+		border-radius: 9px;
+		background: var(--purple);
+		color: #fff;
+		font: inherit;
+		font-size: 0.78rem;
+		font-weight: 700;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.empty-action.secondary {
+		background: #fff;
+		color: var(--purple);
+	}
+
+	.empty-action:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
 	}
 
 	.workspace {

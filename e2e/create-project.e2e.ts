@@ -38,7 +38,7 @@ test('creates a compilable project whose pages match the editor', async ({ page 
 	const root = path.join(parent, 'fresh-site');
 
 	await page.setViewportSize({ width: 1600, height: 1000 });
-	// The test database starts empty; the editor opens with a default page to fill.
+	// The administrator's project starts with the seeded Home page (see auth.setup.ts).
 	await page.goto('/editor');
 	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	await page.getByRole('tab', { name: 'Widgets' }).click();
@@ -55,11 +55,13 @@ test('creates a compilable project whose pages match the editor', async ({ page 
 
 	await page.goto('/');
 	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
-	await page.locator('#project-root').fill(root);
+	await expect(page.getByTestId('project-overview')).toBeVisible();
+	await page.locator('#project-path').fill(root);
 	await page.getByTestId('create-project').click();
-	await expect(page.locator('.project-section')).toContainText('Created a new SvelteKit project', {
-		timeout: 30_000
-	});
+	await expect(page.getByTestId('folder-message')).toContainText(
+		'Created a new SvelteKit project',
+		{ timeout: 30_000 }
+	);
 	expect(await readFile(path.join(root, 'package.json'), 'utf8')).toContain('fresh-site');
 
 	// A second attempt into the now non-empty folder must be refused.
@@ -148,11 +150,13 @@ test('an underlined, large input theme survives into a newly created project', a
 	// 3. Create the project, build and preview it.
 	await page.goto('/');
 	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
-	await page.locator('#project-root').fill(root);
+	await expect(page.getByTestId('project-overview')).toBeVisible();
+	await page.locator('#project-path').fill(root);
 	await page.getByTestId('create-project').click();
-	await expect(page.locator('.project-section')).toContainText('Created a new SvelteKit project', {
-		timeout: 30_000
-	});
+	await expect(page.getByTestId('folder-message')).toContainText(
+		'Created a new SvelteKit project',
+		{ timeout: 30_000 }
+	);
 	expect(await readFile(path.join(root, 'src/lib/site-theme.ts'), 'utf8')).toContain(
 		'"inputStyle": "underlined"'
 	);

@@ -94,6 +94,8 @@ export type ExportSiteOptions = {
 	 * legacy SvelteKit `$lib` alias.
 	 */
 	libImportStyle?: LibImportStyle;
+	/** Project whose widget overrides are exported instead of the built-in defaults. */
+	widgetProjectId?: string;
 };
 
 /**
@@ -245,8 +247,8 @@ export async function exportSite(
 
 	// Export all built-in components & widgets as real native Name.svelte components
 	for (const name of Object.values(componentNames)) {
-		// User-edited versions (`.data/widgets`) win over the built-in defaults.
-		const source = await effectiveWidgetSource(name);
+		// User-edited versions of the project (`.data/widgets/<projectId>`) win over the built-in defaults.
+		const source = await effectiveWidgetSource(name, options.widgetProjectId);
 		if (source !== undefined) {
 			await writeGenerated(
 				root,
@@ -421,14 +423,16 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
  *
  * @param rootInput - Absolute path to target SvelteKit project.
  * @param componentName - Name of the component (e.g. 'WidgetSlider').
+ * @param widgetProjectId - Project whose widget overrides apply.
  * @returns Relative path of written component file.
  */
 export async function exportSingleComponent(
 	rootInput: unknown,
-	componentName: string
+	componentName: string,
+	widgetProjectId?: string
 ): Promise<{ written: string }> {
 	const root = await resolveProject(rootInput);
-	const source = await effectiveWidgetSource(componentName);
+	const source = await effectiveWidgetSource(componentName, widgetProjectId);
 	if (!source) throw new ProjectError(`Component "${componentName}" not found.`);
 
 	const targetDir = path.join(root, 'src', 'lib', 'components', 'editor');

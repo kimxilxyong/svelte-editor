@@ -1,42 +1,36 @@
 /**
- * @fileoverview Editor persistence API endpoint backed by the selected database implementation.
+ * @fileoverview Site persistence API of the **active project**.
  *
- * `GET /editor/api` reports schema and saved-site state. `POST` supports initializing the shared
- * schema and validating/upserting serialized editor sites without assuming a specific SQL backend.
+ * - `GET /editor/api` → `{ project: { id, name } | null, site }`. `site` holds the pages and
+ *   composites of the active project (both empty for a fresh project, or while the user has no project).
+ * - `POST /editor/api` with `{ action: 'save', site }` validates the site and replaces the pages and
+ *   composites of the active project.
+ *
+ * The project is always `locals.project` (resolved and ownership-checked in `hooks.server.ts`); a
+ * project id in the request is never read, so one user can not write into another user's project.
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../lib/editor.js';
-import {
-	createTables,
-	getSavedSite,
-	hasEditorPageTable,
-	saveSite
-} from '../../../lib/server/db/index.js';
 import { getDatabase } from '../../../lib/server/database/manager.js';
+import { loadSite, saveSite } from '../../../lib/server/project-store.js';
 
-function backendLabel(backend: 'sqlite' | 'postgres'): string {
-	return backend === 'postgres' ? 'PostgreSQL' : 'SQLite';
-}
-
-export const GET: RequestHandler = async () => {
-	let backend = 'database';
+export const GET: RequestHandler = async ({ locals }) => {
+	const project = locals.project;
+	if (!project) {
+		return json({ project: null, site: { pages: [], composites: [] } });
+	}
 	try {
-		const client = await getDatabase();
-		backend = backendLabel(client.backend);
-		const created = await hasEditorPageTable();
-		return json({
-			created,
-			site: created ? await getSavedSite() : null
-		});
+		const site = await loadSite(await getDatabase(), project.id);
+		return json({ project: { id: project.id, name: project.name }, site });
 	} catch (error) {
-		console.error(`Unable to load the saved editor page from ${backend}.`, error);
-		return json({ error: `Unable to load the saved page from ${backend}.` }, { status: 500 });
+		console.error('Unable to load the project site.', error);
+		return json({ error: 'Unable to load the project from the database.' }, { status: 500 });
 	}
 };
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
 	let body: unknown;
 
 	try {
@@ -49,20 +43,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json({ error: 'The request must include an action.' }, { status: 400 });
 	}
 
-	if (body.action === 'create-tables') {
-		let backend = 'database';
-		try {
-			const client = await getDatabase();
-			backend = backendLabel(client.backend);
-			await createTables();
-			return json({ success: true });
-		} catch (error) {
-			console.error(`Unable to create ${backend} tables for the page editor.`, error);
-			return json({ error: `Unable to create the ${backend} tables.` }, { status: 500 });
-		}
-	}
-
 	if (body.action === 'save') {
+		const project = locals.project;
+		if (!project) {
+			return json({ error: 'Create or open a project before saving.' }, { status: 409 });
+		}
 		const site = parseEditorSite('site' in body ? body.site : null);
 		if (!site) {
 			return json(
@@ -70,22 +55,12 @@ export const POST: RequestHandler = async ({ request }) => {
 				{ status: 400 }
 			);
 		}
-
-		let backend = 'database';
 		try {
-			const client = await getDatabase();
-			backend = backendLabel(client.backend);
-			if (!(await hasEditorPageTable())) {
-				return json(
-					{ error: `Create the ${backend} tables before saving the page.` },
-					{ status: 409 }
-				);
-			}
-			await saveSite(site);
+			await saveSite(await getDatabase(), project.id, site);
 			return json({ success: true });
 		} catch (error) {
-			console.error(`Unable to save the editor page to ${backend}.`, error);
-			return json({ error: `Unable to save the page to ${backend}.` }, { status: 500 });
+			console.error('Unable to save the project site.', error);
+			return json({ error: 'Unable to save the project to the database.' }, { status: 500 });
 		}
 	}
 

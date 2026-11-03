@@ -33,6 +33,7 @@ import {
 	validatePassword
 } from '../../auth/validation.js';
 import type { SqlClient, SqlParam } from '../database/types.js';
+import { createProject, firstProjectName } from '../project-store.js';
 import { recordAudit } from './audit.js';
 import { AuthError } from './errors.js';
 import { hashPassword, verifyPasswordOrDummy } from './passwords.js';
@@ -319,6 +320,7 @@ export async function listUsers(
 
 /**
  * Creates a user (self-registration, admin creation, first-run setup, OAuth/wallet sign-up).
+ * Also creates the account's first, empty project (see `project-store.ts`).
  * Does **not** check registration policy – that is the caller's job (see `flow.ts`).
  * @param db - Database client.
  * @param input - Account data; needs a password or an identity so the user can sign in.
@@ -363,6 +365,8 @@ export async function createUser(db: SqlClient, input: CreateUserInput): Promise
 				[id, email, email && input.emailVerified ? 1 : 0, name, passwordHash, input.role, now, now]
 			);
 			if (input.identity) await insertIdentity(tx, id, input.identity);
+			// Every account starts with one empty project, so the editor never has to guess a target.
+			await createProject(tx, id, { name: firstProjectName });
 		});
 	} catch (error) {
 		if (isUniqueViolation(error) && !(error instanceof AuthError)) {
@@ -589,6 +593,10 @@ export async function deleteUser(db: SqlClient, id: string, actorId: string): Pr
 			throw new AuthError('last_admin', 'The last active admin cannot be deleted.');
 		}
 		// Explicit deletes: do not rely on ON DELETE CASCADE (SQLite needs a PRAGMA for it).
+		const owned = 'SELECT id FROM projects WHERE owner_id = ?';
+		await tx.run(`DELETE FROM project_pages WHERE project_id IN (${owned})`, [id]);
+		await tx.run(`DELETE FROM project_composites WHERE project_id IN (${owned})`, [id]);
+		await tx.run('DELETE FROM projects WHERE owner_id = ?', [id]);
 		await tx.run('DELETE FROM sessions WHERE user_id = ?', [id]);
 		await tx.run('DELETE FROM user_identities WHERE user_id = ?', [id]);
 		await tx.run('DELETE FROM users WHERE id = ?', [id]);

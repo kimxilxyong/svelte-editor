@@ -66,6 +66,12 @@ export const nav = $state({
 	unsavedChanges: false
 });
 
+/** Forgets everything that belongs to the previous project (called when another one is opened). */
+export function resetProjectContext() {
+	nav.lastEditorPageId = null;
+	nav.pageNames = {};
+}
+
 /** What a route tells the shared navigation about itself. All fields are optional. */
 export interface NavContext {
 	/** Pages of the site (switcher + labels). Omit on routes without pages. */

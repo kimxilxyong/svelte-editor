@@ -22,6 +22,10 @@ export type AuditAction =
 	| 'identity_unlink'
 	| 'settings_update'
 	| 'db_switch'
+	| 'db_reset'
+	| 'project_create'
+	| 'project_update'
+	| 'project_delete'
 	| 'setup';
 
 /** Input of {@link recordAudit}. */

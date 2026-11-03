@@ -180,11 +180,11 @@ describe('backend switching', () => {
 				'2026-01-01T00:00:00.000Z'
 			]
 		);
-		await source.run('INSERT INTO editor_page (id, blocks, updated_at) VALUES (?, ?, ?)', [
-			'site',
-			'{"pages":[]}',
-			'2026-01-01T00:00:00.000Z'
-		]);
+		await source.run(
+			`INSERT INTO projects (id, owner_id, name, theme, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			['project-1', 'user-1', 'Site', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z']
+		);
 
 		const result = await switchBackend(
 			{ backend: 'postgres', postgresUrl: 'postgres://admin:topsecret@pglite.local/app' },
@@ -192,7 +192,7 @@ describe('backend switching', () => {
 		);
 		expect(result.backend).toBe('postgres');
 		expect(result.copied.users).toBe(1);
-		expect(result.copied.editor_page).toBe(1);
+		expect(result.copied.projects).toBe(1);
 		expect(await getActiveConfig()).toEqual({
 			backend: 'postgres',
 			postgresUrl: 'postgres://admin:topsecret@pglite.local/app'
@@ -209,7 +209,7 @@ describe('backend switching', () => {
 			location: '******pglite.local:5432/app',
 			source: 'config-file',
 			userCount: 1,
-			pageSaved: true
+			projectCount: 1
 		});
 		expect(JSON.stringify(status)).not.toContain('test-user');
 
@@ -224,21 +224,22 @@ describe('backend switching', () => {
 		const targetPath = configPath('target.sqlite');
 		process.env.DATABASE_URL = sourcePath;
 		const source = await getDatabase();
-		await source.run('INSERT INTO task (id, title, priority) VALUES (?, ?, ?)', [
+		await source.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', [
 			'task-1',
-			'Source task',
-			2
+			'Source task'
 		]);
 
 		const result = await switchBackend(
 			{ backend: 'sqlite', sqlitePath: targetPath },
 			{ dataMode: 'copy', actor: null }
 		);
-		expect(result.copied.task).toBe(1);
+		expect(result.copied.app_settings).toBe(1);
 		expect(
-			await (await getDatabase()).get<SqlRow>('SELECT title FROM task WHERE id = ?', ['task-1'])
+			await (
+				await getDatabase()
+			).get<SqlRow>('SELECT value FROM app_settings WHERE key = ?', ['task-1'])
 		).toEqual({
-			title: 'Source task'
+			value: 'Source task'
 		});
 
 		const beforeFailedSwitch = await getDatabase();
@@ -256,18 +257,13 @@ describe('backend switching', () => {
 		const targetPath = configPath('target.sqlite');
 		process.env.DATABASE_URL = sourcePath;
 		const source = await getDatabase();
-		await source.run('INSERT INTO task (id, title, priority) VALUES (?, ?, ?)', [
-			'source',
-			'Source',
-			1
-		]);
+		await source.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', ['source', 'Source']);
 
 		const preexisting = openSqliteClient(targetPath);
 		await ensureSchema(preexisting);
-		await preexisting.run('INSERT INTO task (id, title, priority) VALUES (?, ?, ?)', [
+		await preexisting.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', [
 			'old',
-			'Old target',
-			1
+			'Old target'
 		]);
 		await preexisting.close();
 
@@ -275,11 +271,15 @@ describe('backend switching', () => {
 			{ backend: 'sqlite', sqlitePath: targetPath },
 			{ dataMode: 'replace', actor: null }
 		);
-		expect(replacement.copied.task).toBe(1);
+		expect(replacement.copied.app_settings).toBe(1);
 		const target = await getDatabase();
-		expect(await target.get<SqlRow>('SELECT id FROM task WHERE id = ?', ['old'])).toBeUndefined();
-		expect(await target.get<SqlRow>('SELECT id FROM task WHERE id = ?', ['source'])).toEqual({
-			id: 'source'
+		expect(
+			await target.get<SqlRow>('SELECT key FROM app_settings WHERE key = ?', ['old'])
+		).toBeUndefined();
+		expect(
+			await target.get<SqlRow>('SELECT key FROM app_settings WHERE key = ?', ['source'])
+		).toEqual({
+			key: 'source'
 		});
 
 		const keepTargetPath = configPath('keep.sqlite');

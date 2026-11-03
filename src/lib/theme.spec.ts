@@ -1,5 +1,5 @@
 /**
- * @fileoverview Tests for the site theme model and its persistence.
+ * @fileoverview Tests for the site theme model and its per-project persistence.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -15,8 +15,8 @@ import {
 	themeConfig,
 	themeStyle
 } from './theme.js';
-import { getSiteTheme, saveSiteTheme } from './server/theme.js';
 import { ensureSchema } from './server/database/schema.js';
+import { createProject, getProject, updateProject } from './server/project-store.js';
 import { openSqliteClient } from './server/database/sqlite-client.js';
 
 describe('site theme model', () => {
@@ -54,14 +54,18 @@ describe('site theme model', () => {
 	});
 });
 
-describe('site theme persistence', () => {
-	it('falls back to the default and round-trips a saved theme', async () => {
+describe('project theme persistence', () => {
+	it('starts with the default and round-trips a saved theme', async () => {
 		const db = openSqliteClient(':memory:');
 		await ensureSchema(db);
-		expect(await getSiteTheme(db)).toEqual(defaultSiteTheme);
+		await db.run(
+			`INSERT INTO users (id, name, role, created_at, updated_at) VALUES ('u1', 'U', 'user', 'x', 'x')`
+		);
+		const project = await createProject(db, 'u1', { name: 'Site' });
+		expect(project.theme).toEqual(defaultSiteTheme);
 		const next = { ...defaultSiteTheme, primary: '#112233', dark: true };
-		await saveSiteTheme(db, next);
-		expect(await getSiteTheme(db)).toEqual(next);
+		await updateProject(db, project.id, { theme: next });
+		expect((await getProject(db, project.id))?.theme).toEqual(next);
 		await db.close?.();
 	});
 });

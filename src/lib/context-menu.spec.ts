@@ -20,6 +20,8 @@ import {
 	blockMenu,
 	canvasMenu,
 	pageItemMenu,
+	projectItemMenu,
+	projectListMenu,
 	pageListMenu,
 	pagePreviewMenu,
 	paletteItemMenu
@@ -257,6 +259,63 @@ describe('editor menus', () => {
 		expect(shape(paletteItemMenu({ ...base, compositeName: 'Hero' }))).toEqual([
 			'add',
 			'edit-composite'
+		]);
+	});
+});
+
+describe('project menus', () => {
+	const options = {
+		name: 'Portfolio',
+		isActive: false,
+		canDuplicate: true,
+		canEdit: true,
+		hasPath: true,
+		open: run,
+		openPages: run,
+		openEditor: run,
+		rename: run,
+		duplicate: run,
+		copyPath: run,
+		remove: run
+	};
+	const items = (overrides: Partial<typeof options> = {}) =>
+		normalizeEntries(projectItemMenu({ ...options, ...overrides })).filter(isAction);
+
+	it('offers the project actions and marks Delete as dangerous', () => {
+		const entries = items();
+		expect(entries.map((entry) => entry.id)).toEqual([
+			'open',
+			'open-pages',
+			'open-editor',
+			'rename',
+			'duplicate',
+			'copy-path',
+			'delete'
+		]);
+		expect(entries[0].label).toBe('Open “Portfolio”');
+		expect(entries.at(-1)?.danger).toBe(true);
+	});
+
+	it('disables Open for the open project and hides Copy path without a folder', () => {
+		const entries = items({ isActive: true, hasPath: false });
+		expect(entries.find((entry) => entry.id === 'open')?.disabled).toBe(true);
+		expect(entries.some((entry) => entry.id === 'copy-path')).toBe(false);
+	});
+
+	it('makes guests read-only and respects the project limit', () => {
+		const disabled = (entries: ReturnType<typeof items>) =>
+			entries.filter((entry) => entry.disabled).map((entry) => entry.id);
+		expect(disabled(items({ canEdit: false }))).toEqual(['rename', 'duplicate', 'delete']);
+		expect(disabled(items({ canDuplicate: false }))).toEqual(['duplicate']);
+	});
+
+	it('offers New project and Reload on the list background', () => {
+		const entries = normalizeEntries(
+			projectListMenu({ canAdd: false, add: run, reload: run })
+		).filter(isAction);
+		expect(entries.map((entry) => [entry.id, !!entry.disabled])).toEqual([
+			['new-project', true],
+			['reload', false]
 		]);
 	});
 });

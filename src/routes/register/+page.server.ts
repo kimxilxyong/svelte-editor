@@ -5,7 +5,7 @@
  * - Registration can be switched off by an administrator (`auth.allowRegistration`). The load
  *   function reports the state so the page can show "registration closed", and the action re-checks
  *   it: hiding the form is not enforcement.
- * - New accounts get the configured default role (`auth.defaultRole`, `guest` unless changed) –
+ * - New accounts get the configured default role (`auth.defaultRole`, `poweruser` unless changed) –
  *   a visitor can never choose their own role.
  * - After a successful registration the user is signed in (`establishSession`) and redirected to
  *   `next`.

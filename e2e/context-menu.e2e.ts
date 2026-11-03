@@ -5,12 +5,7 @@
 import { expect, test } from '@playwright/test';
 
 test('page list and row menus open, close and act', async ({ page }) => {
-	// A fresh database has no pages: save the editor's default page first.
-	await page.goto('/editor');
-	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
-	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.locator('.save-status')).toContainText('Saved to the database');
-	await page.goto('/');
+	await page.goto('/pages');
 	await page.locator('html[data-hydrated]').waitFor({ state: 'attached' });
 	const rows = page.locator('.page-item');
 	const menu = page.getByRole('menu');

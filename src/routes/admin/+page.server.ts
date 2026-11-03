@@ -4,6 +4,9 @@
  * - `load`: database backend status, authentication settings, sign-in provider status, the newest
  *   audit entries and a user-count-by-role summary.
  * - `actions.testConnection` / `actions.switch`: test a candidate backend / switch the active one.
+ * - `actions.createTables`: deletes **all** tables of the active backend (users, sessions, settings,
+ *   audit log, projects …) and creates them again. Needs the box ticked and `RESET` typed (re-checked
+ *   here); afterwards the administrator is signed out and sent to `/setup`.
  * - `actions.updateSettings`: change registration policy and default role.
  *
  * ## Security model
@@ -14,7 +17,7 @@
  * credentials contained in error messages are returned to the browser (see `scrubSecrets`).
  */
 
-import { fail } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { isRole } from '../../lib/auth/roles.js';
 import type { BackendSummary, DatabaseFeedback, SettingsFeedback } from '../../lib/admin/types.js';
 import {
@@ -39,6 +42,7 @@ import {
 	getDatabase,
 	maskConfig,
 	parseDatabaseConfig,
+	resetDatabase,
 	switchBackend,
 	testConnection
 } from '../../lib/server/database/manager.js';
@@ -237,6 +241,43 @@ export const actions: Actions = {
 			);
 			return databaseFailure('switch', form, error);
 		}
+	},
+
+	/**
+	 * "Create Tables": wipes the active backend and recreates the empty schema. Widget overrides and
+	 * SvelteKit folders on disk are untouched. The wipe also deletes this admin's account and session,
+	 * so the audit entry is written *after* the reset (the audit table is recreated empty) and the
+	 * response redirects to the first-run setup.
+	 */
+	createTables: async ({ locals, request }) => {
+		const user = requireRole(locals, 'admin');
+		const data = await request.formData();
+		const form = readDatabaseForm(data);
+		if (
+			!readCheckbox(data, 'confirmReset') ||
+			readString(data, 'resetText', 20).trim() !== 'RESET'
+		) {
+			return databaseFailure(
+				'createTables',
+				form,
+				null,
+				'Deleting all tables needs the confirmation box ticked and the word RESET typed.'
+			);
+		}
+		try {
+			const actor = auditActor(user);
+			await resetDatabase();
+			await recordAudit(await getDatabase(), {
+				actor,
+				action: 'db_reset',
+				target: (await getActiveConfig()).backend,
+				detail: 'all tables deleted and created again'
+			});
+		} catch (error) {
+			console.error('[admin] create tables failed:', describeError(error, { exposeErrors: true }));
+			return databaseFailure('createTables', form, error);
+		}
+		redirect(303, '/setup');
 	},
 
 	/** Saves the registration policy. */

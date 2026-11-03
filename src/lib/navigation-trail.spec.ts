@@ -84,7 +84,8 @@ describe('navigation trail', () => {
 
 	it('describes paths and builds breadcrumbs', () => {
 		const names = { a: 'About' };
-		expect(describePath('/', names)).toEqual({ label: 'Pages', section: 'pages' });
+		expect(describePath('/', names)).toEqual({ label: 'Projects', section: 'projects' });
+		expect(describePath('/pages', names)).toEqual({ label: 'Pages', section: 'pages' });
 		expect(describePath('/editor?page=a', names).label).toBe('Editor · About');
 		expect(describePath('/editor').label).toBe('Editor');
 		expect(describePath('/about').label).toBe('About');
@@ -92,9 +93,14 @@ describe('navigation trail', () => {
 			label: 'Code editor',
 			section: 'components'
 		});
-		expect(breadcrumbsFor('/', names)).toEqual([{ label: 'Pages', path: null }]);
+		expect(breadcrumbsFor('/', names)).toEqual([{ label: 'Projects', path: null }]);
+		expect(breadcrumbsFor('/pages', names)).toEqual([
+			{ label: 'Projects', path: '/' },
+			{ label: 'Pages', path: null }
+		]);
 		expect(breadcrumbsFor('/editor?page=a', names)).toEqual([
-			{ label: 'Pages', path: '/' },
+			{ label: 'Projects', path: '/' },
+			{ label: 'Pages', path: '/pages' },
 			{ label: 'Editor · About', path: null }
 		]);
 	});
@@ -110,7 +116,7 @@ describe('navigation trail', () => {
 		expect(describePath('/admin/users')).toEqual({ label: 'Users', section: 'admin' });
 		expect(describePath('/admin/other')).toEqual({ label: 'Other', section: 'admin' });
 		expect(breadcrumbsFor('/admin/users')).toEqual([
-			{ label: 'Pages', path: '/' },
+			{ label: 'Projects', path: '/' },
 			{ label: 'Users', path: null }
 		]);
 	});

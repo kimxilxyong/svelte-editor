@@ -42,7 +42,7 @@ export interface PathDescription {
 	/** Short label, for example `Pages` or `Editor · Home`. */
 	label: string;
 	/** Coarse area of the app, used for icons and grouping. */
-	section: 'pages' | 'editor' | 'components' | 'auth' | 'account' | 'admin' | 'other';
+	section: 'projects' | 'pages' | 'editor' | 'components' | 'auth' | 'account' | 'admin' | 'other';
 }
 
 /** One breadcrumb segment. `path` is `null` for the current (non-clickable) segment. */
@@ -58,8 +58,11 @@ export type BackTarget =
 /** Maximum number of remembered entries; the oldest entries are dropped first. */
 export const maxTrailLength = 50;
 
-/** The path of the page list (home). */
-export const pagesPath = '/';
+/** The path of the project list (the application's home). */
+export const projectsPath = '/';
+
+/** The path of the page list of the active project. */
+export const pagesPath = '/pages';
 
 /** The base path of the single-page editor. */
 export const editorPath = '/editor';
@@ -198,6 +201,7 @@ export function describePath(
 	pageNames: Record<string, string> = {}
 ): PathDescription {
 	const { pathname, pageId } = splitPath(path);
+	if (pathname === projectsPath) return { label: 'Projects', section: 'projects' };
 	if (pathname === pagesPath) return { label: 'Pages', section: 'pages' };
 	if (pathname === editorPath) {
 		const name = pageId ? pageNames[pageId] : undefined;
@@ -218,18 +222,22 @@ export function describePath(
 }
 
 /**
- * Builds the breadcrumb ("you are here") for a path. The root is always `Pages`.
+ * Builds the breadcrumb ("you are here") for a path. The root is always `Projects`; the page
+ * editor sits below `Pages` (`Projects › Pages › Editor · Home`).
  *
  * @param path - The current path.
  * @param pageNames - Map of page id → page name.
  * @returns Segments from the root to the current location; the last one has `path: null`.
+ * @example
+ * breadcrumbsFor('/pages'); // Projects › Pages
  */
 export function breadcrumbsFor(path: string, pageNames: Record<string, string> = {}): Breadcrumb[] {
-	if (splitPath(path).pathname === pagesPath) return [{ label: 'Pages', path: null }];
-	return [
-		{ label: 'Pages', path: pagesPath },
-		{ label: describePath(path, pageNames).label, path: null }
-	];
+	const { pathname } = splitPath(path);
+	if (pathname === projectsPath) return [{ label: 'Projects', path: null }];
+	const crumbs: Breadcrumb[] = [{ label: 'Projects', path: projectsPath }];
+	if (pathname === editorPath) crumbs.push({ label: 'Pages', path: pagesPath });
+	crumbs.push({ label: describePath(path, pageNames).label, path: null });
+	return crumbs;
 }
 
 /**
@@ -238,7 +246,7 @@ export function breadcrumbsFor(path: string, pageNames: Record<string, string> =
  * - With a previous trail entry it moves exactly one step back in the browser history
  *   (`history.back()`), so app Back and browser Back are the same operation.
  * - Without one (deep link, reload in a fresh tab) it offers the logical parent
- *   (`Pages`) so the user is never stuck on a dead button, except on `Pages` itself.
+ *   (`Projects`) so the user is never stuck on a dead button, except on `Projects` itself.
  *
  * @param state - The current trail.
  * @param currentPath - The path being shown (used to compute the fallback).
@@ -246,7 +254,9 @@ export function breadcrumbsFor(path: string, pageNames: Record<string, string> =
  */
 export function backTarget(state: TrailState, currentPath: string): BackTarget {
 	if (state.index > 0) return { kind: 'history', path: state.entries[state.index - 1], delta: -1 };
-	return splitPath(currentPath).pathname === pagesPath ? null : { kind: 'parent', path: pagesPath };
+	return splitPath(currentPath).pathname === projectsPath
+		? null
+		: { kind: 'parent', path: projectsPath };
 }
 
 /**

@@ -23,7 +23,7 @@ import {
 	saveComponentFile
 } from '../../../lib/server/component-files.js';
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
 	let body: unknown;
 	try {
 		body = await request.json();
@@ -33,7 +33,10 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
 		return json({ error: 'Invalid request.' }, { status: 400 });
 	}
-	const { action, root, path, content, force } = body as Record<string, unknown>;
+	const { action, path, content, force } = body as Record<string, unknown>;
+	// The folder of the active project is the default; an explicit `root` (folder picker) wins.
+	const requested = (body as Record<string, unknown>).root;
+	const root = typeof requested === 'string' && requested.trim() ? requested : locals.project?.path;
 
 	try {
 		if (action === 'list') return json(await listComponentFiles(root));

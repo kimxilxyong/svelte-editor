@@ -20,7 +20,7 @@
 	 * @prop {boolean} [canRedo=false] - Whether Redo is currently allowed.
 	 * @prop {boolean} [previewing=false] - Preview mode is on; the button then reads "Back to editor".
 	 * @prop {string} [eyebrow='PAGE BUILDER'] - Small caps label above the title (the component editor uses 'COMPONENT EDITOR').
-	 * @prop {string} [title='Untitled website'] - Site title shown next to the eyebrow.
+	 * @prop {string} [title='Untitled website'] - Title shown next to the eyebrow; the builder routes pass the active project's name.
 	 * @prop {string} [saveLabel='Save'] - Text of the save button.
 	 * @prop {string} [readOnlyNotice] - When set, the viewer may not save (e.g. role `guest`): Save is disabled and the text is shown as a tooltip and a small visible "Read-only" badge next to it.
 	 * @prop {() => void} [onsave] - Save clicked.

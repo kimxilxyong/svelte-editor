@@ -583,7 +583,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
  * Parses and validates an entire multi-page EditorSite structure.
  *
  * Ensures:
- * - 1 to 20 pages exist.
+ * - 0 to 20 pages exist (a new project starts empty).
  * - 0 to 50 composites (optional `composites` array) with unique PascalCase names that do not
  *   shadow a widget component, and no composite refers to itself directly or indirectly.
  * - Slugs are non-empty, unique, and follow the kebab-case pattern `^[a-z0-9-]{1,40}$`.
@@ -596,7 +596,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 export function parseEditorSite(value: unknown): EditorSite | null {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
 	const pagesValue = (value as Record<string, unknown>).pages;
-	if (!Array.isArray(pagesValue) || pagesValue.length < 1 || pagesValue.length > 20) return null;
+	if (!Array.isArray(pagesValue) || pagesValue.length > 20) return null;
 
 	const ids = new Set<string>();
 	const slugs = new Set<string>();

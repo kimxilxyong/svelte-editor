@@ -9,9 +9,10 @@
 	 *
 	 * | Question          | UI element                                                       |
 	 * | ----------------- | ---------------------------------------------------------------- |
-	 * | Where am I?       | Breadcrumb (`Pages › Editor · Home`) and the highlighted tab     |
+	 * | Where am I?       | Breadcrumb (`Projects › Pages › Editor · Home`) and the highlighted tab |
 	 * | Where was I?      | Back button label ("Back to …") and the History menu            |
-	 * | Where can I go?   | Tabs (Pages / Editor / Components / Admin / About), the "Open page" switcher, History forward |
+	 * | Where can I go?   | Tabs (Projects / Pages / Editor / Composites / Code / Theme / Admin / About), the project switcher, the "Open page" switcher, History forward |
+	 * | Which project?    | Project chip: the active project and a menu to switch or manage projects |
 	 * | Go back one step  | Back button – identical to the browser Back button               |
 	 * | Who am I?         | `UserMenu` (account, sign out) at the right end                  |
 	 *
@@ -40,7 +41,7 @@
 	 * <AppNav />
 	 */
 	import { browser } from '$app/env';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
 	import logo from '#lib/images/svelte-logo.svg';
@@ -51,10 +52,13 @@
 		forwardTarget,
 		splitPath,
 		toPath,
-		componentEditorPath
+		componentEditorPath,
+		pagesPath,
+		projectsPath
 	} from '../navigation-trail.js';
 	import { canAccess } from '../auth/access.js';
-	import { goBack, goForward, goToEntry, nav } from '../navigation.svelte.js';
+	import { goBack, goForward, goToEntry, nav, resetProjectContext } from '../navigation.svelte.js';
+	import { projectApi } from '../projects-client.js';
 	import UserMenu from './UserMenu.svelte';
 
 	/** Context published by the active route (see `useNavContext`). */
@@ -67,7 +71,8 @@
 	// browser. Server HTML therefore shows the bare path.
 	const currentPath = $derived(browser ? toPath(routePage.url) : routePage.url.pathname);
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
-	const onPages = $derived(splitPath(currentPath).pathname === '/');
+	const onProjects = $derived(splitPath(currentPath).pathname === projectsPath);
+	const onPages = $derived(splitPath(currentPath).pathname === pagesPath);
 	const onComposites = $derived(splitPath(currentPath).pathname === '/composites');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
 	const onTheme = $derived(splitPath(currentPath).pathname === '/theme');
@@ -76,7 +81,8 @@
 
 	/** Role of the signed-in user (`null` while anonymous); drives which tabs are shown. */
 	const role = $derived(routePage.data.user?.role ?? null);
-	const showPages = $derived(canAccess(role, '/'));
+	const showProjects = $derived(canAccess(role, projectsPath));
+	const showPages = $derived(canAccess(role, pagesPath));
 	const showEditor = $derived(canAccess(role, '/editor'));
 	const showComposites = $derived(canAccess(role, '/composites'));
 	const showComponents = $derived(canAccess(role, componentEditorPath));
@@ -95,16 +101,22 @@
 	);
 	const switcherValue = $derived(onEditor ? (activePageId ?? '') : '');
 
-	// Without access to the page list (anonymous on /login, /setup …) the "Pages" root would only
+	// Without access to the project list (anonymous on /login, /setup …) the "Projects" root would only
 	// bounce back to the sign-in page, so the breadcrumb shows just the current location and the
-	// Back button never offers the "Pages" fallback.
+	// Back button never offers the "Projects" fallback.
 	const crumbs = $derived(
-		showPages
+		showProjects
 			? breadcrumbsFor(currentPath, nav.pageNames)
 			: [{ label: describePath(currentPath, nav.pageNames).label, path: null }]
 	);
 	const rawBack = $derived(backTarget(nav.trail, currentPath));
-	const back = $derived(rawBack?.kind === 'parent' && !showPages ? null : rawBack);
+	const back = $derived(rawBack?.kind === 'parent' && !showProjects ? null : rawBack);
+
+	/** The user's projects and the active one (root layout data, see `+layout.server.ts`). */
+	const activeProject = $derived(routePage.data.project ?? null);
+	const projects = $derived(routePage.data.navProjects ?? []);
+	let projectMenuOpen = $state(false);
+	let projectError = $state('');
 	const backLabel = $derived(back ? describePath(back.path, nav.pageNames).label : null);
 	const forwardPath = $derived(forwardTarget(nav.trail));
 	const forwardLabel = $derived(
@@ -124,6 +136,20 @@
 		void goto(resolve(`/editor?page=${encodeURIComponent(id)}`));
 	}
 
+	/** Makes another project active and reloads the data that depends on it. */
+	async function switchProject(id: string) {
+		projectMenuOpen = false;
+		if (id === activeProject?.id) return;
+		projectError = '';
+		try {
+			await projectApi({ action: 'open', id });
+			resetProjectContext();
+			await invalidateAll();
+		} catch (error) {
+			projectError = error instanceof Error ? error.message : 'Could not open the project.';
+		}
+	}
+
 	function jumpTo(index: number) {
 		historyOpen = false;
 		goToEntry(index);
@@ -131,7 +157,7 @@
 </script>
 
 <nav class="app-nav" aria-label="Application navigation">
-	<a class="brand" href={resolve('/')} aria-label="Page Builder – home">
+	<a class="brand" href={resolve('/')} aria-label="Page Builder – projects">
 		<img src={logo} alt="" />
 	</a>
 
@@ -166,7 +192,7 @@
 		{#each crumbs as crumb, i (i)}
 			<li aria-current={crumb.path === null ? 'page' : undefined}>
 				{#if crumb.path !== null}
-					<a href={resolve('/')}>{crumb.label}</a>
+					<a href={resolve(crumb.path as '/')}>{crumb.label}</a>
 					<span class="separator" aria-hidden="true">›</span>
 				{:else}
 					<strong>{crumb.label}</strong>
@@ -176,9 +202,24 @@
 	</ol>
 
 	<ul class="tabs" aria-label="Go to">
+		{#if showProjects}
+			<li>
+				<a
+					href={resolve('/')}
+					class:active={onProjects}
+					aria-current={onProjects ? 'page' : undefined}
+				>
+					Projects
+				</a>
+			</li>
+		{/if}
 		{#if showPages}
 			<li>
-				<a href={resolve('/')} class:active={onPages} aria-current={onPages ? 'page' : undefined}>
+				<a
+					href={resolve('/pages')}
+					class:active={onPages}
+					aria-current={onPages ? 'page' : undefined}
+				>
 					Pages
 				</a>
 			</li>
@@ -244,6 +285,34 @@
 			</a>
 		</li>
 	</ul>
+
+	{#if role && projects.length > 0}
+		<details class="project-chip" bind:open={projectMenuOpen}>
+			<summary title="Active project: switch or manage projects">
+				<span class="chip-label">Project</span>
+				<strong>{activeProject?.name ?? 'Choose…'}</strong>
+			</summary>
+			<ul class="project-menu" aria-label="Switch project">
+				{#each projects as item (item.id)}
+					<li>
+						<button
+							type="button"
+							class:current={item.id === activeProject?.id}
+							aria-current={item.id === activeProject?.id ? 'true' : undefined}
+							onclick={() => switchProject(item.id)}
+						>
+							{item.name}
+							{#if !item.own}<small>{item.ownerName}</small>{/if}
+						</button>
+					</li>
+				{/each}
+				<li class="menu-link">
+					<a href={resolve('/')} onclick={() => (projectMenuOpen = false)}>All projects…</a>
+				</li>
+			</ul>
+		</details>
+		{#if projectError}<span class="project-error" role="alert">{projectError}</span>{/if}
+	{/if}
 
 	{#if pages.length > 0}
 		<label class="switcher">
@@ -488,8 +557,112 @@
 		color: var(--ink, #20233a);
 	}
 
-	.trail {
+	.trail,
+	.project-chip {
 		position: relative;
+	}
+
+	.project-chip summary {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		max-width: 16rem;
+		min-height: 30px;
+		padding: 0 0.7rem;
+		border: 1px solid var(--line, #e9e9f0);
+		border-radius: 8px;
+		background: #fff;
+		color: var(--ink, #20233a);
+		cursor: pointer;
+		list-style: none;
+	}
+
+	.project-chip summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.project-chip summary strong {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.project-chip summary:focus-visible {
+		outline: 2px solid var(--purple, #6b5ce7);
+		outline-offset: 2px;
+	}
+
+	.chip-label {
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		background: #eeeaff;
+		color: var(--purple, #6b5ce7);
+		font-size: 0.62rem;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.project-menu {
+		position: absolute;
+		top: calc(100% + 6px);
+		left: 0;
+		z-index: 10;
+		display: grid;
+		min-width: 14rem;
+		max-height: 18rem;
+		margin: 0;
+		padding: 0.35rem;
+		overflow: auto;
+		border: 1px solid var(--line, #e9e9f0);
+		border-radius: 10px;
+		background: #fff;
+		box-shadow: 0 10px 30px rgb(32 35 58 / 14%);
+		list-style: none;
+	}
+
+	.project-menu button,
+	.project-menu .menu-link a {
+		display: flex;
+		width: 100%;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0.55rem;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: var(--ink, #20233a);
+		text-align: left;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.project-menu button:hover,
+	.project-menu .menu-link a:hover {
+		background: #f3f1ff;
+	}
+
+	.project-menu button.current {
+		background: #eeeaff;
+		font-weight: 700;
+	}
+
+	.project-menu small {
+		margin-left: auto;
+		color: var(--muted, #898ba0);
+		font-size: 0.62rem;
+	}
+
+	.project-menu .menu-link {
+		margin-top: 0.25rem;
+		padding-top: 0.25rem;
+		border-top: 1px solid var(--line, #e9e9f0);
+		color: var(--purple, #6b5ce7);
+		font-weight: 650;
+	}
+
+	.project-error {
+		color: #b42318;
 	}
 
 	.trail summary {

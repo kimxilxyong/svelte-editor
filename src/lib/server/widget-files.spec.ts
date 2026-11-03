@@ -8,6 +8,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	effectiveWidgetSource,
+	projectWidgetsDirectory,
+	removeProjectWidgets,
 	listWidgets,
 	readOverrides,
 	readWidget,
@@ -61,5 +63,50 @@ describe('widget overrides', () => {
 		await expect(saveWidget('../evil', 'x')).rejects.toThrow();
 		await expect(readWidget('Nope')).rejects.toThrow();
 		expect(await effectiveWidgetSource('../../etc/passwd')).toBeUndefined();
+	});
+});
+
+describe('per-project widget overrides', () => {
+	const projectA = 'aaaaaaaa-0000-4000-8000-000000000001';
+	const projectB = 'bbbbbbbb-0000-4000-8000-000000000002';
+
+	it('keeps edits of one project away from the others', async () => {
+		await saveWidget('WidgetButton', '<p>a</p>', false, projectA);
+		expect(await readFile(path.join(dir, projectA, 'WidgetButton.svelte'), 'utf8')).toBe(
+			'<p>a</p>'
+		);
+		expect(await readOverrides(projectA)).toEqual({ WidgetButton: '<p>a</p>' });
+		expect(await readOverrides(projectB)).toEqual({});
+		expect(await readOverrides()).toEqual({});
+		expect(await effectiveWidgetSource('WidgetButton', projectB)).not.toBe('<p>a</p>');
+		expect((await listWidgets(projectA)).find((w) => w.name === 'WidgetButton')?.modified).toBe(
+			true
+		);
+		expect((await listWidgets(projectB)).find((w) => w.name === 'WidgetButton')?.modified).toBe(
+			false
+		);
+		await removeProjectWidgets(projectA);
+		expect(await readOverrides(projectA)).toEqual({});
+	});
+
+	it('falls back to the shared legacy file, which is never overwritten', async () => {
+		await saveWidget('WidgetBadge', '<p>legacy</p>');
+		expect(await readWidget('WidgetBadge', projectA)).toBe('<p>legacy</p>');
+		expect(await readOverrides(projectA)).toEqual({ WidgetBadge: '<p>legacy</p>' });
+		await saveWidget('WidgetBadge', '<p>mine</p>', false, projectA);
+		expect(await readWidget('WidgetBadge', projectA)).toBe('<p>mine</p>');
+		expect(await readWidget('WidgetBadge', projectB)).toBe('<p>legacy</p>');
+		expect(await readFile(path.join(dir, 'WidgetBadge.svelte'), 'utf8')).toBe('<p>legacy</p>');
+		await resetWidget('WidgetBadge', projectA);
+		expect(await readWidget('WidgetBadge', projectA)).toBe('<p>legacy</p>');
+		await resetWidget('WidgetBadge');
+		await removeProjectWidgets(projectA);
+	});
+
+	it('refuses project ids that could leave the widgets folder', async () => {
+		expect(() => projectWidgetsDirectory('../evil')).toThrow();
+		expect(() => projectWidgetsDirectory('a/b')).toThrow();
+		await expect(saveWidget('WidgetButton', 'x', false, '..')).rejects.toThrow();
+		await expect(removeProjectWidgets('../..')).rejects.toThrow();
 	});
 });

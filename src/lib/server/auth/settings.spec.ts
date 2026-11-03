@@ -13,8 +13,11 @@ beforeEach(async () => {
 });
 
 describe('settings', () => {
-	it('defaults to open registration with the guest role', async () => {
-		expect(await getAuthSettings(db)).toEqual({ allowRegistration: true, defaultRole: 'guest' });
+	it('defaults to open registration with the poweruser role', async () => {
+		expect(await getAuthSettings(db)).toEqual({
+			allowRegistration: true,
+			defaultRole: 'poweruser'
+		});
 	});
 
 	it('upserts generic settings', async () => {
@@ -26,7 +29,10 @@ describe('settings', () => {
 
 	it('updates partially and persists', async () => {
 		await updateAuthSettings(db, { allowRegistration: false });
-		expect(await getAuthSettings(db)).toEqual({ allowRegistration: false, defaultRole: 'guest' });
+		expect(await getAuthSettings(db)).toEqual({
+			allowRegistration: false,
+			defaultRole: 'poweruser'
+		});
 		await updateAuthSettings(db, { defaultRole: 'user' });
 		expect(await getAuthSettings(db)).toEqual({ allowRegistration: false, defaultRole: 'user' });
 	});
@@ -39,7 +45,7 @@ describe('settings', () => {
 			AuthError
 		);
 		await setSetting(db, 'auth.defaultRole', 'admin');
-		expect((await getAuthSettings(db)).defaultRole).toBe('guest');
+		expect((await getAuthSettings(db)).defaultRole).toBe('poweruser');
 	});
 });
 

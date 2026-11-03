@@ -110,9 +110,10 @@ describe('createProject', () => {
 		const files = [
 			'src/routes/+layout.svelte',
 			'src/routes/welcome/+page.svelte',
-			...(await readdir(path.join(root, 'src/lib/components/editor'))).map(
-				(name) => `src/lib/components/editor/${name}`
-			)
+			// The folder also holds the `.editor-composites.json` export manifest.
+			...(await readdir(path.join(root, 'src/lib/components/editor')))
+				.filter((name) => name.endsWith('.svelte'))
+				.map((name) => `src/lib/components/editor/${name}`)
 		];
 		for (const file of files) {
 			const source = await readFile(path.join(root, file), 'utf8');

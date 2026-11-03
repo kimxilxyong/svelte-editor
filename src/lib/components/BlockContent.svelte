@@ -7,6 +7,13 @@
 	 *   {@link useComposites}, edge/fill-aligned within its declared dimensions, and scaled to the
 	 *   block's size), or a placeholder card for
 	 * `custom:<Name>` imported components.
+	 * An explicitly defined native composite `source` (including an empty string) instead goes
+	 * through {@link CompositeSource}, which snapshots context dependencies synchronously,
+	 * compiles asynchronously and displays failures without falling back to generated blocks.
+	 * This branch precedes the block-based depth guard; native-source depth errors stay visible.
+	 * Until the model gains `source`, {@link RuntimeComposite} supplies the compatible intersection.
+	 * Block-based child pixel geometry becomes percentages of the composite's declared width
+	 * and height, preserving the child coordinate system when its host block is resized.
 	 * It is the single place that maps block kinds to components, shared by the editor canvas
 	 * (editable, with selection overlays added by the host) and by {@link PageView} (the
 	 * read-only page rendering used for the home overview and previews).
@@ -41,6 +48,8 @@
 	import WidgetCard from './editor/WidgetCard.svelte';
 	import WidgetLink from './editor/WidgetLink.svelte';
 	import BlockContent from './BlockContent.svelte';
+	import CompositeSource from './CompositeSource.svelte';
+	import type { RuntimeComposite } from '../composite-runtime.js';
 	import { componentNames, getComponentName, type BuilderBlock } from '../editor.js';
 	import { resolveBlockLayout } from '../block-layout.js';
 	import { maxCompositeDepth, useComposites } from '../composite-context.js';
@@ -204,6 +213,8 @@
 		newTab={block.newTab}
 		onnavigate={(event: MouseEvent) => onlink?.(event, block)}
 	/>
+{:else if composite && (composite as RuntimeComposite).source !== undefined}
+	<CompositeSource composite={composite as RuntimeComposite} {depth} />
 {:else if composite && depth < maxCompositeDepth}
 	<div class="composite" data-composite={composite.name}>
 		{#each composite.blocks as child (child.id)}

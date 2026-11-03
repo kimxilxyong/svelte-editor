@@ -26,6 +26,8 @@ import {
 	getAccessibleProject,
 	listProjects,
 	loadSite,
+	readCompositeSource,
+	saveCompositeSource,
 	ProjectStoreError,
 	saveSite,
 	updateProject
@@ -278,7 +280,14 @@ describe('PostgreSQL backend', () => {
 		const project = (await defaultProject(pg, ada))!;
 		await saveSite(pg, project.id, site());
 		expect(await loadSite(pg, project.id)).toEqual(site());
+		const id = site().composites[0].id;
+		const read = await readCompositeSource(pg, project.id, id);
+		const source = '<p>PostgreSQL native override</p><style>p { color: red; }</style>';
+		expect((await saveCompositeSource(pg, project.id, id, source, read.revision)).saved).toBe(true);
+		await saveSite(pg, project.id, site(), { preserveCompositeSources: true });
+		expect((await readCompositeSource(pg, project.id, id)).content).toBe(source);
 		const copy = await duplicateProject(pg, project.id);
+		expect((await loadSite(pg, copy.id)).composites[0].source).toBe(source);
 		expect(copy.pageCount).toBe(2);
 		expect(await listProjects(pg, ada)).toHaveLength(2);
 		await recreateSchema(pg);

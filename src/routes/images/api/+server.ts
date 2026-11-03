@@ -42,7 +42,13 @@ import {
 	updateManagedImage
 } from '../../../lib/server/project-store.js';
 
-const errorStatus = { invalid_input: 400, name_taken: 409, not_found: 404, limit: 409 } as const;
+const errorStatus = {
+	invalid_input: 400,
+	name_taken: 409,
+	not_found: 404,
+	limit: 409,
+	conflict: 409
+} as const;
 
 /** Builds a human-readable display name from a filename when none is explicitly provided. */
 function humanizeFilename(filename: string): string {

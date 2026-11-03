@@ -25,7 +25,13 @@ import {
 } from '../../../lib/server/project-store.js';
 import type { SiteTheme } from '../../../lib/theme.js';
 
-const errorStatus = { invalid_input: 400, name_taken: 409, not_found: 404, limit: 409 } as const;
+const errorStatus = {
+	invalid_input: 400,
+	name_taken: 409,
+	not_found: 404,
+	limit: 409,
+	conflict: 409
+} as const;
 
 export const GET: RequestHandler = async ({ locals }) => {
 	requireUser(locals);

@@ -10,15 +10,17 @@
  * table (`svelte`, `svelte/internal/client`, `flowbite-svelte`). Overrides may therefore only
  * import those packages; anything else fails to compile here and the default component is used.
  * Overrides can only be authored by power users, and are evaluated with `new Function`.
+ * Native composites reuse exported `loadDependencies`/strict `compileSource`, extending only the
+ * explicit module table with validated project/built-in component dependencies. Scoped CSS is
+ * injected and runes are enforced. Composite failures propagate to a visible render boundary.
  */
 
 /* eslint-disable svelte/no-svelte-internal -- edited widgets must share the app's own client runtime */
 import { compile } from 'svelte/compiler';
 import type { Component } from 'svelte';
 
-/** Widgets take a per-kind prop superset, so their props are deliberately untyped. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type WidgetComponent = Component<any>;
+/** Native overrides take a per-kind prop superset without exposing unsafe `any` to callers. */
+export type WidgetComponent = Component<Record<string, unknown>>;
 
 /** Reactive registry of compiled overrides, keyed by component name (e.g. `WidgetButton`). */
 export const widgetRuntime = $state<{ components: Record<string, WidgetComponent> }>({
@@ -26,7 +28,7 @@ export const widgetRuntime = $state<{ components: Record<string, WidgetComponent
 });
 
 /** Modules an override may import. Loaded lazily so unmodified sites pay nothing. */
-async function loadDependencies(): Promise<Record<string, unknown>> {
+export async function loadDependencies(): Promise<Record<string, unknown>> {
 	const [client, svelte, flowbite] = await Promise.all([
 		// @ts-expect-error svelte ships no typings for its internal client runtime
 		import('svelte/internal/client'),
@@ -89,13 +91,39 @@ export function compileWidget(
 	deps: Record<string, unknown>
 ): WidgetComponent | undefined {
 	try {
-		const { js } = compile(source, { generate: 'client', filename: `${name}.svelte`, dev: false });
-		const body = toFunctionBody(js.code, Object.keys(deps));
-		return new Function('__deps', body)(deps) as WidgetComponent;
+		return compileSource(name, source, deps);
 	} catch (error) {
 		console.warn(`The edited widget ${name} could not be compiled; using the default.`, error);
 		return undefined;
 	}
+}
+
+/**
+ * Compiles native widget/composite source using the same explicit dependency allowlist.
+ * CSS is injected by the compiled component, preserving scoped authored styles in preview.
+ * Unlike the widget fallback wrapper, errors propagate so active composite overrides fail visibly.
+ * @param name - Compiler filename stem.
+ * @param source - Full native Svelte source.
+ * @param deps - Explicit allowed package and component modules; no dynamic resolution.
+ * @returns A native Svelte component.
+ * @throws When compilation, import resolution or evaluation fails.
+ */
+export function compileSource(
+	name: string,
+	source: string,
+	deps: Record<string, unknown>
+): WidgetComponent {
+	const { js } = compile(source, {
+		generate: 'client',
+		filename: `${name}.svelte`,
+		dev: false,
+		runes: true,
+		// The normal filename-only hash would keep the first injected style after a live CSS edit.
+		cssHash: ({ hash, css, filename }) => `svelte-${hash(`${filename}:${css}`)}`,
+		css: 'injected'
+	});
+	const body = toFunctionBody(js.code, Object.keys(deps));
+	return new Function('__deps', body)(deps) as WidgetComponent;
 }
 
 /**

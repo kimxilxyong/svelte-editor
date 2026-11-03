@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Temporary-directory export/import tests, including exact native source and
+ * stable composite identity manifests. Tests never mutate real project folders or shared storage.
+ */
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -59,6 +63,44 @@ const site: EditorSite = {
 };
 
 describe('project export/import', () => {
+	it('exports exact native composite source, safely re-exports marker-free overrides and imports stable metadata', async () => {
+		const root = await makeProject();
+		const [hero] = seedComposites();
+		const native = `<script lang="ts">
+	import WidgetHeading from './WidgetHeading.svelte';
+	let message = $state('Native composite');
+</script>
+<div class="native"><WidgetHeading title={message} /></div>
+<style>.native { color: red; }</style>\n`;
+		const edited = { ...hero, source: native };
+		const exported: EditorSite = { ...site, composites: [edited] };
+		await exportSite(root, exported);
+		const file = path.join(root, 'src/lib/components/editor', `${hero.name}.svelte`);
+		expect(await readFile(file, 'utf8')).toBe(native);
+		const next = native.replace('Native composite', 'Changed native composite');
+		exported.composites[0] = { ...edited, source: next };
+		expect((await exportSite(root, exported)).skipped).toEqual([]);
+		expect(await readFile(file, 'utf8')).toBe(next);
+		// Markers may be removed or changed; exported identity/layout metadata stays authoritative.
+		await writeFile(
+			file,
+			next.replace('<div class="native">', '<div data-editor-composite="WrongName" class="native">')
+		);
+		const imported = await importSite(root);
+		expect(imported.composites[0]).toMatchObject({
+			id: hero.id,
+			name: hero.name,
+			width: hero.width,
+			height: hero.height,
+			blocks: hero.blocks
+		});
+		expect(imported.composites[0].source).toContain('data-editor-composite="WrongName"');
+		// External marker-free edits do not gain silent overwrite permission.
+		expect((await exportSite(root, exported)).skipped.map((item) => item.file)).toContain(
+			path.relative(root, file)
+		);
+	});
+
 	it('exports all native components and compilable pages', async () => {
 		const root = await makeProject();
 		const result = await exportSite(root, site);

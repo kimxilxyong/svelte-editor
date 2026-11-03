@@ -13,6 +13,8 @@
  *                     and the project's theme (`theme`, JSON text of a `SiteTheme`). Cascades on user deletion.
  * - `project_pages` – the pages of a project (`ordinal` keeps the order; `blocks` is JSON text).
  * - `project_composites` – the composite components of a project (same shape, `name` is unique per project).
+ *   Its `blocks` TEXT JSON accepts legacy block arrays or `{ blocks, source }` native-source
+ *   envelopes, decoded exclusively by project-store; copying backends preserves both unchanged.
  * - `user_identities` – external sign-in methods linked to a user: `provider` ∈ github | google | linkedin | wallet,
  *                     `provider_user_id` is the provider's stable subject (wallet: lower-case 0x address).
  * - `sessions`      – server-side sessions. `id` is the SHA-256 hex of the opaque cookie token, so a database

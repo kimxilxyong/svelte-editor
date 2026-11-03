@@ -62,6 +62,14 @@
 	 * JavaScript and TypeScript do not install class hovers. Language changes
 	 * close old hover tooltips and swap language support and hover lookup together
 	 * without recreating the view or its history.
+	 * Completion is additive: native tags/attributes, CSS properties/values and
+	 * JS/TS local names/functions remain available. Static class tokens complete
+	 * from accessible loaded CSS (including built Tailwind/Flowbite utilities)
+	 * and this document, never a network catalogue or unbuilt utility generator.
+	 * Svelte script contexts also offer rune snippets; there is no TS language
+	 * server/type inference. Ctrl+Space discovers options, arrows select, Enter
+	 * accepts and Escape dismisses; Tab advances active snippet fields.
+	 * Native language support closes tags and (), [], {}, single/double quotes.
 	 *
 	 * Layout: the host element is `width: 100%; height: 100%` with a
 	 * `min-height` of `minHeight`. Give the component a parent cell with a
@@ -171,12 +179,7 @@
 		redo as cmRedo,
 		undo as cmUndo
 	} from '@codemirror/commands';
-	import {
-		autocompletion,
-		closeBrackets,
-		closeBracketsKeymap,
-		completionKeymap
-	} from '@codemirror/autocomplete';
+	import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 	import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 	import { lintGutter, lintKeymap, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 	import { javascript } from '@codemirror/lang-javascript';
@@ -186,6 +189,7 @@
 	import { oneDark } from '@codemirror/theme-one-dark';
 	import { tags as t } from '@lezer/highlight';
 	import { classHoverExtension } from '../class-hover.js';
+	import { editorCompletionExtension } from '../editor-completions.js';
 
 	let {
 		value = $bindable(''),
@@ -199,8 +203,8 @@
 		onchange,
 		onsave,
 		onfocus,
-		// `api` is write-only here (the parent reads it via bind:api), which
-		// trips the no-useless-assignment rule on the $bindable() default.
+		// Write-only binding: the parent reads this handle. Project ESLint requires
+		// this suppression even though the MCP autofixer uses a different rule set.
 		// eslint-disable-next-line no-useless-assignment
 		api = $bindable(),
 		class: className = ''
@@ -245,18 +249,19 @@
 
 	/** Bundles language support with contextual class hovers where supported. */
 	function languageExtension(lang: CodeLanguage): Extension {
+		const completion = editorCompletionExtension(lang);
 		switch (lang) {
 			case 'svelte':
-				return [svelte(), classHoverExtension('svelte')];
+				return [svelte(), classHoverExtension('svelte'), completion];
 			case 'html':
-				return [html(), classHoverExtension('html')];
+				return [html(), classHoverExtension('html'), completion];
 			case 'typescript':
-				return javascript({ typescript: true });
+				return [javascript({ typescript: true }), completion];
 			case 'css':
-				return [css(), classHoverExtension('css')];
+				return [css(), classHoverExtension('css'), completion];
 			case 'javascript':
 			default:
-				return javascript();
+				return [javascript(), completion];
 		}
 	}
 
@@ -458,7 +463,6 @@
 					...searchKeymap,
 					...historyKeymap,
 					...foldKeymap,
-					...completionKeymap,
 					...lintKeymap,
 					indentWithTab
 				]),

@@ -11,6 +11,11 @@
 	 * - Left: project folder (browse), component file list, "New component". The **Built-in
 	 *   widgets** tab instead lists the editor's own widgets/sections; saving stores an override in
 	 *   `.data/widgets` (see `widget-files.ts`) that the canvas and exports use ("Reset to default").
+	 *   **Composites** instead edits exact native source on the active project's composite rows.
+	 *   A single Find field below these three tabs filters all names/paths case-insensitively.
+	 *   Source overrides are authoritative in preview/export; visual layout edits retain them until
+	 *   an explicit reset. The composite endpoint saves only one row using an opaque read revision.
+	 *   Request generations and captured source/project identity discard stale async results.
 	 * - Centre: the part editors (or a read-only "Full file" view of the assembled source).
 	 * - Right: problems from the Svelte compiler (click to jump) and the detected props.
 	 *
@@ -41,12 +46,15 @@
 	 * - The route is client-driven; there are no load functions and no prerendering.
 	 * No component props or bindable inputs; route data comes from `$app/state`.
 	 */
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { beforeNavigate, invalidateAll } from '$app/navigation';
 	import { page as routePage } from '$app/state';
 	import { projectApi } from '../../lib/projects-client.js';
 	import BuilderHeader from '../../lib/components/BuilderHeader.svelte';
 	import { loadWidgetOverrides } from '../../lib/widget-runtime.svelte.js';
+	import { provideComposites } from '../../lib/composite-context.js';
+	import { type EditorComposite, type BuilderBlock, compositeKind } from '../../lib/editor.js';
+	import BlockContent from '../../lib/components/BlockContent.svelte';
 	import { useNavContext } from '../../lib/navigation.svelte.js';
 	import DirectoryPickerModal from '../../lib/components/DirectoryPickerModal.svelte';
 	import CodeEditor, {
@@ -94,8 +102,14 @@
 	});
 
 	/** `project`: files of a real SvelteKit project; `widgets`: the built-in widgets/sections. */
-	let mode = $state<'project' | 'widgets'>('project');
+	let mode = $state<'project' | 'widgets' | 'composites'>('project');
 	let widgets = $state<{ name: string; modified: boolean }[]>([]);
+	let composites = $state<EditorComposite[]>([]);
+	let selectedCompositeId = $state<string | null>(null);
+	let compositeRevision = $state('');
+	/** Request identity is independent from source revision: even edit-then-undo invalidates reads. */
+	let ioGeneration = 0;
+	let contextProjectId: string | undefined;
 	let projectRoot = $state('');
 	let showPicker = $state(false);
 	let files = $state<{ path: string; size: number }[]>([]);
@@ -131,6 +145,46 @@
 	const visibleFiles = $derived(
 		files.filter((file) => file.path.toLowerCase().includes(filter.trim().toLowerCase()))
 	);
+	const visibleWidgets = $derived(
+		widgets.filter((item) =>
+			`${item.name}.svelte`.toLowerCase().includes(filter.trim().toLowerCase())
+		)
+	);
+	const visibleComposites = $derived(
+		composites.filter((item) =>
+			`${item.name}.svelte`.toLowerCase().includes(filter.trim().toLowerCase())
+		)
+	);
+	const selectedComposite = $derived(composites.find((item) => item.id === selectedCompositeId));
+	const previewComposites = $derived(
+		composites.map((item) =>
+			mode === 'composites' && item.id === selectedCompositeId
+				? { ...item, source: joined.source }
+				: item
+		)
+	);
+	provideComposites(() => previewComposites);
+	const previewBlock = $derived.by((): BuilderBlock | undefined => {
+		if (mode !== 'composites' || !selectedComposite) return undefined;
+		return {
+			id: 'composite-code-preview',
+			kind: compositeKind(selectedComposite.name),
+			title: '',
+			body: '',
+			action: '',
+			theme: 'light',
+			positioned: true,
+			x: 0,
+			y: 0,
+			width: selectedComposite.width,
+			height: selectedComposite.height,
+			value: '',
+			checked: false,
+			level: 60,
+			href: '',
+			newTab: false
+		};
+	});
 	const rows = $derived<ProblemRow[]>(
 		(Object.keys(problems) as PartId[])
 			.flatMap((part) => problems[part].map((item) => ({ ...item, part })))
@@ -149,11 +203,37 @@
 	const hasModule = $derived(parts.moduleScript.trim() !== '' || showModule);
 
 	onDestroy(invalidateBaseCss);
+	onDestroy(() => {
+		ioGeneration += 1;
+	});
 
 	onMount(() => {
-		projectRoot = routePage.data.project?.path ?? '';
 		theme = localStorage.getItem(themeKey) === 'dark' ? 'dark' : 'light';
-		if (projectRoot) void loadFiles();
+	});
+
+	// Synchronises an external route context, not computed state. A project change invalidates all
+	// source/I/O identities before loading the new project's list; never carry source across users.
+	$effect(() => {
+		const project = routePage.data.project;
+		if (project?.id === contextProjectId) return;
+		untrack(() => {
+			contextProjectId = project?.id;
+			ioGeneration += 1;
+			invalidateBaseCss();
+			busy = false;
+			selectedPath = null;
+			selectedCompositeId = null;
+			compositeRevision = '';
+			composites = [];
+			widgets = [];
+			files = [];
+			parts = emptyParts('ts');
+			baseline = '';
+			projectRoot = project?.path ?? '';
+			if (mode === 'composites') void loadComposites();
+			else if (mode === 'widgets') void loadWidgets();
+			else if (projectRoot) void loadFiles();
+		});
 	});
 
 	// Debounced compiler check. The timer is cleared whenever the source changes again.
@@ -165,7 +245,11 @@
 			return;
 		}
 		const timer = setTimeout(() => {
-			problems = distributeDiagnostics(checkSvelteSource(source, name).diagnostics, map);
+			problems = distributeDiagnostics(
+				checkSvelteSource(source, name, { runes: mode === 'composites' ? true : undefined })
+					.diagnostics,
+				map
+			);
 			confirmForce = confirmForce && errorCount > 0;
 		}, 250);
 		return () => clearTimeout(timer);
@@ -195,11 +279,33 @@
 	 */
 	async function request<T extends { error?: string }>(body: Record<string, unknown>): Promise<T> {
 		if (mode === 'widgets') return widgetRequest<T>(body);
+		if (mode === 'composites') return compositeRequest<T>(body);
 		try {
 			const response = await fetch('/component-editor/api', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ root: projectRoot.trim(), ...body }),
+				cache: 'no-store'
+			});
+			return (await response.json()) as T;
+		} catch {
+			return { error: 'The server could not be reached.' } as T;
+		}
+	}
+
+	/** Uses only stable composite ids; the server ignores all caller-supplied project identifiers. */
+	async function compositeRequest<T extends { error?: string }>(
+		body: Record<string, unknown>
+	): Promise<T> {
+		const id =
+			body.id ??
+			selectedCompositeId ??
+			composites.find((item) => `${item.name}.svelte` === body.path)?.id;
+		try {
+			const response = await fetch('/component-editor/composites', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ ...body, id, revision: compositeRevision }),
 				cache: 'no-store'
 			});
 			return (await response.json()) as T;
@@ -230,25 +336,53 @@
 	}
 
 	async function loadWidgets() {
+		const generation = ioGeneration;
+		const project = routePage.data.project?.id;
 		const result = await widgetRequest<{
 			widgets?: { name: string; modified: boolean }[];
 			error?: string;
 		}>({ action: 'list' });
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
 		if (result.widgets) widgets = result.widgets;
 		else status = result.error ?? 'The widgets could not be listed.';
 	}
 
-	async function setMode(next: 'project' | 'widgets') {
+	/** Refreshes definitions for list markers, native preview context, and stable-id lookup. */
+	async function loadComposites() {
+		const generation = ioGeneration;
+		const project = routePage.data.project?.id;
+		const result = await compositeRequest<{ composites?: EditorComposite[]; error?: string }>({
+			action: 'list'
+		});
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
+		if (result.composites) composites = result.composites;
+		else {
+			composites = [];
+			status = result.error ?? 'The composites could not be listed.';
+		}
+	}
+
+	async function setMode(next: 'project' | 'widgets' | 'composites') {
 		if (next === mode) return;
 		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
 		invalidateBaseCss();
+		const generation = ++ioGeneration;
 		mode = next;
+		busy = false;
 		selectedPath = null;
+		selectedCompositeId = null;
+		compositeRevision = '';
 		parts = emptyParts('ts');
 		baseline = '';
 		if (next === 'widgets') {
 			await loadWidgets();
+			if (generation !== ioGeneration) return;
 			status = 'Edit a built-in widget; the canvas and exports use your version.';
+		} else if (next === 'composites') {
+			await Promise.all([loadComposites(), loadWidgetOverrides()]);
+			if (generation !== ioGeneration) return;
+			if (composites.length)
+				status = 'Choose a composite. Native source overrides are used by preview and export.';
 		} else {
 			status = projectRoot.trim()
 				? 'Choose a component.'
@@ -260,26 +394,72 @@
 	async function resetWidget() {
 		if (mode !== 'widgets' || !selectedPath || busy) return;
 		if (!confirm('Reset this widget to the built-in default?')) return;
+		const generation = ++ioGeneration;
+		const project = routePage.data.project?.id;
+		const revision = sourceRevision;
+		const path = selectedPath;
 		busy = true;
-		const result = await widgetRequest<{ error?: string }>({ action: 'reset', path: selectedPath });
+		const result = await widgetRequest<{ error?: string }>({ action: 'reset', path });
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
 		if (result.error) {
 			busy = false;
 			status = result.error;
 			return;
 		}
+
 		const read = await widgetRequest<{ content?: string; error?: string }>({
 			action: 'read',
-			path: selectedPath
+			path
 		});
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
 		busy = false;
-		if (read.content !== undefined) loadSource(selectedPath, read.content);
+		if (read.content !== undefined && revision === sourceRevision) loadSource(path, read.content);
 		await Promise.all([loadWidgets(), loadWidgetOverrides()]);
-		status = `${selectedPath} was reset to the default.`;
+		if (generation === ioGeneration) status = `${path} was reset to the default.`;
 	}
 
+	/** Explicit reset is the only code action that relinquishes an active visual source override. */
+	async function resetComposite() {
+		if (mode !== 'composites' || !selectedPath || busy) return;
+		if (
+			!confirm(
+				'Reset this composite to generated visual source? Unsaved code changes will be discarded.'
+			)
+		)
+			return;
+		const path = selectedPath;
+		const generation = ++ioGeneration;
+		const revision = sourceRevision;
+		const project = routePage.data.project?.id;
+		busy = true;
+		const result = await compositeRequest<{
+			saved?: boolean;
+			content?: string;
+			revision?: string;
+			composite?: EditorComposite;
+			error?: string;
+		}>({ action: 'reset' });
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
+		busy = false;
+		if (result.error) {
+			status = result.error;
+			return;
+		}
+		if (result.saved && result.content !== undefined && result.composite) {
+			compositeRevision = result.revision ?? '';
+			composites = composites.map((item) =>
+				item.id === result.composite?.id ? result.composite : item
+			);
+			if (revision === sourceRevision) loadSource(path, result.content);
+			status = `${path} was reset to generated visual source.`;
+		}
+	}
 	async function loadFiles() {
+		const generation = ++ioGeneration;
+		const project = routePage.data.project?.id;
 		busy = true;
 		const result = await request<ListResponse>({ action: 'list' });
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
 		busy = false;
 		if (result.error || !result.files) {
 			files = [];
@@ -310,14 +490,35 @@
 	async function openFile(path: string) {
 		if (path === selectedPath) return;
 		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
+		const generation = ++ioGeneration;
+		const revision = sourceRevision;
+		const project = routePage.data.project?.id;
+		const composite =
+			mode === 'composites' ? composites.find((item) => `${item.name}.svelte` === path) : undefined;
 		busy = true;
-		const result = await request<{ content?: string; error?: string }>({ action: 'read', path });
+		const result = await request<{
+			content?: string;
+			revision?: string;
+			composite?: EditorComposite;
+			error?: string;
+		}>({ action: 'read', path, id: composite?.id });
+		if (generation !== ioGeneration || project !== routePage.data.project?.id) return;
 		busy = false;
+		if (revision !== sourceRevision) {
+			status = 'Open cancelled because the current source changed.';
+			return;
+		}
 		if (result.error || result.content === undefined) {
 			status = result.error ?? 'The file could not be read.';
 			return;
 		}
 		loadSource(path, result.content);
+		selectedCompositeId = result.composite?.id ?? null;
+		compositeRevision = result.revision ?? '';
+		if (result.composite)
+			composites = composites.map((item) =>
+				item.id === result.composite?.id ? result.composite : item
+			);
 		status = `Opened ${path}.`;
 	}
 
@@ -347,17 +548,36 @@
 		}
 		busy = true;
 		const source = joined.source;
-		const result = await request<{ saved?: boolean; error?: string }>({
+		const generation = ++ioGeneration;
+		const project = routePage.data.project?.id;
+		const path = selectedPath;
+		const result = await request<{
+			saved?: boolean;
+			revision?: string;
+			composite?: EditorComposite;
+			error?: string;
+		}>({
 			action: 'save',
 			path: selectedPath,
 			content: source,
 			force
 		});
+		if (
+			generation !== ioGeneration ||
+			project !== routePage.data.project?.id ||
+			selectedPath !== path
+		)
+			return;
 		busy = false;
 		if (result.error) {
 			status = result.error;
 		} else if (result.saved) {
 			baseline = source;
+			compositeRevision = result.revision ?? compositeRevision;
+			if (result.composite)
+				composites = composites.map((item) =>
+					item.id === result.composite?.id ? result.composite : item
+				);
 			confirmForce = false;
 			status = `Saved ${selectedPath}.`;
 			if (mode === 'widgets') await Promise.all([loadWidgets(), loadWidgetOverrides()]);
@@ -369,17 +589,30 @@
 
 	async function createComponent(event: SubmitEvent) {
 		event.preventDefault();
+		if (mode !== 'project') return;
 		let name = newName.trim().replace(/\\/g, '/');
 		if (!name) return;
 		if (!name.endsWith('.svelte')) name += '.svelte';
 		if (dirty && !confirm('Discard your unsaved changes to this component?')) return;
 		creating = true;
+		const generation = ++ioGeneration;
+		const revision = sourceRevision;
+		const project = routePage.data.project?.id;
+		const root = projectRoot;
 		const content = newComponentSource(newLang);
 		const result = await request<{ saved?: boolean; error?: string }>({
 			action: 'create',
 			path: name,
 			content
 		});
+		if (
+			generation !== ioGeneration ||
+			project !== routePage.data.project?.id ||
+			root !== projectRoot
+		) {
+			creating = false;
+			return;
+		}
 		creating = false;
 		if (result.error || !result.saved) {
 			status = result.error ?? 'The component could not be created.';
@@ -387,6 +620,13 @@
 		}
 		newName = '';
 		await loadFiles();
+		if (
+			generation + 1 !== ioGeneration ||
+			project !== routePage.data.project?.id ||
+			root !== projectRoot ||
+			revision !== sourceRevision
+		)
+			return;
 		loadSource(name, content);
 		status = `Created ${name}.`;
 	}
@@ -539,7 +779,22 @@
 					class:on={mode === 'widgets'}
 					onclick={() => setMode('widgets')}>Built-in widgets</button
 				>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={mode === 'composites'}
+					class:on={mode === 'composites'}
+					onclick={() => setMode('composites')}>Composites</button
+				>
 			</div>
+			<label class="field-label" for="ce-filter">Find</label>
+			<input
+				id="ce-filter"
+				class="field-control"
+				type="search"
+				placeholder="Find by name or path…"
+				bind:value={filter}
+			/>
 
 			{#if mode === 'widgets'}
 				<p class="panel-hint">
@@ -547,7 +802,7 @@
 					preview and in exports.
 				</p>
 				<ul class="file-list" aria-label="Built-in widgets">
-					{#each widgets as widget (widget.name)}
+					{#each visibleWidgets as widget (widget.name)}
 						<li>
 							<button
 								type="button"
@@ -559,11 +814,44 @@
 								{#if widget.modified}<small>edited</small>{/if}
 							</button>
 						</li>
+					{:else}
+						<li class="empty">{widgets.length ? 'No match.' : 'No widgets to show.'}</li>
 					{/each}
 				</ul>
 				{#if selectedPath}
 					<button type="button" class="ghost" disabled={busy} onclick={resetWidget}>
 						Reset to default
+					</button>
+				{/if}
+			{:else if mode === 'composites'}
+				<p class="panel-hint">
+					Edit Script, Markup and Style. Saved native source replaces visual rendering in preview
+					and export. Visual layout edits do not overwrite this override; reset to use them again.
+				</p>
+				<ul class="file-list" aria-label="Composites">
+					{#each visibleComposites as composite (composite.id)}
+						<li>
+							<button
+								type="button"
+								class="file-item"
+								class:active={selectedCompositeId === composite.id}
+								onclick={() => openFile(`${composite.name}.svelte`)}
+							>
+								<strong>{composite.name}</strong>
+								{#if composite.source !== undefined}<small>edited</small>{/if}
+							</button>
+						</li>
+					{:else}
+						<li class="empty">
+							{composites.length
+								? 'No match.'
+								: 'No composites yet. Create one in the visual Composites editor.'}
+						</li>
+					{/each}
+				</ul>
+				{#if selectedPath}
+					<button type="button" class="ghost" disabled={busy} onclick={resetComposite}>
+						Reset to generated source
 					</button>
 				{/if}
 			{:else}
@@ -600,14 +888,7 @@
 					onclose={() => (showPicker = false)}
 				/>
 
-				<label class="field-label" for="ce-filter">Files in <code>src/lib/components</code></label>
-				<input
-					id="ce-filter"
-					class="field-control"
-					type="search"
-					placeholder="Filter…"
-					bind:value={filter}
-				/>
+				<p class="field-label">Files in <code>src/lib/components</code></p>
 				<ul class="file-list" aria-label="Component files">
 					{#each visibleFiles as file (file.path)}
 						<li>
@@ -662,8 +943,8 @@
 				<div class="placeholder">
 					<h2>Edit a component</h2>
 					<p>
-						Open a project, then pick a <code>.svelte</code> file on the left or create a new one. Script,
-						markup and style are edited separately and checked by the Svelte compiler.
+						Pick a project component, built-in widget or composite on the left. Script, markup and
+						style are edited separately and checked by the Svelte compiler.
 					</p>
 				</div>
 			{:else}
@@ -835,6 +1116,16 @@
 		</section>
 
 		<aside class="inspector-panel" aria-label="Problems and props">
+			{#if previewBlock && selectedComposite}
+				<h2>Composite preview</h2>
+				<p class="panel-hint">Live native source; save to apply to page instances and exports.</p>
+				<div
+					class="composite-source-preview"
+					style:aspect-ratio={`${selectedComposite.width} / ${selectedComposite.height}`}
+				>
+					<BlockContent block={previewBlock} />
+				</div>
+			{/if}
 			<div class="panel-heading">
 				<div>
 					<p class="eyebrow">COMPILER</p>
@@ -892,6 +1183,13 @@
 </div>
 
 <style>
+	.composite-source-preview {
+		width: 100%;
+		min-height: 8rem;
+		overflow: auto;
+		border: 1px solid #cbd5e1;
+		margin-bottom: 1rem;
+	}
 	:global(main:has(.editor-shell)) {
 		width: 100%;
 		max-width: none;
@@ -1374,11 +1672,13 @@
 
 	.mode-tabs button {
 		flex: 1;
-		padding: 0.35rem 0.5rem;
+		min-width: 0;
+		padding: 0.35rem 0.25rem;
 		border: 1px solid #e8e8ed;
 		border-radius: 6px;
 		background: #fff;
-		font-size: 0.8rem;
+		font-size: 0.7rem;
+		color: #33354a;
 		cursor: pointer;
 	}
 

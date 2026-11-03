@@ -26,7 +26,12 @@ import {
 	ProjectError
 } from '../../../../lib/server/project.js';
 import { createProject } from '../../../../lib/server/new-project.js';
-import { loadSite, saveSite, updateProject } from '../../../../lib/server/project-store.js';
+import {
+	loadSite,
+	saveSite,
+	updateProject,
+	ProjectStoreError
+} from '../../../../lib/server/project-store.js';
 import { mergeImportedSite } from '../../../../lib/site-merge.js';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
@@ -69,6 +74,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					{ status: 400 }
 				);
 			}
+			// Unsaved visual geometry may be exported, but stale visual snapshots never replace code.
+			const saved = await loadSite(db, project.id);
+			site.composites = site.composites.map((item) => {
+				const current = saved.composites.find((candidate) => candidate.id === item.id);
+				return current ? { ...item, source: current.source } : item;
+			});
 			if (action === 'create') {
 				const result = await createProject(root, site, project.theme, {
 					install: install === true,
@@ -105,7 +116,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 		return json({ error: 'Unknown action.' }, { status: 400 });
 	} catch (error) {
-		if (error instanceof ProjectError) return json({ error: error.message }, { status: 400 });
+		if (error instanceof ProjectError || error instanceof ProjectStoreError)
+			return json({ error: error.message }, { status: 400 });
 		console.error('Project export/import failed.', error);
 		return json({ error: 'The project files could not be read or written.' }, { status: 500 });
 	}

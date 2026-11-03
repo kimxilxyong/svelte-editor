@@ -37,6 +37,9 @@ The `/component-editor` route edits native `.svelte` files part by part. When ch
 - `src/routes/component-editor/api/+server.ts` – thin JSON action endpoint (`list`/`read`/`save`/`create`).
 - `src/lib/components/CodeEditor.svelte` – reusable CodeMirror 6 wrapper (`value`, `language`, `diagnostics`, `api`); the view is created once in an attachment and props are pushed in through Compartments/transactions.
 - `src/routes/component-editor/+page.svelte` – composes the above; documents the data flow in its `@component` block.
+- `src/routes/component-editor/composites/+server.ts` – active-project, poweruser-only list/read/save/reset
+  actions for native composites. Saves require an opaque read revision and target one composite row.
+  A single Find field immediately below Project / Built-in widgets / Composites filters all lists.
 
 Document any change to these modules in the matching `@fileoverview` / `@component` block, and keep the position conventions (1-based lines, 0-based columns) explicit in new types.
 
@@ -49,6 +52,16 @@ A **Composite Component** is a named, reusable group of widgets edited on a visu
 - `src/lib/composite-context.ts` + `BlockContent.svelte` – render context and recursive rendering (children positioned in % of the composite size, depth-limited).
 - `src/lib/components/SiteEditor.svelte` – the shared canvas editor; `mode="pages"` (`/editor`) or `mode="composites"` (`/composites`). The other document kind is stashed and merged on save.
 - `src/lib/svelte-pages.ts` / `src/lib/server/project.ts` – generate/parse pages and composites (`src/lib/components/editor/<Name>.svelte`, marked with `data-editor-composite`).
+- `EditorComposite.source` – optional exact native override, retained through parsing, visual snapshots,
+  persistence and exports. Visual saves preserve the current stored override; reset explicitly removes it.
+  `project-store.ts` stores `{ blocks, source }` in the existing blocks JSON column (legacy arrays stay valid)
+  and provides revision-guarded targeted code writes. No schema migration or second source registry.
+- `src/lib/composite-source.ts` / `composite-runtime.ts` / `components/CompositeSource.svelte` – shared AST
+  import policy and context-scoped recursive compilation using widget-runtime's constrained compiler.
+  Nested generated/native composites and widget overrides resolve via explicit dependencies, with cycle/depth
+  guards, stale-generation rejection and visible failures. Composite sources cannot dynamically import modules.
+- Exported `.editor-composites.json` holds stable visual identity/layout metadata and content hashes separately
+  from authored source, so marker-free native edits round-trip verbatim without overwriting handwritten files.
 
 ## Authentication, Admin & Database Architecture Map
 

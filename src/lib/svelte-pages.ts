@@ -11,6 +11,8 @@
  *      subpath, depending on the target project's import configuration.
  *    - Renders `<svelte:head><title>...</title></svelte:head>`.
  *    - Resolves docked geometry against declared page/composite dimensions and stores alignment
+ * - Composite native source overrides are authoritative and returned byte-for-byte; parsing
+ *   imported composites retains their entire source, not merely reconstructed widget geometry.
  *      metadata on each absolute-positioned wrapper (pixels for pages, percentages for composites).
  *
  * 2. Importer (`parsePageSource`):
@@ -314,6 +316,8 @@ export function renderCompositeSource(
 	composite: EditorComposite,
 	importStyle: LibImportStyle = 'sveltekit'
 ): string {
+	// Native overrides are authoritative: never regenerate, normalize or rewrite authored imports.
+	if (composite.source !== undefined) return composite.source;
 	const layout = resolveBlockLayout(composite.blocks, composite.width, composite.height);
 	const names = [
 		...new Set(
@@ -620,5 +624,5 @@ export function parseCompositeSource(
 
 	const blocks = parseBuilderBlocks(readBlocks(element, compositeNames, width / 100, height / 100));
 	if (!blocks) return null;
-	return { id: globalThis.crypto.randomUUID(), name, width, height, blocks };
+	return { id: globalThis.crypto.randomUUID(), name, width, height, blocks, source };
 }

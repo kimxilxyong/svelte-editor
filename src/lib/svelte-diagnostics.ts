@@ -65,16 +65,22 @@ function toDiagnostic(item: CompilerMessage, severity: 'error' | 'warning'): Sou
  * @param source - Full file text (use `joinSvelteSource(parts).source`).
  * @param filename - Used by the compiler for messages and component naming. Defaults to
  *   `Component.svelte`.
+ * @param options - Optional compiler mode; native composites explicitly require runes to match
+ *   their constrained browser runtime. Other source editors retain compiler inference.
  * @returns `ok` plus the list of diagnostics. Never throws.
  * @example
  * const { ok, diagnostics } = checkSvelteSource('<p>{</p>');
  * ok; // false
  * diagnostics[0].severity; // 'error'
  */
-export function checkSvelteSource(source: string, filename = 'Component.svelte'): CheckResult {
+export function checkSvelteSource(
+	source: string,
+	filename = 'Component.svelte',
+	options: { runes?: boolean } = {}
+): CheckResult {
 	const diagnostics: SourceDiagnostic[] = [];
 	try {
-		const result = compile(source, { generate: false, filename, runes: undefined });
+		const result = compile(source, { generate: false, filename, runes: options.runes });
 		for (const warning of result.warnings) {
 			diagnostics.push(toDiagnostic(warning as CompilerMessage, 'warning'));
 		}

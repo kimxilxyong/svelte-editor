@@ -14,7 +14,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseEditorSite } from '../../../lib/editor.js';
 import { getDatabase } from '../../../lib/server/database/manager.js';
-import { loadSite, saveSite } from '../../../lib/server/project-store.js';
+import { loadSite, saveSite, ProjectStoreError } from '../../../lib/server/project-store.js';
+import { hasRole } from '../../../lib/auth/roles.js';
 
 export const GET: RequestHandler = async ({ locals }) => {
 	const project = locals.project;
@@ -56,9 +57,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			);
 		}
 		try {
-			await saveSite(await getDatabase(), project.id, site);
-			return json({ success: true });
+			const db = await getDatabase();
+			const saved = await loadSite(db, project.id);
+			if (!locals.user || !hasRole(locals.user.role, 'poweruser')) {
+				const existingIds = new Set(saved.composites.map((item) => item.id));
+				if (
+					site.composites.some((item) => item.source !== undefined && !existingIds.has(item.id))
+				) {
+					return json({ error: 'Native composite code requires a power user.' }, { status: 403 });
+				}
+			}
+			await saveSite(db, project.id, site, { preserveCompositeSources: true });
+			return json({ success: true, site: await loadSite(db, project.id) });
 		} catch (error) {
+			if (error instanceof ProjectStoreError)
+				return json({ error: error.message }, { status: error.code === 'not_found' ? 404 : 400 });
 			console.error('Unable to save the project site.', error);
 			return json({ error: 'Unable to save the project to the database.' }, { status: 500 });
 		}

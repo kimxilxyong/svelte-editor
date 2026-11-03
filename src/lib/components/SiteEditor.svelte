@@ -46,6 +46,9 @@
 
 	/**
 	 * @component SiteEditor
+	 * Native composite overrides remain independent of this visual geometry. Composite preview
+	 * renders the whole override through CompositeSource, while editing shows retained layout with
+	 * an explicit warning; source resets belong to /component-editor, never an implicit visual save.
 	 * @prop {'pages' | 'composites'} [mode='pages'] - Which domain collection the shared canvas
 	 *   edits. Fixed for the component lifetime; routes mount one editor per mode.
 	 */
@@ -56,6 +59,7 @@
 	import BlockInspector from './BlockInspector.svelte';
 	import { untrack } from 'svelte';
 	import BlockContent from './BlockContent.svelte';
+	import CompositeSource from './CompositeSource.svelte';
 	import ThemeScope from './editor/ThemeScope.svelte';
 	import BuilderHeader from './BuilderHeader.svelte';
 	import { useNavContext } from '../navigation.svelte.js';
@@ -414,7 +418,15 @@
 		databaseStatus = 'Saving site to the database…';
 
 		try {
-			await requestApi('POST', { action: 'save', site: siteSnapshot });
+			const result = await requestApi('POST', { action: 'save', site: siteSnapshot });
+			// A code editor in another tab may have changed overrides since this visual snapshot.
+			// Refresh only authoritative native source, leaving all in-flight geometry edits intact.
+			if (result.site) {
+				for (const composite of composites) {
+					const saved = result.site.composites.find((item) => item.id === composite.id);
+					if (saved) composite.source = saved.source;
+				}
+			}
 			hasUnsavedChanges = revision !== savedRevision;
 			databaseStatus = hasUnsavedChanges
 				? 'More changes still need saving'
@@ -1420,6 +1432,14 @@
 					{/if}
 				</div>
 
+				{#if composing && !isEditorPage(currentDocument) && currentDocument.source !== undefined}
+					<p class="panel-hint" role="note">
+						This composite has edited native source. Preview and export use that source; visual
+						layout changes will not replace it. Reset it in
+						<a href={resolve('/component-editor')}>Components → Composites</a> to use the visual layout
+						again.
+					</p>
+				{/if}
 				<div class="canvas-stage">
 					<div class="canvas-fit" bind:clientWidth={stageWidth}>
 						<ThemeScope theme={routePage.data.siteTheme}>
@@ -1442,7 +1462,14 @@
 									ondragover={handleCanvasDragOver}
 									ondrop={handleDrop}
 								>
-									{#if blocks.length === 0}
+									{#if isPreview && composing && !isEditorPage(currentDocument) && currentDocument.source !== undefined}
+										<div
+											style:width="{currentDocument.width}px"
+											style:height="{currentDocument.height}px"
+										>
+											<CompositeSource composite={currentDocument} />
+										</div>
+									{:else if blocks.length === 0}
 										<div class="empty-canvas">
 											<div class="empty-icon" aria-hidden="true">✳</div>
 											<h2>{composing ? 'Your composite starts here' : 'Your page starts here'}</h2>

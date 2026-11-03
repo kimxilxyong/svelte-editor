@@ -14,7 +14,10 @@
  * ## Site storage
  * The editor still works with one whole {@link EditorSite} document: {@link loadSite} assembles it
  * from the page/composite rows and {@link saveSite} replaces the rows in one transaction. Page and
- * composite ids are unique per project only.
+ * composite ids are unique per project only. Composite native overrides live inside the existing
+ * `blocks` JSON column as `{ blocks, source }`; legacy array rows remain readable, so schema copying,
+ * duplication and backend migration need no DDL change. Code saves target one row with a SHA-256
+ * revision/CAS check; visual saves can preserve current overrides even from stale site snapshots.
  *
  * Interacts with:
  * - `auth/users.ts` – creates the first, empty project together with every new account.
@@ -22,8 +25,22 @@
  * - `widget-files.ts` – per-project widget overrides, removed together with the project.
  */
 
+import { createHash } from 'node:crypto';
 import { hasRole, type Role } from '../auth/roles.js';
-import { parseEditorSite, type EditorSite } from '../editor.js';
+import {
+	parseEditorSite,
+	type EditorSite,
+	type EditorComposite,
+	maxCompositeSourceBytes
+} from '../editor.js';
+import {
+	compositeSourceImports,
+	compositeImportPattern,
+	CompositeImportError
+} from '../composite-source.js';
+import { componentNames } from '../editor.js';
+import { checkSvelteSource } from '../svelte-diagnostics.js';
+import { renderCompositeSource } from '../svelte-pages.js';
 import {
 	imageLimits,
 	isValidImageCategory,
@@ -31,8 +48,7 @@ import {
 	normalizeImageName,
 	prepopulatedImages,
 	type ImageCategory,
-	type ManagedImage,
-	type ManagedImageInput
+	type ManagedImage
 } from '../images.js';
 import {
 	normalizeProjectName,
@@ -53,7 +69,8 @@ import {
 import type { SqlClient, SqlRow } from './database/types.js';
 
 /** Reason codes of {@link ProjectStoreError}. */
-export type ProjectStoreErrorCode = 'invalid_input' | 'name_taken' | 'not_found' | 'limit';
+export type ProjectStoreErrorCode =
+	'invalid_input' | 'name_taken' | 'not_found' | 'limit' | 'conflict';
 
 /** Error with a message that is safe to show to the user. */
 export class ProjectStoreError extends Error {
@@ -369,7 +386,7 @@ export async function loadSite(db: SqlClient, projectId: string): Promise<Editor
 			name: row.name,
 			width: Number(row.width),
 			height: Number(row.height),
-			blocks: JSON.parse(String(row.blocks))
+			...decodeComposite(String(row.blocks))
 		}))
 	});
 	if (!site) throw new Error('The saved project contains invalid pages or components.');
@@ -384,10 +401,41 @@ export async function loadSite(db: SqlClient, projectId: string): Promise<Editor
  * @param site - Validated site (see `parseEditorSite`).
  * @throws {ProjectStoreError} `not_found` when the project does not exist.
  */
-export async function saveSite(db: SqlClient, projectId: string, site: EditorSite): Promise<void> {
+export async function saveSite(
+	db: SqlClient,
+	projectId: string,
+	site: EditorSite,
+	options: { preserveCompositeSources?: boolean } = {}
+): Promise<void> {
 	await db.transaction(async (tx) => {
-		if (!(await tx.get('SELECT id FROM projects WHERE id = ?', [projectId]))) {
+		// A portable write acquires the per-project transaction lock on both backends before any
+		// source snapshot is read. Visual replacement cannot race past a targeted code save.
+		const locked = await tx.run('UPDATE projects SET updated_at = updated_at WHERE id = ?', [
+			projectId
+		]);
+		if (locked.changes !== 1) {
 			throw new ProjectStoreError('not_found', 'Project not found.');
+		}
+		const stored = await loadSite(tx, projectId);
+		const current = options.preserveCompositeSources ? stored : undefined;
+		// New/imported native overrides cross the same compiler boundary as targeted code writes.
+		// Unchanged force-saved sources stay legal during unrelated visual saves.
+		for (const composite of site.composites) {
+			const previous = stored.composites.find((item) => item.id === composite.id);
+			const source =
+				options.preserveCompositeSources && previous ? previous.source : composite.source;
+			if (
+				source !== undefined &&
+				source !== previous?.source &&
+				validateCompositeSource(source, composite.name, site.composites).some(
+					(item) => item.severity === 'error'
+				)
+			) {
+				throw new ProjectStoreError(
+					'invalid_input',
+					`Composite "${composite.name}" contains compile errors.`
+				);
+			}
 		}
 		await tx.run('DELETE FROM project_pages WHERE project_id = ?', [projectId]);
 		await tx.run('DELETE FROM project_composites WHERE project_id = ?', [projectId]);
@@ -408,6 +456,8 @@ export async function saveSite(db: SqlClient, projectId: string, site: EditorSit
 			);
 		}
 		for (const [ordinal, composite] of site.composites.entries()) {
+			const previous = current?.composites.find((item) => item.id === composite.id);
+			const effective = previous ? { ...composite, source: previous.source } : composite;
 			await tx.run(
 				`INSERT INTO project_composites (project_id, id, ordinal, name, width, height, blocks)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -418,7 +468,7 @@ export async function saveSite(db: SqlClient, projectId: string, site: EditorSit
 					composite.name,
 					Math.round(composite.width),
 					Math.round(composite.height),
-					JSON.stringify(composite.blocks)
+					encodeComposite(effective)
 				]
 			);
 		}
@@ -429,6 +479,159 @@ export async function saveSite(db: SqlClient, projectId: string, site: EditorSit
 	});
 }
 
+/** Decodes legacy arrays and versionless native-source JSON envelopes without losing exact text. */
+function decodeComposite(json: string): Pick<EditorComposite, 'blocks' | 'source'> {
+	const value = JSON.parse(json);
+	return Array.isArray(value) ? { blocks: value } : value;
+}
+
+/** Keeps legacy rows compact; an empty string is an active override, unlike undefined. */
+function encodeComposite(composite: EditorComposite): string {
+	return JSON.stringify(
+		composite.source === undefined
+			? composite.blocks
+			: { blocks: composite.blocks, source: composite.source }
+	);
+}
+
+/** Opaque content revision includes layout/name metadata so visual edits invalidate code writes. */
+function compositeRevision(composite: EditorComposite): string {
+	return createHash('sha256').update(JSON.stringify(composite)).digest('hex');
+}
+
+/**
+ * Validates native imports and compiles in the same runes mode as the runtime.
+ * Syntax diagnostics may be force-saved by the targeted editor; import policy always throws.
+ */
+function validateCompositeSource(source: string, name: string, composites: EditorComposite[]) {
+	if (source.includes('\0') || new TextEncoder().encode(source).length > maxCompositeSourceBytes) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			'Composite source must be at most 128 KiB without NUL characters.'
+		);
+	}
+	const diagnostics = checkSvelteSource(source, `${name}.svelte`, { runes: true }).diagnostics;
+	let imports: string[] = [];
+	try {
+		imports = compositeSourceImports(source);
+	} catch (error) {
+		if (
+			error instanceof CompositeImportError ||
+			!diagnostics.some((item) => item.severity === 'error')
+		) {
+			throw new ProjectStoreError('invalid_input', (error as Error).message);
+		}
+	}
+	const names = new Set([...Object.values(componentNames), ...composites.map((item) => item.name)]);
+	for (const specifier of imports) {
+		const match = compositeImportPattern.exec(specifier);
+		if (match ? !names.has(match[1]) : !['svelte', 'flowbite-svelte'].includes(specifier)) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				`Composite sources cannot import "${specifier}".`
+			);
+		}
+	}
+	return diagnostics;
+}
+
+/**
+ * Reads one scoped composite and its exact effective source and optimistic revision.
+ * @param db - Portable database client.
+ * @param projectId - Ownership-checked active project id.
+ * @param id - Composite identity, never inferred from editable source markers.
+ * @returns Definition, native/generated content, and revision.
+ * @throws {ProjectStoreError} When the project or composite does not exist.
+ */
+export async function readCompositeSource(db: SqlClient, projectId: string, id: string) {
+	if (!(await getProject(db, projectId)))
+		throw new ProjectStoreError('not_found', 'Project not found.');
+	const composite = (await loadSite(db, projectId)).composites.find((item) => item.id === id);
+	if (!composite) throw new ProjectStoreError('not_found', 'Composite not found.');
+	return {
+		composite,
+		content: renderCompositeSource(composite),
+		revision: compositeRevision(composite)
+	};
+}
+
+/**
+ * Saves or resets only one composite's source. Names, ids, dimensions, blocks and unrelated rows
+ * are never derived from edited markup. Validation runs server-side; force permits compile errors
+ * but not size, import-policy or revision violations. Reset removes the source, restoring geometry.
+ * @param db - Portable SQL client; transaction plus row CAS handles overlapping editor saves.
+ * @param projectId - Ownership-checked active project.
+ * @param id - Stable composite id.
+ * @param content - Exact source, or undefined to reset.
+ * @param revision - Last read revision (required even for reset).
+ * @param force - Permit syntactically invalid source; preview will show a visible error.
+ * @returns Save result, compiler diagnostics and refreshed definition/content/revision on success.
+ * @throws {ProjectStoreError} On limits, policy violations, missing identity or stale revision.
+ */
+export async function saveCompositeSource(
+	db: SqlClient,
+	projectId: string,
+	id: string,
+	content: unknown,
+	revision: unknown,
+	force = false
+) {
+	if (
+		content !== undefined &&
+		(typeof content !== 'string' ||
+			content.includes('\0') ||
+			new TextEncoder().encode(content).length > maxCompositeSourceBytes)
+	) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			'Composite source must be text of at most 128 KiB without NUL characters.'
+		);
+	}
+	return db.transaction(async (tx) => {
+		const locked = await tx.run('UPDATE projects SET updated_at = updated_at WHERE id = ?', [
+			projectId
+		]);
+		if (locked.changes !== 1) throw new ProjectStoreError('not_found', 'Project not found.');
+		const raw = await tx.get(
+			'SELECT blocks FROM project_composites WHERE project_id = ? AND id = ?',
+			[projectId, id]
+		);
+		const read = await readCompositeSource(tx, projectId, id);
+		if (revision !== read.revision)
+			throw new ProjectStoreError('conflict', 'This composite changed. Reopen it before saving.');
+		const source = content as string | undefined;
+		const diagnostics =
+			source === undefined
+				? []
+				: validateCompositeSource(
+						source,
+						read.composite.name,
+						(await loadSite(tx, projectId)).composites
+					);
+		if (!force && diagnostics.some((item) => item.severity === 'error'))
+			return { saved: false, diagnostics };
+		const next = { ...read.composite, source };
+		const changed = await tx.run(
+			'UPDATE project_composites SET blocks = ? WHERE project_id = ? AND id = ? AND blocks = ? AND name = ? AND width = ? AND height = ?',
+			[
+				encodeComposite(next),
+				projectId,
+				id,
+				String(raw?.blocks),
+				read.composite.name,
+				read.composite.width,
+				read.composite.height
+			]
+		);
+		if (changed.changes !== 1)
+			throw new ProjectStoreError('conflict', 'This composite changed. Reopen it before saving.');
+		await tx.run('UPDATE projects SET updated_at = ? WHERE id = ?', [
+			new Date().toISOString(),
+			projectId
+		]);
+		return { saved: true, diagnostics, ...(await readCompositeSource(tx, projectId, id)) };
+	});
+}
 // ---------------------------------------------------------------------------
 // Managed Themes (`themes` table)
 // ---------------------------------------------------------------------------

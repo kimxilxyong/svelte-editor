@@ -4,6 +4,8 @@
  *
  * This module defines the domain entities used across the application:
  * - Block kinds (atomic widgets, composite components and imported custom components).
+ * - Optional exact composite native-source overrides, retained by parsing and site snapshots.
+ *   Native source is independent of visual pixel geometry; only explicit reset relinquishes it.
  * - Composite components: reusable groups of widgets (and other composites) that are edited on a
  *   visual canvas exactly like pages and exported as native `.svelte` components.
  * - Layout and positioning models (absolute pixel geometry plus edge/fill alignment).
@@ -237,7 +239,12 @@ export type EditorComposite = {
 	height: number;
 	/** Blocks positioned on the composite canvas. */
 	blocks: BuilderBlock[];
+	/** Exact native source override. Visual geometry remains editable but never replaces this source. */
+	source?: string;
 };
+
+/** Maximum UTF-8 size of a native composite override, matching widget source limits. */
+export const maxCompositeSourceBytes = 128 * 1024;
 
 /**
  * Root site model holding all pages and composite components of the user's project.
@@ -708,7 +715,11 @@ export function parseComposites(value: unknown): EditorComposite[] | null {
 			typeof composite.height !== 'number' ||
 			!Number.isFinite(composite.height) ||
 			composite.height < compositeLimits.minHeight ||
-			composite.height > compositeLimits.maxHeight
+			composite.height > compositeLimits.maxHeight ||
+			(composite.source !== undefined &&
+				(typeof composite.source !== 'string' ||
+					composite.source.includes('\0') ||
+					new TextEncoder().encode(composite.source).length > maxCompositeSourceBytes))
 		) {
 			return null;
 		}
@@ -719,7 +730,8 @@ export function parseComposites(value: unknown): EditorComposite[] | null {
 			name: composite.name,
 			width: composite.width,
 			height: composite.height,
-			blocks
+			blocks,
+			...(composite.source !== undefined ? { source: composite.source as string } : {})
 		});
 	}
 

@@ -13,20 +13,29 @@ import type { SiteTheme } from '../../lib/theme.js';
 import { hasRole } from '../../lib/auth/roles.js';
 import { getDatabase } from '../../lib/server/database/manager.js';
 import { requireRole } from '../../lib/server/auth/guard.js';
-import { updateProject } from '../../lib/server/project-store.js';
+import {
+	createManagedTheme,
+	deleteManagedTheme,
+	listThemes,
+	ProjectStoreError,
+	updateManagedTheme,
+	updateProject
+} from '../../lib/server/project-store.js';
 import type { Actions, PageServerLoad } from './$types';
 
-/** @returns `{ canEdit }` – whether the signed-in user may save a new theme for the active project. */
-export const load: PageServerLoad = ({ locals }) => ({
-	canEdit: hasRole(locals.user?.role, 'poweruser') && locals.project !== null
+/** @returns `{ canEdit, themes }` – whether the signed-in user may manage themes and the library of themes. */
+export const load: PageServerLoad = async ({ locals }) => ({
+	canEdit: hasRole(locals.user?.role, 'poweruser'),
+	themes: await listThemes(await getDatabase())
 });
 
 export const actions: Actions = {
-	/** Validates the JSON in the `theme` form field and stores it as the active project's theme. */
+	/**
+	 * Validates the JSON in the `theme` form field, updates/creates the managed theme if `themeId` or
+	 * `themeName` is provided, and stores it as the active project's theme when a project is open.
+	 */
 	save: async ({ request, locals }) => {
 		requireRole(locals, 'poweruser');
-		const project = locals.project;
-		if (!project) return fail(409, { error: 'Create or open a project first.' });
 		const form = await request.formData();
 		let payload: unknown;
 		try {
@@ -34,11 +43,64 @@ export const actions: Actions = {
 		} catch {
 			return fail(400, { error: 'The theme could not be read.' });
 		}
+		const themeId = String(form.get('themeId') ?? '').trim();
+		const themeName = String(form.get('themeName') ?? '').trim();
+		const db = await getDatabase();
 		try {
-			await updateProject(await getDatabase(), project.id, { theme: payload as SiteTheme });
-		} catch {
-			return fail(400, { error: 'The theme is invalid.' });
+			if (themeId) {
+				await updateManagedTheme(db, themeId, {
+					...(themeName ? { name: themeName } : {}),
+					theme: payload
+				});
+			} else if (themeName) {
+				await createManagedTheme(db, { name: themeName, theme: payload });
+			}
+			if (locals.project) {
+				await updateProject(db, locals.project.id, { theme: payload as SiteTheme });
+			}
+		} catch (error) {
+			return fail(400, {
+				error: error instanceof ProjectStoreError ? error.message : 'The theme is invalid.'
+			});
 		}
 		return { saved: true };
+	},
+	/** Creates a new named theme in the managed themes library. */
+	create: async ({ request, locals }) => {
+		requireRole(locals, 'poweruser');
+		const form = await request.formData();
+		let payload: unknown;
+		try {
+			payload = JSON.parse(String(form.get('theme') ?? ''));
+		} catch {
+			return fail(400, { error: 'The theme could not be read.' });
+		}
+		const themeName = String(form.get('themeName') ?? '').trim();
+		const db = await getDatabase();
+		try {
+			const created = await createManagedTheme(db, { name: themeName, theme: payload });
+			if (locals.project) {
+				await updateProject(db, locals.project.id, { theme: created.theme });
+			}
+			return { saved: true, createdId: created.id };
+		} catch (error) {
+			return fail(400, {
+				error: error instanceof ProjectStoreError ? error.message : 'Could not create theme.'
+			});
+		}
+	},
+	/** Deletes a managed theme from the library. */
+	delete: async ({ request, locals }) => {
+		requireRole(locals, 'poweruser');
+		const form = await request.formData();
+		const themeId = String(form.get('themeId') ?? '').trim();
+		try {
+			await deleteManagedTheme(await getDatabase(), themeId);
+			return { deleted: true };
+		} catch (error) {
+			return fail(400, {
+				error: error instanceof ProjectStoreError ? error.message : 'Could not delete theme.'
+			});
+		}
 	}
 };

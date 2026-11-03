@@ -9,6 +9,7 @@
 	 * @prop {string} [title] - Brand name.
 	 * @prop {string} [items] - Links, one per line as `Label | /link` (only `https://` and `/path`
 	 *   targets are used). Defaults to Home / About / Contact.
+	 * @prop {string} [image=''] - Optional brand logo/icon URL.
 	 * @prop {(event: MouseEvent) => void} [onnavigate] - Reports link clicks to the host.
 	 */
 	import { Navbar, NavBrand, NavUl, NavLi, NavHamburger } from 'flowbite-svelte';
@@ -16,10 +17,19 @@
 	let {
 		title = '',
 		items = '',
+		image = '',
 		onnavigate
-	}: { title?: string; items?: string; onnavigate?: (event: MouseEvent) => void } = $props();
+	}: {
+		title?: string;
+		items?: string;
+		image?: string;
+		onnavigate?: (event: MouseEvent) => void;
+	} = $props();
 	const safe = (href: string) =>
 		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href);
+	const safeImage = $derived(
+		/^(https?:\/\/[^\s]+|\/(?!\/)[^\s]*|data:image\/[a-z+.-]+[;,][^\s]*)$/i.test(image)
+	);
 	const links = $derived(
 		(items || 'Home | /\nAbout | /about\nContact | /contact')
 			.split('\n')
@@ -34,7 +44,12 @@
 
 <div class="h-full w-full overflow-visible">
 	<Navbar class="w-full">
-		<NavBrand href={undefined}><span class="text-lg font-semibold">{title}</span></NavBrand>
+		<NavBrand href={undefined}>
+			{#if safeImage}
+				<img src={image} alt="" class="mr-2 h-6 w-6 shrink-0 object-contain" />
+			{/if}
+			<span class="text-lg font-semibold">{title}</span>
+		</NavBrand>
 		<NavHamburger />
 		<NavUl>
 			{#each links as link, index (index)}

@@ -93,6 +93,10 @@ describe('navigation trail', () => {
 			label: 'Code editor',
 			section: 'components'
 		});
+		expect(describePath('/images')).toEqual({
+			label: 'Images',
+			section: 'other'
+		});
 		expect(breadcrumbsFor('/', names)).toEqual([{ label: 'Projects', path: null }]);
 		expect(breadcrumbsFor('/pages', names)).toEqual([
 			{ label: 'Projects', path: '/' },

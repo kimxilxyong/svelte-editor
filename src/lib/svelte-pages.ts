@@ -68,13 +68,14 @@ type PropName =
 	| 'level'
 	| 'href'
 	| 'newTab'
-	| 'items';
+	| 'items'
+	| 'image';
 
 /**
  * Prop attribute whitelist mapping for each built-in widget kind.
  */
 const kindProps: Record<WidgetKind, PropName[]> = {
-	'widget-button': ['body', 'action', 'href', 'newTab'],
+	'widget-button': ['body', 'action', 'href', 'newTab', 'image'],
 	'widget-text-field': ['title', 'body', 'action', 'value'],
 	'widget-textarea': ['title', 'body', 'action', 'value'],
 	'widget-checkbox': ['title', 'body', 'checked'],
@@ -82,12 +83,12 @@ const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-switch': ['title', 'body', 'checked'],
 	'widget-select': ['title', 'body', 'value', 'items'],
 	'widget-slider': ['title', 'body', 'level'],
-	'widget-badge': ['title', 'body'],
-	'widget-alert': ['title', 'body'],
+	'widget-badge': ['title', 'body', 'image'],
+	'widget-alert': ['title', 'body', 'image'],
 	'widget-progress': ['title', 'body', 'level'],
-	'widget-avatar': ['title', 'body'],
-	'widget-card': ['title', 'body', 'action', 'href', 'newTab'],
-	'widget-link': ['title', 'body', 'href', 'newTab'],
+	'widget-avatar': ['title', 'body', 'image'],
+	'widget-card': ['title', 'body', 'action', 'href', 'newTab', 'image'],
+	'widget-link': ['title', 'body', 'href', 'newTab', 'image'],
 	'widget-search': ['body', 'action'],
 	'widget-file-upload': ['title', 'body'],
 	'widget-dropzone': ['title', 'body'],
@@ -98,7 +99,7 @@ const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-phone-input': ['title', 'body'],
 	'widget-tags': ['title', 'action', 'items'],
 	'widget-button-group': ['body', 'items'],
-	'widget-gradient-button': ['body', 'action', 'href', 'newTab'],
+	'widget-gradient-button': ['body', 'action', 'href', 'newTab', 'image'],
 	'widget-rating': ['title', 'body', 'level'],
 	'widget-clipboard': ['title', 'body'],
 	'widget-heading': ['title', 'action'],
@@ -107,7 +108,7 @@ const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-divider': ['title'],
 	'widget-list': ['items'],
 	'widget-kbd': ['items'],
-	'widget-image': ['title', 'body', 'action'],
+	'widget-image': ['title', 'body', 'action', 'image'],
 	'widget-video': ['title', 'action'],
 	'widget-spinner': ['title', 'action'],
 	'widget-indicator': ['title', 'action'],
@@ -120,12 +121,12 @@ const kindProps: Record<WidgetKind, PropName[]> = {
 	'widget-stepper': ['items', 'level'],
 	'widget-radial-progress': ['title', 'level'],
 	'widget-pagination': ['items'],
-	'widget-toast': ['title', 'body'],
-	'widget-banner': ['title', 'body'],
+	'widget-toast': ['title', 'body', 'image'],
+	'widget-banner': ['title', 'body', 'image'],
 	'widget-tooltip': ['title', 'action'],
 	'widget-popover': ['title', 'body', 'action'],
 	'widget-breadcrumb': ['items'],
-	'widget-navbar': ['title', 'items'],
+	'widget-navbar': ['title', 'items', 'image'],
 	'widget-footer': ['title', 'items'],
 	'widget-sidebar': ['items'],
 	'widget-dropdown': ['action', 'items'],
@@ -284,7 +285,9 @@ function renderBlockElement(block: BuilderBlock, geometry: string): string {
 		}
 		propsStr = rendered.join(' ');
 	} else {
-		const allowed = kindProps[block.kind as WidgetKind] || [];
+		const allowed = (kindProps[block.kind as WidgetKind] || []).filter(
+			(prop) => prop !== 'image' || Boolean(block.image)
+		);
 		propsStr = allowed.map((prop) => renderProp(block, prop)).join(' ');
 	}
 	const colors = blockColorStyle(block);

@@ -38,6 +38,11 @@ export interface InspectorFields {
 	 * (button, card) an empty address means "no link".
 	 */
 	link?: { optional: boolean };
+	/**
+	 * Shows the managed Image Picker for widgets that can render an icon, avatar, thumbnail or
+	 * full image (`image` field, plus `action` sync on `widget-image`).
+	 */
+	image?: { label: string };
 	/** Shows one editor per entry of `customProps` (imported components only). */
 	customProps?: true;
 }
@@ -47,7 +52,12 @@ const labelled = (title: string, body = 'Helper text'): InspectorFields => ({ ti
 /** Fields per built-in widget. Mirrors what each `Widget*.svelte` renders. */
 const widgetFields: Record<WidgetKind, InspectorFields> = {
 	// The button renders only `action` as its label and `body` as its tooltip; `title` is unused.
-	'widget-button': { action: 'Button label', body: 'Tooltip', link: { optional: true } },
+	'widget-button': {
+		action: 'Button label',
+		body: 'Tooltip',
+		link: { optional: true },
+		image: { label: 'Button icon / image' }
+	},
 	'widget-text-field': { ...labelled('Label'), action: 'Placeholder' },
 	'widget-textarea': { ...labelled('Label'), action: 'Placeholder' },
 	'widget-checkbox': { ...labelled('Label'), checked: true },
@@ -59,17 +69,23 @@ const widgetFields: Record<WidgetKind, InspectorFields> = {
 		items: 'One option per line.'
 	},
 	'widget-slider': { ...labelled('Label'), level: true },
-	'widget-badge': { title: 'Badge text', body: 'Tooltip' },
-	'widget-alert': { title: 'Heading', body: 'Message' },
+	'widget-badge': { title: 'Badge text', body: 'Tooltip', image: { label: 'Badge icon' } },
+	'widget-alert': { title: 'Heading', body: 'Message', image: { label: 'Alert icon' } },
 	'widget-progress': { ...labelled('Label'), level: true },
-	'widget-avatar': { title: 'Name', body: 'Subtitle' },
+	'widget-avatar': { title: 'Name', body: 'Subtitle', image: { label: 'Avatar image' } },
 	'widget-card': {
 		title: 'Heading',
 		body: 'Description',
 		action: 'Button label',
-		link: { optional: true }
+		link: { optional: true },
+		image: { label: 'Card image' }
 	},
-	'widget-link': { title: 'Link text', body: 'Tooltip', link: { optional: false } },
+	'widget-link': {
+		title: 'Link text',
+		body: 'Tooltip',
+		link: { optional: false },
+		image: { label: 'Link icon / image' }
+	},
 	'widget-search': { body: 'Helper text', action: 'Placeholder' },
 	'widget-file-upload': { title: 'Label', body: 'Helper text' },
 	'widget-dropzone': { title: 'Instruction', body: 'Hint' },
@@ -85,7 +101,12 @@ const widgetFields: Record<WidgetKind, InspectorFields> = {
 	'widget-phone-input': { title: 'Label', body: 'Helper text' },
 	'widget-tags': { title: 'Label', action: 'Placeholder', items: 'Initial tags, one per line.' },
 	'widget-button-group': { body: 'Tooltip', items: 'One button label per line.' },
-	'widget-gradient-button': { action: 'Button label', body: 'Tooltip', link: { optional: true } },
+	'widget-gradient-button': {
+		action: 'Button label',
+		body: 'Tooltip',
+		link: { optional: true },
+		image: { label: 'Button icon / image' }
+	},
 	'widget-rating': { title: 'Caption', body: 'Helper text', level: true },
 	'widget-clipboard': { title: 'Label', body: 'Text to copy' },
 	'widget-heading': { title: 'Heading text', action: 'Tag (h1–h6)' },
@@ -94,7 +115,12 @@ const widgetFields: Record<WidgetKind, InspectorFields> = {
 	'widget-divider': { title: 'Centered text (optional)' },
 	'widget-list': { items: 'One entry per line.' },
 	'widget-kbd': { items: 'One key per line.' },
-	'widget-image': { title: 'Alt text', body: 'Caption', action: 'Image URL' },
+	'widget-image': {
+		title: 'Alt text',
+		body: 'Caption',
+		action: 'Image URL',
+		image: { label: 'Pick image' }
+	},
 	'widget-video': { title: 'Accessible title', action: 'Video URL' },
 	'widget-spinner': { title: 'Caption', action: 'Style: default, dots, bars, pulse, orbit' },
 	'widget-indicator': {
@@ -112,12 +138,16 @@ const widgetFields: Record<WidgetKind, InspectorFields> = {
 	'widget-stepper': { items: 'One step name per line.', level: true },
 	'widget-radial-progress': { title: 'Caption', level: true },
 	'widget-pagination': { items: 'One page label per line.' },
-	'widget-toast': { title: 'Heading', body: 'Message' },
-	'widget-banner': { title: 'Lead-in', body: 'Announcement' },
+	'widget-toast': { title: 'Heading', body: 'Message', image: { label: 'Toast icon' } },
+	'widget-banner': { title: 'Lead-in', body: 'Announcement', image: { label: 'Banner icon' } },
 	'widget-tooltip': { title: 'Tooltip text', action: 'Button label' },
 	'widget-popover': { title: 'Popover heading', body: 'Popover text', action: 'Button label' },
 	'widget-breadcrumb': { items: 'One crumb per line: Label | /link (link optional)' },
-	'widget-navbar': { title: 'Brand name', items: 'One link per line: Label | /link' },
+	'widget-navbar': {
+		title: 'Brand name',
+		items: 'One link per line: Label | /link',
+		image: { label: 'Brand logo / icon' }
+	},
 	'widget-footer': { title: 'Owner', items: 'One link per line: Label | /link' },
 	'widget-sidebar': { items: 'One entry per line: Label | /link' },
 	'widget-dropdown': {

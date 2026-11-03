@@ -27,6 +27,8 @@ export interface WidgetProps {
 	action: string;
 	/** Newline-separated entries, cells separated by `|`. */
 	items: string;
+	/** Optional image or icon URL picked from the managed images library. */
+	image?: string;
 	/** Percentage 0–100 for progress-, rating- and step-like widgets. */
 	level: number;
 	/** Optional link target. */

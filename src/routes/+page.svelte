@@ -39,7 +39,14 @@
 	import { resetProjectContext, useNavContext } from '../lib/navigation.svelte.js';
 	import { projectLimits, type ProjectSummary } from '../lib/projects.js';
 	import { projectApi } from '../lib/projects-client.js';
-	import { defaultSiteTheme } from '../lib/theme.js';
+	import {
+		builtInThemes,
+		defaultSiteTheme,
+		findMatchingTheme,
+		themesEqual,
+		type ManagedTheme,
+		type SiteTheme
+	} from '../lib/theme.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -58,6 +65,10 @@
 	const activeId = $derived(routePage.data.project?.id ?? '');
 	const ownCount = $derived(data.projects.filter((item) => item.ownerId === userId).length);
 	const canCreate = $derived(canEdit && ownCount < projectLimits.perUser);
+	const managedThemes = $derived<ManagedTheme[]>(
+		(routePage.data.themes as ManagedTheme[] | undefined) ??
+			builtInThemes.map((item) => ({ ...item, builtIn: true, createdAt: '', updatedAt: '' }))
+	);
 
 	let selectedId = $state('');
 	let query = $state('');
@@ -66,6 +77,7 @@
 	let status = $state('');
 	let creating = $state(false);
 	let newName = $state('');
+	let newThemeId = $state(builtInThemes[0].id);
 	let deleteOpen = $state(false);
 	let deleteText = $state('');
 	let showPicker = $state(false);
@@ -73,7 +85,12 @@
 	let folderState = $state<FolderState>('unset');
 	let folderMessage = $state('');
 	let folderDetails = $state<string[]>([]);
-	let draft = $state({ name: '', description: '', path: '' });
+	let draft = $state<{ name: string; description: string; path: string; theme: SiteTheme }>({
+		name: '',
+		description: '',
+		path: '',
+		theme: { ...defaultSiteTheme }
+	});
 	let nameInput = $state<HTMLInputElement | null>(null);
 	let newNameInput = $state<HTMLInputElement | null>(null);
 
@@ -88,7 +105,8 @@
 		!!selected &&
 			(draft.name !== selected.name ||
 				draft.description !== selected.description ||
-				draft.path !== selected.path)
+				draft.path !== selected.path ||
+				!themesEqual(draft.theme, selected.theme))
 	);
 	/** Owners of the visible projects (for the admin filter). */
 	const owners = $derived(
@@ -137,7 +155,12 @@
 		draftKey = key;
 		if (current) {
 			selectedId = current.id;
-			draft = { name: current.name, description: current.description, path: current.path };
+			draft = {
+				name: current.name,
+				description: current.description,
+				path: current.path,
+				theme: { ...current.theme }
+			};
 		}
 		// Messages and the delete confirmation belong to one project; a refresh of the same project
 		// (for example after an export remembered the folder) must not wipe them.
@@ -211,6 +234,7 @@
 		if (!canCreate) return;
 		creating = true;
 		newName = '';
+		newThemeId = managedThemes[0]?.id ?? builtInThemes[0].id;
 		await tick();
 		newNameInput?.focus();
 	}
@@ -218,8 +242,13 @@
 	async function createProject() {
 		const name = newName.trim();
 		if (!name) return;
+		const chosenTheme = managedThemes.find((item) => item.id === newThemeId)?.theme;
 		await run('Creating project…', async () => {
-			const { project } = await projectApi({ action: 'create', name });
+			const { project } = await projectApi({
+				action: 'create',
+				name,
+				...(chosenTheme ? { theme: chosenTheme } : {})
+			});
 			creating = false;
 			resetProjectContext();
 			await invalidateAll();
@@ -251,7 +280,8 @@
 				id: target.id,
 				name: draft.name,
 				description: draft.description,
-				path: draft.path.trim()
+				path: draft.path.trim(),
+				theme: $state.snapshot(draft.theme)
 			});
 			await invalidateAll();
 			status = 'Project saved';
@@ -373,8 +403,11 @@
 		}
 	}
 
-	const themeSummary = (project: ProjectSummary) =>
-		`${project.theme.preset} · ${project.theme.dark ? 'dark' : 'light'} · ${project.theme.font}`;
+	const themeSummary = (project: ProjectSummary) => {
+		const match = findMatchingTheme(project.theme, managedThemes);
+		const prefix = match ? `${match.name} · ` : '';
+		return `${prefix}${project.theme.preset} · ${project.theme.dark ? 'dark' : 'light'} · ${project.theme.font}`;
+	};
 </script>
 
 <svelte:head>
@@ -456,6 +489,19 @@
 						bind:value={newName}
 						onkeydown={(event) => event.key === 'Escape' && (creating = false)}
 					/>
+					<label class="field-label" for="new-project-theme">Theme</label>
+					<select
+						id="new-project-theme"
+						class="field-control"
+						aria-label="New project theme"
+						bind:value={newThemeId}
+					>
+						{#each managedThemes as entry (entry.id)}
+							<option value={entry.id}>
+								{entry.name} ({entry.theme.preset} · {entry.theme.dark ? 'dark' : 'light'})
+							</option>
+						{/each}
+					</select>
 					<div class="actions">
 						<button type="submit" class="primary" disabled={busy || !newName.trim()}>Create</button>
 						<button type="button" onclick={() => (creating = false)}>Cancel</button>
@@ -723,6 +769,35 @@
 						onclose={() => (showPicker = false)}
 					/>
 
+					<label class="field-label" for="project-theme">Theme</label>
+					<div class="project-input-row">
+						<select
+							id="project-theme"
+							class="field-control"
+							aria-label="Theme"
+							data-testid="project-theme-select"
+							value={findMatchingTheme(draft.theme, managedThemes)?.id ?? 'custom'}
+							onchange={(event) => {
+								const chosen = managedThemes.find((t) => t.id === event.currentTarget.value);
+								if (chosen) draft.theme = { ...chosen.theme };
+							}}
+						>
+							{#if !findMatchingTheme(draft.theme, managedThemes)}
+								<option value="custom" disabled>
+									Custom ({draft.theme.preset} · {draft.theme.dark ? 'dark' : 'light'})
+								</option>
+							{/if}
+							{#each managedThemes as entry (entry.id)}
+								<option value={entry.id}>
+									{entry.name} ({entry.theme.preset} · {entry.theme.dark ? 'dark' : 'light'})
+								</option>
+							{/each}
+						</select>
+					</div>
+					<p class="panel-hint">
+						Pick one of the managed themes or <a href={resolve('/theme')}>manage themes →</a>
+					</p>
+
 					<div class="actions settings-actions">
 						<button type="button" class="primary" disabled={busy || !dirty} onclick={saveSettings}>
 							Save settings
@@ -735,7 +810,8 @@
 								(draft = {
 									name: selected.name,
 									description: selected.description,
-									path: selected.path
+									path: selected.path,
+									theme: { ...selected.theme }
 								})}
 						>
 							Revert

@@ -10,6 +10,7 @@
 	 * @prop {string} body - Tooltip text.
 	 * @prop {string} href - Target address.
 	 * @prop {boolean} newTab - Open external links in a new tab.
+	 * @prop {string} [image=''] - Optional icon/image URL displayed next to the link text.
 	 * @prop {(event: MouseEvent) => void} [onnavigate] - Click handler so the host can intercept navigation.
 	 */
 	import { A } from 'flowbite-svelte';
@@ -19,16 +20,21 @@
 		body,
 		href,
 		newTab,
+		image = '',
 		onnavigate
 	}: {
 		title: string;
 		body: string;
 		href: string;
 		newTab: boolean;
+		image?: string;
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
 	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeImage = $derived(
+		/^(https?:\/\/[^\s]+|\/(?!\/)[^\s]*|data:image\/[a-z+.-]+[;,][^\s]*)$/i.test(image)
+	);
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">
@@ -37,7 +43,16 @@
 			href={safeHref ? href : undefined}
 			target={externalHref && newTab ? '_blank' : undefined}
 			rel="noopener noreferrer"
-			onclick={(event: MouseEvent) => onnavigate?.(event)}>{title} ↪</A
+			onclick={(event: MouseEvent) => onnavigate?.(event)}
 		>
+			{#if safeImage}
+				<img
+					src={image}
+					alt=""
+					class="mr-1.5 inline-block h-4 w-4 shrink-0 object-contain align-text-bottom"
+				/>
+			{/if}
+			{title} ↪
+		</A>
 	</div>
 </div>

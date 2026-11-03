@@ -232,6 +232,182 @@ export const defaultSiteTheme: Readonly<SiteTheme> = {
 	shadow: 'none'
 };
 
+/** Validation bounds for managed themes. */
+export const themeLimits = {
+	/** Maximum characters for a theme name. */
+	nameLength: 60,
+	/** Maximum number of managed themes in the library. */
+	maxThemes: 100
+} as const;
+
+/**
+ * A named, managed theme stored in the `themes` table so users can create, save, delete and pick
+ * themes during project setup or on the `/theme` page.
+ */
+export type ManagedTheme = {
+	/** Unique identifier (UUID or deterministic seed id). */
+	id: string;
+	/** Display name of the theme (unique, case-insensitive). */
+	name: string;
+	/** Full {@link SiteTheme} configuration. */
+	theme: SiteTheme;
+	/** `true` if this theme is one of the initial built-in seeds. */
+	builtIn: boolean;
+	/** ISO timestamp of creation. */
+	createdAt: string;
+	/** ISO timestamp of the last update. */
+	updatedAt: string;
+};
+
+/**
+ * Normalises a managed theme name: collapses whitespace and trims.
+ *
+ * @param raw - Untrusted name input.
+ * @returns Normalized name or `null` when empty or too long.
+ */
+export function normalizeThemeName(raw: unknown): string | null {
+	if (typeof raw !== 'string') return null;
+	const name = raw.replace(/\s+/g, ' ').trim();
+	return name.length >= 1 && name.length <= themeLimits.nameLength ? name : null;
+}
+
+/**
+ * Compares two {@link SiteTheme} objects for value equality across all normalized properties.
+ *
+ * @param a - First theme.
+ * @param b - Second theme.
+ * @returns `true` when both themes produce identical styling.
+ */
+export function themesEqual(a: SiteTheme, b: SiteTheme): boolean {
+	return (
+		a.preset === b.preset &&
+		a.primary.toLowerCase() === b.primary.toLowerCase() &&
+		a.secondary.toLowerCase() === b.secondary.toLowerCase() &&
+		a.background.toLowerCase() === b.background.toLowerCase() &&
+		a.foreground.toLowerCase() === b.foreground.toLowerCase() &&
+		a.radius === b.radius &&
+		a.font === b.font &&
+		a.dark === b.dark &&
+		a.inputStyle === b.inputStyle &&
+		a.inputSize === b.inputSize &&
+		a.inputBorder === b.inputBorder &&
+		a.focusRing === b.focusRing &&
+		a.shadow === b.shadow
+	);
+}
+
+/**
+ * Finds the managed theme whose values match `theme`, if any.
+ *
+ * @param theme - Project's current {@link SiteTheme}.
+ * @param managed - Available managed themes.
+ * @returns Matching {@link ManagedTheme} or `undefined`.
+ */
+export function findMatchingTheme(
+	theme: SiteTheme,
+	managed: readonly ManagedTheme[]
+): ManagedTheme | undefined {
+	return managed.find((entry) => themesEqual(entry.theme, theme));
+}
+
+/**
+ * Pre-seeded named themes so users always have multiple distinct themes to pick from in project
+ * setup and on the `/theme` management page.
+ */
+export const builtInThemes: readonly { id: string; name: string; theme: SiteTheme }[] = [
+	{
+		id: 'theme-violet-default',
+		name: 'Violet Default',
+		theme: { ...defaultSiteTheme }
+	},
+	{
+		id: 'theme-ocean-minimal',
+		name: 'Ocean Minimal',
+		theme: {
+			...defaultSiteTheme,
+			preset: 'ocean',
+			primary: '#2563eb',
+			secondary: '#06b6d4',
+			radius: 'none',
+			font: 'sans',
+			inputStyle: 'underlined',
+			inputSize: 'md',
+			inputBorder: 'medium',
+			focusRing: 'none',
+			shadow: 'none'
+		}
+	},
+	{
+		id: 'theme-forest-soft',
+		name: 'Forest Soft',
+		theme: {
+			...defaultSiteTheme,
+			preset: 'forest',
+			primary: '#16a34a',
+			secondary: '#10b981',
+			radius: 'lg',
+			font: 'sans',
+			inputStyle: 'soft',
+			inputSize: 'lg',
+			inputBorder: 'thin',
+			focusRing: 'primary',
+			shadow: 'md'
+		}
+	},
+	{
+		id: 'theme-rose-playful',
+		name: 'Rose Playful',
+		theme: {
+			...defaultSiteTheme,
+			preset: 'rose',
+			primary: '#e11d48',
+			secondary: '#f59e0b',
+			radius: 'full',
+			font: 'sans',
+			inputStyle: 'filled',
+			inputSize: 'lg',
+			inputBorder: 'thick',
+			focusRing: 'secondary',
+			shadow: 'lg'
+		}
+	},
+	{
+		id: 'theme-slate-enterprise',
+		name: 'Slate Enterprise',
+		theme: {
+			...defaultSiteTheme,
+			preset: 'slate',
+			primary: '#475569',
+			secondary: '#2563eb',
+			radius: 'sm',
+			font: 'serif',
+			inputStyle: 'outlined',
+			inputSize: 'md',
+			inputBorder: 'medium',
+			focusRing: 'primary',
+			shadow: 'sm'
+		}
+	},
+	{
+		id: 'theme-midnight-dark',
+		name: 'Midnight Dark',
+		theme: {
+			...defaultSiteTheme,
+			preset: 'violet',
+			primary: '#7766df',
+			secondary: '#38bdf8',
+			radius: 'md',
+			font: 'sans',
+			dark: true,
+			inputStyle: 'outlined',
+			inputSize: 'md',
+			inputBorder: 'thin',
+			focusRing: 'primary',
+			shadow: 'md'
+		}
+	}
+] as const;
+
 const hexPattern = /^#[0-9a-f]{6}$/i;
 
 /**

@@ -23,6 +23,7 @@
 	import { widgetCatalog } from '../../lib/widget-catalog.js';
 	import {
 		contrastRatio,
+		findMatchingTheme,
 		siteBackground,
 		siteForeground,
 		colorScale,
@@ -30,11 +31,14 @@
 		themeInputBorders,
 		themeInputSizes,
 		themeInputStyles,
+		themeLimits,
 		themeLooks,
 		themeShadows,
 		themeFonts,
 		themePresets,
 		themeRadii,
+		themesEqual,
+		type ManagedTheme,
 		type SiteTheme,
 		type ThemeRadius,
 		type ThemeFont
@@ -44,19 +48,95 @@
 
 	let { data, form }: PageProps = $props();
 
-	// svelte-ignore state_referenced_locally
-	let draft = $state<SiteTheme>({ ...data.siteTheme });
+	let themes = $derived<ManagedTheme[]>(data.themes ?? []);
+	let draft = $derived<SiteTheme>({ ...data.siteTheme });
+	const initialMatch = $derived(
+		findMatchingTheme(data.siteTheme, data.themes ?? []) ?? data.themes?.[0]
+	);
+	let selectedThemeId = $derived(initialMatch?.id ?? '');
+	let themeName = $derived(initialMatch?.name ?? 'Custom Theme');
 	let saving = $state(false);
-	// Another project became active: its theme replaces the draft.
-	// svelte-ignore state_referenced_locally
-	let draftProjectId = data.project?.id;
-	$effect(() => {
-		const id = data.project?.id;
-		if (id === draftProjectId) return;
-		draftProjectId = id;
-		draft = { ...data.siteTheme };
-	});
-	const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(data.siteTheme));
+	let statusMessage = $state('');
+	let errorMessage = $state('');
+
+	const selectedTheme = $derived(themes.find((t) => t.id === selectedThemeId));
+	const activeProjectMatch = $derived(
+		data.project ? findMatchingTheme(data.project.theme, themes) : undefined
+	);
+	const dirty = $derived(
+		!themesEqual(draft, data.siteTheme) ||
+			(!!selectedTheme &&
+				(!themesEqual(draft, selectedTheme.theme) || themeName.trim() !== selectedTheme.name))
+	);
+
+	function selectManagedTheme(entry: ManagedTheme) {
+		selectedThemeId = entry.id;
+		themeName = entry.name;
+		draft = { ...entry.theme };
+		statusMessage = '';
+		errorMessage = '';
+	}
+
+	async function themeApi(body: Record<string, unknown>) {
+		saving = true;
+		statusMessage = '';
+		errorMessage = '';
+		try {
+			const response = await fetch('/theme/api', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			const res = (await response.json().catch(() => ({}))) as {
+				theme?: ManagedTheme;
+				themes?: ManagedTheme[];
+				deleted?: string;
+				error?: string;
+			};
+			if (!response.ok) throw new Error(res.error ?? `Request failed (${response.status}).`);
+			if (res.themes) themes = res.themes;
+			await invalidateAll();
+			return res;
+		} catch (error) {
+			errorMessage = error instanceof Error ? error.message : 'Theme request failed.';
+			return null;
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function createNewTheme() {
+		const desired = themeName.trim() || `Theme ${themes.length + 1}`;
+		const uniqueName = themes.some((t) => t.name.toLowerCase() === desired.toLowerCase())
+			? `${desired} ${themes.length + 1}`
+			: desired;
+		const res = await themeApi({
+			action: 'create',
+			name: uniqueName,
+			theme: $state.snapshot(draft),
+			applyToProject: true
+		});
+		if (res?.theme) {
+			selectedThemeId = res.theme.id;
+			themeName = res.theme.name;
+			statusMessage = `Created and applied “${res.theme.name}”.`;
+		}
+	}
+
+	async function deleteCurrentTheme() {
+		if (!selectedTheme || themes.length <= 1) return;
+		const removedName = selectedTheme.name;
+		const res = await themeApi({ action: 'delete', id: selectedTheme.id });
+		if (res) {
+			const next = themes[0];
+			if (next) {
+				selectedThemeId = next.id;
+				themeName = next.name;
+				draft = { ...next.theme };
+			}
+			statusMessage = `Deleted theme “${removedName}”.`;
+		}
+	}
 
 	/** Widgets shown in the preview, in display order. */
 	const previewKinds: WidgetKind[] = [
@@ -144,6 +224,8 @@
 			action="?/save"
 			use:enhance={() => {
 				saving = true;
+				statusMessage = '';
+				errorMessage = '';
 				return async ({ update }) => {
 					await update({ reset: false });
 					await invalidateAll();
@@ -152,6 +234,64 @@
 			}}
 		>
 			<input type="hidden" name="theme" value={JSON.stringify(draft)} />
+			<input type="hidden" name="themeId" value={selectedThemeId} />
+			<input type="hidden" name="themeName" value={themeName} />
+
+			<fieldset data-testid="managed-themes-section">
+				<legend>Managed themes ({themes.length})</legend>
+				<div class="theme-list" role="listbox" aria-label="Available themes">
+					{#each themes as entry (entry.id)}
+						<button
+							type="button"
+							role="option"
+							aria-selected={selectedThemeId === entry.id}
+							class="theme-item"
+							class:active={selectedThemeId === entry.id}
+							data-testid="managed-theme-item"
+							onclick={() => selectManagedTheme(entry)}
+						>
+							<span class="dot" style:--swatch={entry.theme.primary}></span>
+							<span class="dot" style:--swatch={entry.theme.secondary}></span>
+							<span class="theme-item-name">{entry.name}</span>
+							{#if activeProjectMatch?.id === entry.id}
+								<span class="theme-badge">Active</span>
+							{/if}
+						</button>
+					{/each}
+				</div>
+
+				<label class="row">
+					<span>Theme name</span>
+					<input
+						type="text"
+						class="theme-name-input"
+						aria-label="Theme name"
+						maxlength={themeLimits.nameLength}
+						disabled={!data.canEdit}
+						bind:value={themeName}
+					/>
+				</label>
+
+				<div class="actions theme-library-actions">
+					<button
+						type="button"
+						disabled={!data.canEdit || saving || !themeName.trim()}
+						data-testid="create-theme-button"
+						onclick={createNewTheme}
+					>
+						Save as new theme
+					</button>
+					<button
+						type="button"
+						class="danger-outline"
+						disabled={!data.canEdit || saving || !selectedTheme || themes.length <= 1}
+						data-testid="delete-theme-button"
+						onclick={deleteCurrentTheme}
+					>
+						Delete theme
+					</button>
+				</div>
+			</fieldset>
 
 			<fieldset disabled={!data.canEdit}>
 				<legend>Colour</legend>
@@ -316,8 +456,12 @@
 			{#if !data.canEdit}
 				<p class="hint" role="status">Read-only: saving the theme needs the power user role.</p>
 			{/if}
-			{#if form?.error}<p class="error" role="alert">{form.error}</p>{/if}
-			{#if form?.saved && !dirty}<p class="ok" role="status">Theme saved.</p>{/if}
+			{#if form?.error || errorMessage}
+				<p class="error" role="alert">{form?.error || errorMessage}</p>
+			{/if}
+			{#if (form?.saved && !dirty) || statusMessage}
+				<p class="ok" role="status">{statusMessage || 'Theme saved.'}</p>
+			{/if}
 		</form>
 	</section>
 
@@ -432,6 +576,76 @@
 	.choices label.active {
 		border-color: #7766df;
 		box-shadow: 0 0 0 2px #e7e3ff;
+	}
+
+	.theme-list {
+		display: grid;
+		gap: 0.35rem;
+		max-height: 195px;
+		overflow-y: auto;
+		padding: 0.15rem;
+	}
+
+	.theme-item {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		width: 100%;
+		padding: 0.4rem 0.6rem;
+		border: 1px solid #d4d1ee;
+		border-radius: 8px;
+		background: #fff;
+		font: inherit;
+		font-size: 0.84rem;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.theme-item:hover {
+		background: #faf9ff;
+	}
+
+	.theme-item.active {
+		border-color: #7766df;
+		background: #f5f3ff;
+		box-shadow: 0 0 0 2px #e7e3ff;
+	}
+
+	.theme-item-name {
+		flex: 1;
+		overflow: hidden;
+		font-weight: 600;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.theme-badge {
+		padding: 0.1rem 0.45rem;
+		border-radius: 999px;
+		background: #e7e3ff;
+		color: #5445c5;
+		font-size: 0.7rem;
+		font-weight: 650;
+	}
+
+	.theme-name-input {
+		flex: 1;
+		min-width: 0;
+		padding: 0.35rem 0.6rem;
+		border: 1px solid #d4d1ee;
+		border-radius: 8px;
+		font: inherit;
+		font-size: 0.85rem;
+	}
+
+	.theme-library-actions {
+		margin-top: 0.6rem;
+	}
+
+	.actions .danger-outline {
+		border-color: #f1cfd2;
+		background: #fff6f7;
+		color: #b42318;
 	}
 
 	.choices input {

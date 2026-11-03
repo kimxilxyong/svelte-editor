@@ -108,6 +108,8 @@ export const accessRules: readonly AccessRule[] = [
 	{ prefix: '/editor/api', read: 'guest', write: 'user' },
 	{ prefix: '/editor', read: 'user' },
 	{ prefix: '/composites', read: 'user' },
+	// Managed images: everybody signed-in may browse/use them, editors may create/import/delete.
+	{ prefix: '/images', read: 'guest', write: 'user' },
 	// Site theme: everybody signed-in may look at it, power users may change it.
 	{ prefix: '/theme', read: 'guest', write: 'poweruser' },
 	{ prefix: '/account', read: 'guest' }

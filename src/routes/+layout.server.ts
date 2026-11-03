@@ -8,18 +8,24 @@
  */
 
 import type { LayoutServerLoad } from './$types';
-import { defaultSiteTheme, type SiteTheme } from '../lib/theme.js';
+import {
+	builtInThemes,
+	defaultSiteTheme,
+	type ManagedTheme,
+	type SiteTheme
+} from '../lib/theme.js';
+import type { ManagedImage } from '../lib/images.js';
 import { getDatabase } from '../lib/server/database/manager.js';
-import { listProjects } from '../lib/server/project-store.js';
+import { listImages, listProjects, listThemes } from '../lib/server/project-store.js';
 
 /** One entry of the navigation's project switcher. */
 export type NavProject = { id: string; name: string; ownerName: string; own: boolean };
 
 /**
- * @returns `{ user, project, navProjects, siteTheme }` – the current user (`null` when anonymous), the
- * active project (`null` when the user has none), the user's own projects (plus the active one when an
- * admin works in somebody else's) and the active project's theme, which is applied to the canvas,
- * previews and exports (the default theme while no project is active).
+ * @returns `{ user, project, navProjects, siteTheme, themes, images }` – the current user (`null`
+ * when anonymous), the active project (`null` when the user has none), the user's own projects
+ * (plus the active one when an admin works in somebody else's), the active project's theme, the
+ * managed theme library and the managed image catalog.
  */
 export const load: LayoutServerLoad = async ({ locals }) => {
 	const user = locals.user ?? null;
@@ -27,10 +33,18 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	const siteTheme: SiteTheme = project ? project.theme : { ...defaultSiteTheme };
 
 	let projects: NavProject[] = [];
+	let themes: ManagedTheme[] = builtInThemes.map((item) => ({
+		...item,
+		builtIn: true,
+		createdAt: '',
+		updatedAt: ''
+	}));
+	let images: ManagedImage[] = [];
 	if (user) {
 		try {
+			const db = await getDatabase();
 			// `role: 'user'` deliberately lists only the user's own projects, also for admins.
-			const own = await listProjects(await getDatabase(), { id: user.id, role: 'user' });
+			const own = await listProjects(db, { id: user.id, role: 'user' });
 			projects = own
 				.map((item) => ({ id: item.id, name: item.name, ownerName: item.ownerName, own: true }))
 				.sort((a, b) => a.name.localeCompare(b.name));
@@ -42,9 +56,11 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 					own: false
 				});
 			}
+			themes = await listThemes(db);
+			images = await listImages(db);
 		} catch {
 			// A broken database must not take the whole app down; the switcher is simply empty.
 		}
 	}
-	return { user, project, navProjects: projects, siteTheme };
+	return { user, project, navProjects: projects, siteTheme, themes, images };
 };

@@ -73,6 +73,9 @@ export const compositesPath = '/composites';
 /** Path of the Svelte source (component) editor. */
 export const componentEditorPath = '/component-editor';
 
+/** Path of the managed Images library page. */
+export const imagesPath = '/images';
+
 /**
  * Fixed labels of the authentication / administration routes (exact pathname match).
  * `/admin/users` is deliberately listed explicitly: the generic fallback below would
@@ -83,6 +86,7 @@ const authPathLabels: Record<string, PathDescription> = {
 	'/register': { label: 'Register', section: 'auth' },
 	'/setup': { label: 'Setup', section: 'auth' },
 	'/account': { label: 'Account', section: 'account' },
+	'/images': { label: 'Images', section: 'other' },
 	'/theme': { label: 'Theme', section: 'other' },
 	'/admin': { label: 'Admin', section: 'admin' },
 	'/admin/users': { label: 'Users', section: 'admin' }

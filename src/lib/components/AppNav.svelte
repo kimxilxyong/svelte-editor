@@ -53,6 +53,7 @@
 		splitPath,
 		toPath,
 		componentEditorPath,
+		imagesPath,
 		pagesPath,
 		projectsPath
 	} from '../navigation-trail.js';
@@ -75,6 +76,7 @@
 	const onPages = $derived(splitPath(currentPath).pathname === pagesPath);
 	const onComposites = $derived(splitPath(currentPath).pathname === '/composites');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
+	const onImages = $derived(splitPath(currentPath).pathname === imagesPath);
 	const onTheme = $derived(splitPath(currentPath).pathname === '/theme');
 	const onAdmin = $derived(splitPath(currentPath).pathname.startsWith('/admin'));
 	const onAbout = $derived(splitPath(currentPath).pathname === '/about');
@@ -86,6 +88,7 @@
 	const showEditor = $derived(canAccess(role, '/editor'));
 	const showComposites = $derived(canAccess(role, '/composites'));
 	const showComponents = $derived(canAccess(role, componentEditorPath));
+	const showImages = $derived(canAccess(role, imagesPath));
 	const showTheme = $derived(canAccess(role, '/theme'));
 	const showAdmin = $derived(canAccess(role, '/admin'));
 
@@ -250,6 +253,17 @@
 					aria-current={onComponents ? 'page' : undefined}
 				>
 					Code
+				</a>
+			</li>
+		{/if}
+		{#if showImages}
+			<li>
+				<a
+					href={resolve('/images')}
+					class:active={onImages}
+					aria-current={onImages ? 'page' : undefined}
+				>
+					Images
 				</a>
 			</li>
 		{/if}

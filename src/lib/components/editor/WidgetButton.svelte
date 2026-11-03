@@ -12,6 +12,7 @@
 	 * @prop {string} body - Tooltip text shown on hover.
 	 * @prop {string} [href=''] - Link target; empty means "plain button".
 	 * @prop {boolean} [newTab=false] - Open external links in a new tab.
+	 * @prop {string} [image=''] - Optional icon/image URL displayed alongside the button label.
 	 * @prop {(event: MouseEvent) => void} [onnavigate] - Called when the anchor is clicked so the host
 	 *   can intercept in-app navigation. Distinct from value-edit callbacks: clicking never edits the page.
 	 */
@@ -22,16 +23,21 @@
 		body,
 		href = '',
 		newTab = false,
+		image = '',
 		onnavigate
 	}: {
 		action: string;
 		body: string;
 		href?: string;
 		newTab?: boolean;
+		image?: string;
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
 	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeImage = $derived(
+		/^(https?:\/\/[^\s]+|\/(?!\/)[^\s]*|data:image\/[a-z+.-]+[;,][^\s]*)$/i.test(image)
+	);
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">
@@ -42,9 +48,19 @@
 			{href}
 			target={externalHref && newTab ? '_blank' : undefined}
 			rel={externalHref ? 'noopener noreferrer' : undefined}
-			onclick={(event: MouseEvent) => onnavigate?.(event)}>{action}</Button
+			onclick={(event: MouseEvent) => onnavigate?.(event)}
 		>
+			{#if safeImage}
+				<img src={image} alt="" class="mr-1.5 h-4 w-4 shrink-0 object-contain" />
+			{/if}
+			{action}
+		</Button>
 	{:else}
-		<Button size="sm" title={body || undefined}>{action}</Button>
+		<Button size="sm" title={body || undefined}>
+			{#if safeImage}
+				<img src={image} alt="" class="mr-1.5 h-4 w-4 shrink-0 object-contain" />
+			{/if}
+			{action}
+		</Button>
 	{/if}
 </div>

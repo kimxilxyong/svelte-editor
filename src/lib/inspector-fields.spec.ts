@@ -51,4 +51,21 @@ describe('inspectorFields capability map', () => {
 		expect(inspectorFields('widget-badge').level).toBeUndefined();
 		expect(inspectorFields('widget-text-field').action).toBe('Placeholder');
 	});
+
+	it('offers the managed image picker on suitable widgets (Image, Button, Link, Card, Avatar, Badge, Navbar, Alert, Toast, Banner)', () => {
+		const withImages = kinds.filter((kind) => inspectorFields(kind).image);
+		expect(withImages.sort()).toEqual([
+			'widget-alert',
+			'widget-avatar',
+			'widget-badge',
+			'widget-banner',
+			'widget-button',
+			'widget-card',
+			'widget-gradient-button',
+			'widget-image',
+			'widget-link',
+			'widget-navbar',
+			'widget-toast'
+		]);
+	});
 });

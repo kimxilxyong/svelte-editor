@@ -68,7 +68,8 @@ export const POST: RequestHandler = async ({ request, locals, cookies, url }) =>
 			const input: ProjectInput = {
 				name: body.name as string,
 				description: typeof body.description === 'string' ? body.description : undefined,
-				path: typeof body.path === 'string' ? body.path : undefined
+				path: typeof body.path === 'string' ? body.path : undefined,
+				theme: 'theme' in body ? (body.theme as ProjectInput['theme']) : undefined
 			};
 			const project = await createProject(db, user.id, input);
 			if (body.activate !== false) setActiveProjectCookie(cookies, project.id, secure);

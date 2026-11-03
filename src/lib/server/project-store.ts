@@ -25,13 +25,31 @@
 import { hasRole, type Role } from '../auth/roles.js';
 import { parseEditorSite, type EditorSite } from '../editor.js';
 import {
+	imageLimits,
+	isValidImageCategory,
+	isValidImageUrl,
+	normalizeImageName,
+	prepopulatedImages,
+	type ImageCategory,
+	type ManagedImage,
+	type ManagedImageInput
+} from '../images.js';
+import {
 	normalizeProjectName,
 	projectLimits,
 	uniqueProjectName,
 	type ProjectInput,
 	type ProjectSummary
 } from '../projects.js';
-import { defaultSiteTheme, parseSiteTheme, type SiteTheme } from '../theme.js';
+import {
+	builtInThemes,
+	defaultSiteTheme,
+	normalizeThemeName,
+	parseSiteTheme,
+	themeLimits,
+	type ManagedTheme,
+	type SiteTheme
+} from '../theme.js';
 import type { SqlClient, SqlRow } from './database/types.js';
 
 /** Reason codes of {@link ProjectStoreError}. */
@@ -409,4 +427,445 @@ export async function saveSite(db: SqlClient, projectId: string, site: EditorSit
 			projectId
 		]);
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Managed Themes (`themes` table)
+// ---------------------------------------------------------------------------
+
+function toManagedTheme(row: SqlRow): ManagedTheme {
+	let theme: SiteTheme | null = null;
+	try {
+		theme = parseSiteTheme(JSON.parse(String(row.theme)));
+	} catch {
+		// Fall back to defaultSiteTheme if stored JSON was corrupted.
+	}
+	return {
+		id: String(row.id),
+		name: String(row.name),
+		theme: theme ?? { ...defaultSiteTheme },
+		builtIn: Number(row.built_in ?? 0) === 1,
+		createdAt: String(row.created_at),
+		updatedAt: String(row.updated_at)
+	};
+}
+
+/**
+ * Ensures the initial built-in themes exist when a database has not been seeded yet.
+ *
+ * Uses `app_settings` key `themes.seeded` so user deletions of built-in themes are respected
+ * until {@link restoreBuiltInThemes} is explicitly invoked (or if all themes were removed).
+ *
+ * @param db - Database client.
+ */
+export async function ensureBuiltInThemes(db: SqlClient): Promise<void> {
+	const seeded = await db.get<SqlRow>('SELECT value FROM app_settings WHERE key = ?', [
+		'themes.seeded'
+	]);
+	const countRow = await db.get<SqlRow>('SELECT CAST(COUNT(*) AS INTEGER) AS c FROM themes');
+	const count = Number(countRow?.c ?? 0);
+	if (seeded && count > 0) return;
+
+	const now = new Date().toISOString();
+	await db.transaction(async (tx) => {
+		for (const item of builtInThemes) {
+			const existing = await tx.get<SqlRow>(
+				'SELECT id FROM themes WHERE id = ? OR LOWER(name) = LOWER(?)',
+				[item.id, item.name]
+			);
+			if (!existing) {
+				await tx.run(
+					`INSERT INTO themes (id, name, theme, built_in, created_at, updated_at)
+					 VALUES (?, ?, ?, 1, ?, ?)`,
+					[item.id, item.name, JSON.stringify(item.theme), now, now]
+				);
+			}
+		}
+		const flag = await tx.get<SqlRow>('SELECT value FROM app_settings WHERE key = ?', [
+			'themes.seeded'
+		]);
+		if (!flag) {
+			await tx.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', ['themes.seeded', '1']);
+		}
+	});
+}
+
+/**
+ * Lists all managed themes in the library (seeding the defaults on first run).
+ *
+ * @param db - Database client.
+ * @returns Managed themes ordered with built-ins first, then alphabetically by name.
+ */
+export async function listThemes(db: SqlClient): Promise<ManagedTheme[]> {
+	await ensureBuiltInThemes(db);
+	const rows = await db.all<SqlRow>(
+		'SELECT id, name, theme, built_in, created_at, updated_at FROM themes ORDER BY built_in DESC, name ASC'
+	);
+	return rows.map(toManagedTheme);
+}
+
+/**
+ * Loads one managed theme by id.
+ *
+ * @param db - Database client.
+ * @param id - Theme id.
+ * @returns The theme or `null`.
+ */
+export async function getManagedTheme(db: SqlClient, id: string): Promise<ManagedTheme | null> {
+	await ensureBuiltInThemes(db);
+	const row = await db.get<SqlRow>(
+		'SELECT id, name, theme, built_in, created_at, updated_at FROM themes WHERE id = ?',
+		[id]
+	);
+	return row ? toManagedTheme(row) : null;
+}
+
+/**
+ * Creates a new managed theme in the library.
+ *
+ * @param db - Database client.
+ * @param input - Name and {@link SiteTheme} configuration.
+ * @returns The newly created {@link ManagedTheme}.
+ * @throws {ProjectStoreError} `invalid_input`, `name_taken` or `limit`.
+ */
+export async function createManagedTheme(
+	db: SqlClient,
+	input: { name: unknown; theme: unknown }
+): Promise<ManagedTheme> {
+	await ensureBuiltInThemes(db);
+	const name = normalizeThemeName(input.name);
+	if (!name) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			`Enter a theme name (1–${themeLimits.nameLength} characters).`
+		);
+	}
+	const theme = parseSiteTheme(input.theme);
+	if (!theme) throw new ProjectStoreError('invalid_input', 'The theme is invalid.');
+
+	const existing = await db.all<SqlRow>('SELECT id, name FROM themes');
+	if (existing.length >= themeLimits.maxThemes) {
+		throw new ProjectStoreError('limit', `You can store at most ${themeLimits.maxThemes} themes.`);
+	}
+	if (existing.some((row) => String(row.name).toLowerCase() === name.toLowerCase())) {
+		throw new ProjectStoreError('name_taken', 'A theme with this name already exists.');
+	}
+
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+	await db.run(
+		`INSERT INTO themes (id, name, theme, built_in, created_at, updated_at)
+		 VALUES (?, ?, ?, 0, ?, ?)`,
+		[id, name, JSON.stringify(theme), now, now]
+	);
+	return (await getManagedTheme(db, id))!;
+}
+
+/**
+ * Updates the name and/or values of an existing managed theme.
+ *
+ * @param db - Database client.
+ * @param id - Theme id.
+ * @param patch - Fields to update.
+ * @returns Updated {@link ManagedTheme}.
+ * @throws {ProjectStoreError} `not_found`, `invalid_input` or `name_taken`.
+ */
+export async function updateManagedTheme(
+	db: SqlClient,
+	id: string,
+	patch: { name?: unknown; theme?: unknown }
+): Promise<ManagedTheme> {
+	const current = await getManagedTheme(db, id);
+	if (!current) throw new ProjectStoreError('not_found', 'Theme not found.');
+
+	const sets: string[] = [];
+	const params: (string | number)[] = [];
+
+	if (patch.name !== undefined) {
+		const name = normalizeThemeName(patch.name);
+		if (!name) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				`Enter a theme name (1–${themeLimits.nameLength} characters).`
+			);
+		}
+		const clash = await db.get<SqlRow>(
+			'SELECT id FROM themes WHERE LOWER(name) = LOWER(?) AND id != ?',
+			[name, id]
+		);
+		if (clash) {
+			throw new ProjectStoreError('name_taken', 'A theme with this name already exists.');
+		}
+		sets.push('name = ?');
+		params.push(name);
+	}
+
+	if (patch.theme !== undefined) {
+		const theme = parseSiteTheme(patch.theme);
+		if (!theme) throw new ProjectStoreError('invalid_input', 'The theme is invalid.');
+		sets.push('theme = ?');
+		params.push(JSON.stringify(theme));
+	}
+
+	if (sets.length === 0) return current;
+	sets.push('updated_at = ?');
+	params.push(new Date().toISOString(), id);
+	await db.run(`UPDATE themes SET ${sets.join(', ')} WHERE id = ?`, params);
+	return (await getManagedTheme(db, id))!;
+}
+
+/**
+ * Deletes a managed theme from the library. Refuses to delete the last remaining theme so projects
+ * always have at least one selectable theme.
+ *
+ * @param db - Database client.
+ * @param id - Theme id to delete.
+ * @returns `true` if deleted.
+ * @throws {ProjectStoreError} `not_found` or `invalid_input` when only one theme remains.
+ */
+export async function deleteManagedTheme(db: SqlClient, id: string): Promise<boolean> {
+	const all = await listThemes(db);
+	if (!all.some((item) => item.id === id)) {
+		throw new ProjectStoreError('not_found', 'Theme not found.');
+	}
+	if (all.length <= 1) {
+		throw new ProjectStoreError('invalid_input', 'At least one theme must remain in the library.');
+	}
+	const res = await db.run('DELETE FROM themes WHERE id = ?', [id]);
+	return res.changes > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Managed Images (`images` table)
+// ---------------------------------------------------------------------------
+
+function toManagedImage(row: SqlRow): ManagedImage {
+	const rawCat = String(row.category ?? 'custom');
+	const category: ImageCategory = isValidImageCategory(rawCat) ? rawCat : 'custom';
+	return {
+		id: String(row.id),
+		name: String(row.name),
+		url: String(row.url),
+		category,
+		builtIn: Number(row.built_in ?? 0) === 1,
+		createdAt: String(row.created_at)
+	};
+}
+
+/**
+ * Prepopulates the `images` table with the 50 Isometric 3D Interface Icons from SVG Repo and the
+ * existing static SVGs when the database has not been seeded yet.
+ *
+ * Uses `app_settings` key `images.seeded` so user deletions of prepopulated images stay deleted
+ * until {@link restorePrepopulatedImages} is called.
+ *
+ * @param db - Database client.
+ */
+export async function ensurePrepopulatedImages(db: SqlClient): Promise<void> {
+	const seeded = await db.get<SqlRow>('SELECT value FROM app_settings WHERE key = ?', [
+		'images.seeded'
+	]);
+	if (seeded) return;
+
+	const now = new Date().toISOString();
+	await db.transaction(async (tx) => {
+		for (const item of prepopulatedImages) {
+			const existing = await tx.get<SqlRow>(
+				'SELECT id FROM images WHERE id = ? OR LOWER(name) = LOWER(?)',
+				[item.id, item.name]
+			);
+			if (!existing) {
+				await tx.run(
+					`INSERT INTO images (id, name, url, category, built_in, created_at)
+					 VALUES (?, ?, ?, ?, 1, ?)`,
+					[item.id, item.name, item.url, item.category, now]
+				);
+			}
+		}
+		await tx.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', ['images.seeded', '1']);
+	});
+}
+
+/**
+ * Restores any missing prepopulated images without overwriting custom images.
+ *
+ * @param db - Database client.
+ * @returns The updated list of all managed images.
+ */
+export async function restorePrepopulatedImages(db: SqlClient): Promise<ManagedImage[]> {
+	const now = new Date().toISOString();
+	await db.transaction(async (tx) => {
+		for (const item of prepopulatedImages) {
+			const existing = await tx.get<SqlRow>(
+				'SELECT id FROM images WHERE id = ? OR LOWER(name) = LOWER(?)',
+				[item.id, item.name]
+			);
+			if (!existing) {
+				await tx.run(
+					`INSERT INTO images (id, name, url, category, built_in, created_at)
+					 VALUES (?, ?, ?, ?, 1, ?)`,
+					[item.id, item.name, item.url, item.category, now]
+				);
+			}
+		}
+	});
+	return listImages(db);
+}
+
+/**
+ * Lists all available managed images (prepopulating the defaults on first run).
+ *
+ * @param db - Database client.
+ * @returns Managed images ordered by category and name.
+ */
+export async function listImages(db: SqlClient): Promise<ManagedImage[]> {
+	await ensurePrepopulatedImages(db);
+	const rows = await db.all<SqlRow>(
+		'SELECT id, name, url, category, built_in, created_at FROM images ORDER BY category ASC, name ASC'
+	);
+	return rows.map(toManagedImage);
+}
+
+/**
+ * Loads a single managed image by id.
+ *
+ * @param db - Database client.
+ * @param id - Image id.
+ * @returns The image or `null`.
+ */
+export async function getManagedImage(db: SqlClient, id: string): Promise<ManagedImage | null> {
+	await ensurePrepopulatedImages(db);
+	const row = await db.get<SqlRow>(
+		'SELECT id, name, url, category, built_in, created_at FROM images WHERE id = ?',
+		[id]
+	);
+	return row ? toManagedImage(row) : null;
+}
+
+/**
+ * Creates a new managed image entry in the catalog.
+ *
+ * @param db - Database client.
+ * @param input - Name, URL and predefined category.
+ * @returns The created {@link ManagedImage}.
+ * @throws {ProjectStoreError} `invalid_input`, `name_taken` or `limit`.
+ */
+export async function createManagedImage(
+	db: SqlClient,
+	input: { name: unknown; url: unknown; category: unknown }
+): Promise<ManagedImage> {
+	await ensurePrepopulatedImages(db);
+	const name = normalizeImageName(input.name);
+	if (!name) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			`Enter an image name (1–${imageLimits.nameLength} characters).`
+		);
+	}
+	if (!isValidImageUrl(input.url)) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			'Enter a valid image URL (/images/…, https://… or data:image/…).'
+		);
+	}
+	if (!isValidImageCategory(input.category)) {
+		throw new ProjectStoreError('invalid_input', 'Choose a valid image category.');
+	}
+
+	const existing = await db.all<SqlRow>('SELECT id, name FROM images');
+	if (existing.length >= imageLimits.maxImages) {
+		throw new ProjectStoreError('limit', `You can store at most ${imageLimits.maxImages} images.`);
+	}
+	if (existing.some((row) => String(row.name).toLowerCase() === name.toLowerCase())) {
+		throw new ProjectStoreError('name_taken', 'An image with this name already exists.');
+	}
+
+	const id = crypto.randomUUID();
+	const now = new Date().toISOString();
+	await db.run(
+		`INSERT INTO images (id, name, url, category, built_in, created_at)
+		 VALUES (?, ?, ?, ?, 0, ?)`,
+		[id, name, input.url.trim(), input.category, now]
+	);
+	return (await getManagedImage(db, id))!;
+}
+
+/**
+ * Updates the name, URL and/or category of an existing managed image.
+ *
+ * @param db - Database client.
+ * @param id - Image id.
+ * @param patch - Fields to change.
+ * @returns Updated {@link ManagedImage}.
+ * @throws {ProjectStoreError} `not_found`, `invalid_input` or `name_taken`.
+ */
+export async function updateManagedImage(
+	db: SqlClient,
+	id: string,
+	patch: { name?: unknown; url?: unknown; category?: unknown }
+): Promise<ManagedImage> {
+	const current = await getManagedImage(db, id);
+	if (!current) throw new ProjectStoreError('not_found', 'Image not found.');
+
+	const sets: string[] = [];
+	const params: (string | number)[] = [];
+
+	if (patch.name !== undefined) {
+		const name = normalizeImageName(patch.name);
+		if (!name) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				`Enter an image name (1–${imageLimits.nameLength} characters).`
+			);
+		}
+		const clash = await db.get<SqlRow>(
+			'SELECT id FROM images WHERE LOWER(name) = LOWER(?) AND id != ?',
+			[name, id]
+		);
+		if (clash) {
+			throw new ProjectStoreError('name_taken', 'An image with this name already exists.');
+		}
+		sets.push('name = ?');
+		params.push(name);
+	}
+
+	if (patch.url !== undefined) {
+		if (!isValidImageUrl(patch.url)) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				'Enter a valid image URL (/images/…, https://… or data:image/…).'
+			);
+		}
+		sets.push('url = ?');
+		params.push(patch.url.trim());
+	}
+
+	if (patch.category !== undefined) {
+		if (!isValidImageCategory(patch.category)) {
+			throw new ProjectStoreError('invalid_input', 'Choose a valid image category.');
+		}
+		sets.push('category = ?');
+		params.push(patch.category);
+	}
+
+	if (sets.length === 0) return current;
+	params.push(id);
+	await db.run(`UPDATE images SET ${sets.join(', ')} WHERE id = ?`, params);
+	return (await getManagedImage(db, id))!;
+}
+
+/**
+ * Deletes an image from the catalog and returns the removed record so the caller can clean up any
+ * user-uploaded file on disk.
+ *
+ * @param db - Database client.
+ * @param id - Image id to delete.
+ * @returns The deleted {@link ManagedImage}.
+ * @throws {ProjectStoreError} `not_found` when the image does not exist.
+ */
+export async function deleteManagedImage(db: SqlClient, id: string): Promise<ManagedImage> {
+	const current = await getManagedImage(db, id);
+	if (!current) throw new ProjectStoreError('not_found', 'Image not found.');
+	await db.run('DELETE FROM images WHERE id = ?', [id]);
+	return current;
 }

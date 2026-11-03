@@ -194,6 +194,11 @@ export type BuilderBlock = {
 	 * widget's built-in sample entries".
 	 */
 	items?: string;
+	/**
+	 * Optional image or icon URL (`/images/...`, `https://...` or `data:image/...`) picked from the
+	 * managed images catalog for widgets that display an icon, thumbnail or illustration.
+	 */
+	image?: string;
 	/** Dynamic properties for custom Svelte components imported from target projects. */
 	customProps?: Record<string, string | number | boolean>;
 };
@@ -443,6 +448,18 @@ export function isValidLinkHref(href: string): boolean {
 }
 
 /**
+ * Validates an optional block image source (`/path`, `http(s)://...` or `data:image/...`).
+ *
+ * @param src - Untrusted image source string.
+ * @returns `true` when empty/undefined or a safe image URL.
+ */
+export function isValidBlockImage(src: unknown): src is string | undefined {
+	if (src === undefined || src === '') return true;
+	if (typeof src !== 'string' || src.length > 500) return false;
+	return /^(https?:\/\/[^\s"<>]+|\/(?!\/)[^\s"<>]*|data:image\/[a-z0-9+.-]+[;,][^\s]*)$/i.test(src);
+}
+
+/**
  * Parses, sanitizes, and bounds-checks an untrusted block collection payload.
  *
  * Automatically converts legacy flow blocks into positioned blocks and enforces
@@ -474,6 +491,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 		const href = block.href ?? '';
 		const newTab = block.newTab ?? false;
 		const items = block.items ?? '';
+		const image = block.image ?? '';
 		const alignTo = block.alignTo ?? 'none';
 
 		if (
@@ -525,7 +543,8 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			!isValidLinkHref(href) ||
 			typeof newTab !== 'boolean' ||
 			typeof items !== 'string' ||
-			items.length > 600
+			items.length > 600 ||
+			!isValidBlockImage(image)
 		) {
 			return null;
 		}
@@ -572,6 +591,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			href,
 			newTab,
 			...(items ? { items } : {}),
+			...(image ? { image } : {}),
 			...(customProps ? { customProps } : {})
 		});
 	}

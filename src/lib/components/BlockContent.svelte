@@ -87,6 +87,7 @@
 		action={block.action}
 		theme={block.theme}
 		items={block.items}
+		image={block.image}
 		value={block.value}
 		checked={block.checked}
 		level={block.level}
@@ -101,6 +102,7 @@
 		body={block.body}
 		href={block.href}
 		newTab={block.newTab}
+		image={block.image}
 		onnavigate={(event) => onlink?.(event, block)}
 	/>
 {:else if block.kind === 'widget-text-field'}
@@ -163,13 +165,13 @@
 		{onchange}
 	/>
 {:else if block.kind === 'widget-badge'}
-	<WidgetBadge title={block.title} body={block.body} />
+	<WidgetBadge title={block.title} body={block.body} image={block.image} />
 {:else if block.kind === 'widget-alert'}
-	<WidgetAlert title={block.title} body={block.body} />
+	<WidgetAlert title={block.title} body={block.body} image={block.image} />
 {:else if block.kind === 'widget-progress'}
 	<WidgetProgress title={block.title} body={block.body} level={block.level} />
 {:else if block.kind === 'widget-avatar'}
-	<WidgetAvatar title={block.title} body={block.body} />
+	<WidgetAvatar title={block.title} body={block.body} image={block.image} />
 {:else if block.kind === 'widget-card'}
 	<WidgetCard
 		title={block.title}
@@ -177,6 +179,7 @@
 		action={block.action}
 		href={block.href}
 		newTab={block.newTab}
+		image={block.image}
 		onnavigate={(event) => onlink?.(event, block)}
 	/>
 {:else if block.kind === 'widget-link'}
@@ -185,6 +188,7 @@
 		body={block.body}
 		href={block.href}
 		newTab={block.newTab}
+		image={block.image}
 		onnavigate={(event) => onlink?.(event, block)}
 	/>
 {:else if Generic}
@@ -194,6 +198,7 @@
 		body={block.body}
 		action={block.action}
 		items={block.items}
+		image={block.image}
 		level={block.level}
 		href={block.href}
 		newTab={block.newTab}

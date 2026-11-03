@@ -115,6 +115,22 @@ export const schemaStatements: readonly string[] = [
 		blocks TEXT NOT NULL,
 		PRIMARY KEY (project_id, id),
 		UNIQUE (project_id, name)
+	)`,
+	`CREATE TABLE IF NOT EXISTS themes (
+		id TEXT PRIMARY KEY NOT NULL,
+		name TEXT UNIQUE NOT NULL,
+		theme TEXT NOT NULL,
+		built_in INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS images (
+		id TEXT PRIMARY KEY NOT NULL,
+		name TEXT UNIQUE NOT NULL,
+		url TEXT NOT NULL,
+		category TEXT NOT NULL,
+		built_in INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
 	)`
 ];
 
@@ -126,6 +142,8 @@ export const copyOrder: readonly string[] = [
 	'auth_nonces',
 	'app_settings',
 	'audit_log',
+	'themes',
+	'images',
 	'projects',
 	'project_pages',
 	'project_composites'

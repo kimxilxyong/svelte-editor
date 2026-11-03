@@ -4,8 +4,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+	builtInThemes,
 	contrastRatio,
 	defaultSiteTheme,
+	findMatchingTheme,
 	normalizeSiteTheme,
 	parseSiteTheme,
 	primaryScale,
@@ -13,10 +15,19 @@ import {
 	siteForeground,
 	themeClasses,
 	themeConfig,
-	themeStyle
+	themeStyle,
+	themesEqual
 } from './theme.js';
 import { ensureSchema } from './server/database/schema.js';
-import { createProject, getProject, updateProject } from './server/project-store.js';
+import {
+	createManagedTheme,
+	createProject,
+	deleteManagedTheme,
+	getProject,
+	listThemes,
+	updateManagedTheme,
+	updateProject
+} from './server/project-store.js';
 import { openSqliteClient } from './server/database/sqlite-client.js';
 
 describe('site theme model', () => {
@@ -66,6 +77,29 @@ describe('project theme persistence', () => {
 		const next = { ...defaultSiteTheme, primary: '#112233', dark: true };
 		await updateProject(db, project.id, { theme: next });
 		expect((await getProject(db, project.id))?.theme).toEqual(next);
+		await db.close?.();
+	});
+
+	it('manages multiple named themes (seed, create, update, delete)', async () => {
+		const db = openSqliteClient(':memory:');
+		await ensureSchema(db);
+		const seeded = await listThemes(db);
+		expect(seeded.length).toBe(builtInThemes.length);
+		expect(findMatchingTheme(defaultSiteTheme, seeded)?.name).toBe('Violet Default');
+
+		const custom = await createManagedTheme(db, {
+			name: 'Sunset Glow',
+			theme: { ...defaultSiteTheme, preset: 'rose', primary: '#e11d48', dark: true }
+		});
+		expect(custom.name).toBe('Sunset Glow');
+		expect(themesEqual(custom.theme, defaultSiteTheme)).toBe(false);
+
+		const renamed = await updateManagedTheme(db, custom.id, {
+			name: 'Crimson Night'
+		});
+		expect(renamed.name).toBe('Crimson Night');
+
+		await expect(deleteManagedTheme(db, custom.id)).resolves.toBe(true);
 		await db.close?.();
 	});
 });

@@ -41,7 +41,16 @@
 	 *   onduplicate={duplicate} ondelete={remove} />
 	 */
 	import { resolve } from '$app/paths';
+	import { page as routePage } from '$app/state';
 	import { blockLimits, isValidLinkHref, type AlignTo, type BuilderBlock } from '../editor.js';
+	import {
+		imageCategories,
+		imagePathElement,
+		listImagePathElements,
+		prepopulatedImages,
+		type ImageCategory,
+		type ManagedImage
+	} from '../images.js';
 	import { defaultSiteTheme, siteBackground, siteForeground, type SiteTheme } from '../theme.js';
 	import { inspectorFields } from '../inspector-fields.js';
 	import { widgetCatalog } from '../widget-catalog.js';
@@ -54,6 +63,7 @@
 		label,
 		mark,
 		linkPages = [],
+		availableImages,
 		compositeEdit,
 		hasFillBlock = false,
 		siteTheme = defaultSiteTheme,
@@ -68,6 +78,7 @@
 		label: string;
 		mark: string;
 		linkPages?: { id: string; name: string; slug: string }[];
+		availableImages?: ManagedImage[];
 		compositeEdit?: { id: string; name: string };
 		hasFillBlock?: boolean;
 		siteTheme?: SiteTheme;
@@ -91,6 +102,40 @@
 			.map((line) => line.trim())
 			.filter(Boolean)
 	);
+
+	/** Managed images offered in the widget image picker (layout data or prepopulated fallback). */
+	const catalogImages = $derived<readonly Pick<ManagedImage, 'id' | 'name' | 'url' | 'category'>[]>(
+		availableImages ?? (routePage.data?.images as ManagedImage[] | undefined) ?? prepopulatedImages
+	);
+	let imageSearch = $state('');
+	let imageCategoryFilter = $state<'all' | ImageCategory>('all');
+	let imagePathFilter = $state('all');
+	let imageGridOpen = $state(false);
+
+	const availablePathElements = $derived(listImagePathElements(catalogImages));
+
+	const filteredCatalogImages = $derived(
+		catalogImages.filter((item) => {
+			if (imageCategoryFilter !== 'all' && item.category !== imageCategoryFilter) return false;
+			if (imagePathFilter !== 'all' && imagePathElement(item.url) !== imagePathFilter) return false;
+			const q = imageSearch.trim().toLowerCase();
+			return !q || item.name.toLowerCase().includes(q) || item.url.toLowerCase().includes(q);
+		})
+	);
+
+	const currentImageUrl = $derived(
+		block ? block.image || (block.kind === 'widget-image' ? block.action : '') : ''
+	);
+
+	function applyPickedImage(url: string) {
+		if (!block) return;
+		const trimmed = url.trim();
+		block.image = trimmed || undefined;
+		if (block.kind === 'widget-image') {
+			block.action = trimmed;
+		}
+		onchange();
+	}
 
 	/**
 	 * Colour pickers. Without a custom value a picker shows (and a reset returns to) the site
@@ -276,9 +321,124 @@
 				id="{uid}-action"
 				class="field-control"
 				bind:value={current.action}
-				maxlength="48"
-				oninput={onchange}
+				maxlength={current.kind === 'widget-image' || current.kind === 'widget-video' ? 500 : 48}
+				oninput={() => {
+					if (current.kind === 'widget-image') {
+						current.image = current.action.trim() || undefined;
+					}
+					onchange();
+				}}
 			/>
+		{/if}
+
+		{#if fields.image}
+			<fieldset class="link-group image-picker-group" data-testid="inspector-image-picker">
+				<legend class="field-label">{fields.image.label}</legend>
+				<div class="image-select-row">
+					<select
+						id="{uid}-image-select"
+						class="field-control"
+						aria-label={fields.image.label}
+						value={catalogImages.some((img) => img.url === currentImageUrl) ? currentImageUrl : ''}
+						onchange={(event) => applyPickedImage(event.currentTarget.value)}
+					>
+						<option value="">None (no image)</option>
+						{#each imageCategories as cat (cat.value)}
+							{@const group = catalogImages.filter((img) => img.category === cat.value)}
+							{#if group.length > 0}
+								<optgroup label={cat.label}>
+									{#each group as img (img.id)}
+										<option value={img.url}>{img.name}</option>
+									{/each}
+								</optgroup>
+							{/if}
+						{/each}
+					</select>
+					<button
+						type="button"
+						class="image-browse-toggle"
+						aria-expanded={imageGridOpen}
+						onclick={() => (imageGridOpen = !imageGridOpen)}
+					>
+						{imageGridOpen ? 'Hide grid' : 'Browse'}
+					</button>
+				</div>
+
+				{#if currentImageUrl}
+					<div class="picked-image-preview">
+						<img src={currentImageUrl} alt="" />
+						<div class="picked-image-meta">
+							<strong>
+								{catalogImages.find((img) => img.url === currentImageUrl)?.name ?? 'Custom URL'}
+							</strong>
+							<code>{currentImageUrl}</code>
+						</div>
+						<button
+							type="button"
+							class="color-reset"
+							aria-label="Clear selected image"
+							onclick={() => applyPickedImage('')}
+						>
+							Clear
+						</button>
+					</div>
+				{/if}
+
+				{#if imageGridOpen}
+					<div class="image-browser-popover">
+						<div class="image-browser-filters">
+							<input
+								type="search"
+								class="field-control"
+								placeholder="Filter images…"
+								aria-label="Filter available images"
+								bind:value={imageSearch}
+							/>
+							<select
+								class="field-control"
+								aria-label="Filter images by category"
+								bind:value={imageCategoryFilter}
+							>
+								<option value="all">All categories</option>
+								{#each imageCategories as cat (cat.value)}
+									<option value={cat.value}>{cat.label}</option>
+								{/each}
+							</select>
+							<select
+								class="field-control"
+								aria-label="Filter images by path element"
+								bind:value={imagePathFilter}
+							>
+								<option value="all">All path folders</option>
+								{#each availablePathElements as seg (seg)}
+									<option value={seg}>{seg}</option>
+								{/each}
+							</select>
+						</div>
+						<div class="image-picker-grid" role="listbox" aria-label="Available images">
+							{#each filteredCatalogImages as img (img.id)}
+								<button
+									type="button"
+									role="option"
+									aria-selected={currentImageUrl === img.url}
+									class="image-picker-tile"
+									class:active={currentImageUrl === img.url}
+									title="{img.name} ({img.url})"
+									onclick={() => applyPickedImage(img.url)}
+								>
+									<img src={img.url} alt="" loading="lazy" />
+									<span>{img.name}</span>
+								</button>
+							{:else}
+								<p class="panel-hint">No matching images.</p>
+							{/each}
+						</div>
+						<div class="image-picker-footer">
+							<a class="text-button" href={resolve('/images')}>Manage images →</a>
+						</div>
+					</div>
+				{/if}
+			</fieldset>
 		{/if}
 
 		{#if fields.link}
@@ -735,6 +895,141 @@
 	.color-reset:disabled {
 		color: #c1c1cc;
 		cursor: default;
+	}
+
+	.image-select-row {
+		display: flex;
+		gap: 0.4rem;
+		align-items: center;
+		margin-top: 0.35rem;
+	}
+
+	.image-browse-toggle {
+		flex-shrink: 0;
+		min-height: 37px;
+		padding: 0.45rem 0.65rem;
+		border: 1px solid #d8d4ee;
+		border-radius: 7px;
+		background: #f8f6ff;
+		color: #5b4dc7;
+		font: inherit;
+		font-size: 0.68rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.image-browse-toggle:hover {
+		background: #efebff;
+	}
+
+	.picked-image-preview {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		margin-top: 0.5rem;
+		padding: 0.45rem 0.55rem;
+		border: 1px solid #eceaf6;
+		border-radius: 8px;
+		background: #fbfaff;
+	}
+
+	.picked-image-preview img {
+		width: 32px;
+		height: 32px;
+		flex-shrink: 0;
+		border-radius: 6px;
+		background: #fff;
+		object-fit: contain;
+	}
+
+	.picked-image-meta {
+		display: grid;
+		min-width: 0;
+		flex: 1;
+		gap: 0.1rem;
+	}
+
+	.picked-image-meta strong {
+		overflow: hidden;
+		font-size: 0.68rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.picked-image-meta code {
+		overflow: hidden;
+		color: #88869f;
+		font-size: 0.6rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.image-browser-popover {
+		margin-top: 0.55rem;
+		padding: 0.55rem;
+		border: 1px solid #e6e4f2;
+		border-radius: 9px;
+		background: #faf9fe;
+	}
+
+	.image-browser-filters {
+		display: grid;
+		gap: 0.35rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.image-picker-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.35rem;
+		max-height: 210px;
+		overflow-y: auto;
+		padding: 0.15rem;
+	}
+
+	.image-picker-tile {
+		display: grid;
+		justify-items: center;
+		gap: 0.25rem;
+		padding: 0.4rem 0.25rem;
+		border: 1px solid #e9e7f3;
+		border-radius: 7px;
+		background: #fff;
+		color: #33354a;
+		font: inherit;
+		font-size: 0.6rem;
+		text-align: center;
+		cursor: pointer;
+	}
+
+	.image-picker-tile:hover {
+		border-color: #b7adfa;
+		background: #f6f4ff;
+	}
+
+	.image-picker-tile.active {
+		border-color: #6b5ce7;
+		background: #f0edff;
+		box-shadow: 0 0 0 2px rgb(107 92 231 / 18%);
+	}
+
+	.image-picker-tile img {
+		width: 28px;
+		height: 28px;
+		object-fit: contain;
+	}
+
+	.image-picker-tile span {
+		width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.image-picker-footer {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: 0.35rem;
 	}
 
 	.inspector-empty {

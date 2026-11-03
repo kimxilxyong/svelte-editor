@@ -12,9 +12,11 @@ describe('canAccess', () => {
 		expect(canAccess(undefined, '/login')).toBe(true);
 	});
 
-	it('lets guests read the theme page but only power users save it', () => {
+	it('lets guests read the theme and images pages, editors manage images, and power users save themes', () => {
 		expect(canAccess('guest', '/theme')).toBe(true);
 		expect(requiredRoleFor('/theme', 'POST')).toBe('poweruser');
+		expect(canAccess('guest', '/images')).toBe(true);
+		expect(requiredRoleFor('/images/api', 'POST')).toBe('user');
 	});
 
 	it('requires a sign-in for everything else', () => {

@@ -29,6 +29,7 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defaultSiteTheme, normalizeSiteTheme, type SiteTheme } from '../theme.js';
+import { readLocalImageFile } from './image-files.js';
 import { effectiveWidgetSource } from './widget-files.js';
 import {
 	componentNames,
@@ -309,6 +310,37 @@ export async function exportSite(
 		if (!slugPattern.test(page.slug)) throw new ProjectError(`Invalid route "${page.slug}".`);
 		const file = path.join(root, 'src', 'routes', page.slug, '+page.svelte');
 		await writeGenerated(root, file, renderPageSource(page, importStyle), result);
+	}
+
+	// Copy any local image files (`/images/...` or `/*.svg`) referenced by page or composite blocks
+	// into the target SvelteKit project's `static/` directory so exported sites render them.
+	const referencedImages = new Set<string>();
+	for (const doc of [...site.pages, ...site.composites]) {
+		for (const block of doc.blocks) {
+			if (block.image && block.image.startsWith('/') && !block.image.startsWith('//')) {
+				referencedImages.add(block.image);
+			}
+			if (
+				block.kind === 'widget-image' &&
+				block.action.startsWith('/') &&
+				!block.action.startsWith('//')
+			) {
+				referencedImages.add(block.action);
+			}
+		}
+	}
+	for (const imgUrl of referencedImages) {
+		const asset = await readLocalImageFile(imgUrl);
+		if (!asset) continue;
+		const destFile = path.join(root, 'static', imgUrl.slice(1));
+		const relDest = path.relative(root, destFile);
+		if (relDest.startsWith('..') || path.isAbsolute(relDest)) continue;
+		const existingStat = await lstat(destFile).catch(() => null);
+		if (!existingStat) {
+			await ensureDirectory(root, path.dirname(destFile));
+			await writeFile(destFile, asset.bytes);
+			result.written.push(relDest);
+		}
 	}
 
 	return result;

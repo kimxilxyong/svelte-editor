@@ -12,6 +12,7 @@
 	 * @prop {string} action - CTA label; empty hides the CTA.
 	 * @prop {string} [href=''] - CTA link target; empty means "plain button".
 	 * @prop {boolean} [newTab=false] - Open external links in a new tab.
+	 * @prop {string} [image=''] - Optional thumbnail/illustration URL rendered in the card.
 	 * @prop {(event: MouseEvent) => void} [onnavigate] - Called when the CTA anchor is clicked so the
 	 *   host can intercept in-app navigation.
 	 */
@@ -23,6 +24,7 @@
 		action,
 		href = '',
 		newTab = false,
+		image = '',
 		onnavigate
 	}: {
 		title: string;
@@ -30,17 +32,26 @@
 		action: string;
 		href?: string;
 		newTab?: boolean;
+		image?: string;
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
 	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeImage = $derived(
+		/^(https?:\/\/[^\s]+|\/(?!\/)[^\s]*|data:image\/[a-z+.-]+[;,][^\s]*)$/i.test(image)
+	);
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">
 	<Card size="xl" class="h-full w-full max-w-none justify-between gap-1 overflow-hidden p-3">
-		<div class="min-h-0">
-			<h5 class="truncate text-base font-bold">{title}</h5>
-			<p class="text-sm opacity-80">{body}</p>
+		<div class="flex min-h-0 items-start gap-2.5">
+			{#if safeImage}
+				<img src={image} alt="" class="h-10 w-10 shrink-0 rounded object-contain" />
+			{/if}
+			<div class="min-w-0">
+				<h5 class="truncate text-base font-bold">{title}</h5>
+				<p class="text-sm opacity-80">{body}</p>
+			</div>
 		</div>
 		{#if action}
 			<div>

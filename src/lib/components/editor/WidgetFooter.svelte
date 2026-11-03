@@ -5,6 +5,7 @@
 	 *
 	 * Link clicks are reported through `onnavigate` so the editor can block them; exported pages
 	 * follow the per-entry link normally.
+	 * Local targets can contain percent-encoded characters, such as project image filenames.
 	 *
 	 * @prop {string} [title] - Owner shown in the copyright line.
 	 * @prop {string} [items] - Links, one per line as `Label | /link`. Defaults to About / Privacy.
@@ -18,7 +19,7 @@
 		onnavigate
 	}: { title?: string; items?: string; onnavigate?: (event: MouseEvent) => void } = $props();
 	const safe = (href: string) =>
-		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href);
+		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href);
 	const links = $derived(
 		(items || 'About | /about\nPrivacy | /privacy\nContact | /contact')
 			.split('\n')

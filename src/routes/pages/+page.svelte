@@ -1,12 +1,12 @@
 <script lang="ts">
 	/**
-	 * @fileoverview Page management of the active project (`/pages`).
+	 * @component PagesPage
+	 * Page management of the active project (`/pages`).
 	 *
 	 * - Multi-page management: Add, duplicate, delete, and configure pages and slugs. A new project has
 	 *   no pages; the empty state offers "Add first page". The last page may be deleted as well.
-	 * - Persistence: Save writes the pages (and the untouched composites) of the **active project** to the
-	 *   database through `/editor/api`; the project is chosen on the Projects page (`/`) or with the
-	 *   project chip in the top navigation.
+	 * - Persistence: Save writes the pages (and untouched composites) through `/editor/api`, using
+	 *   the loaded project's identity and revision as preconditions. Conflicts preserve the draft.
 	 * - Canvas settings: Configure page widths (mobile/tablet/desktop) and minimum heights.
 	 * - Visual overview: the selected page rendered with the real components via `PageView`
 	 *   (same content as the editor, reloaded from the database on every visit), plus an interactive
@@ -16,9 +16,11 @@
 	 * - Right-click menus (see `editor-menus.ts`): a page row offers Edit / Preview / Duplicate /
 	 *   Delete / Copy route, the list background Add / Save / Reload, the preview Edit / Preview /
 	 *   Save. Right-clicking a row also selects it, so the action targets what the user pointed at.
+	 *
+	 * @prop {never} none - This route reads the active project and user from layout data.
 	 */
 
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page as routePage } from '$app/state';
@@ -40,6 +42,8 @@
 	type ApiResponse = {
 		project?: { id: string; name: string } | null;
 		site?: EditorSite;
+		revision?: number;
+		success?: boolean;
 		error?: string;
 	};
 
@@ -59,6 +63,10 @@
 	let busy = $state(true);
 	let status = $state('Loading project…');
 	let dirty = $state(false);
+	let serverRevision: number | null = null;
+	let snapshotProjectId: string | null = null;
+	let loadGeneration = 0;
+	let editVersion = 0;
 	// Feeds the shared top navigation (page switcher, labels, unsaved-changes guard).
 	useNavContext(() => ({ pages, unsavedChanges: dirty }));
 	let slugBeforeEdit = '';
@@ -70,7 +78,13 @@
 	const canSave = $derived(!readOnlyNotice && !!project && dirty);
 
 	onMount(() => {
+		const discardConfirmedDraft = () => {
+			dirty = false;
+		};
+		window.addEventListener('svelte-editor:discard-project-draft', discardConfirmedDraft);
 		void load();
+		return () =>
+			window.removeEventListener('svelte-editor:discard-project-draft', discardConfirmedDraft);
 	});
 
 	// Another project became active (project chip): show its pages instead.
@@ -79,12 +93,19 @@
 		const id = routePage.data.project?.id;
 		if (id === loadedProjectId) return;
 		loadedProjectId = id;
+		if (untrack(() => dirty)) {
+			loadGeneration++;
+			busy = false;
+			status =
+				'The active project changed. Your draft is retained; reload or reconcile it before saving.';
+			return;
+		}
 		void load();
 	});
 
 	async function request(
 		method: 'GET' | 'POST',
-		payload?: { action: 'save'; site: EditorSite }
+		payload?: { action: 'save'; site: EditorSite; revision: number; expectedProjectId: string }
 	): Promise<ApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
@@ -93,12 +114,22 @@
 				? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) }
 				: {})
 		});
-		const result = (await response.json()) as ApiResponse;
-		if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
+		const result = (await response.json().catch(() => null)) as ApiResponse | null;
+		if (!response.ok) {
+			const message = result?.error ?? `Request failed (${response.status}).`;
+			throw new Error(
+				response.status === 409
+					? `${message} Your draft is retained; reload or reconcile it before saving.`
+					: message
+			);
+		}
+		if (!result) throw new Error('The project returned an invalid response.');
 		return result;
 	}
 
 	function apply(result: ApiResponse) {
+		serverRevision = result.revision!;
+		snapshotProjectId = result.project?.id ?? null;
 		pages = result.site?.pages ?? [];
 		composites = result.site?.composites ?? [];
 		// Show the page that was just edited in the editor, so recent changes are visible.
@@ -124,22 +155,71 @@
 	}
 
 	async function load() {
-		await run('Loading project…', async () => apply(await request('GET')));
+		const projectId = routePage.data.project?.id ?? null;
+		const generation = ++loadGeneration;
+		const version = editVersion;
+		busy = true;
+		status = 'Loading project…';
+		try {
+			const result = await request('GET');
+			if (generation !== loadGeneration || (routePage.data.project?.id ?? null) !== projectId)
+				return;
+			if (
+				(result.project?.id ?? null) !== projectId ||
+				!result.site ||
+				!Number.isSafeInteger(result.revision) ||
+				result.revision! < 0
+			) {
+				throw new Error('The active project changed or returned invalid data. Please reload.');
+			}
+			if (editVersion !== version) {
+				status = 'Your draft is retained. Reload or reconcile it before saving.';
+				return;
+			}
+			apply(result);
+		} catch (error) {
+			if (generation === loadGeneration)
+				status = error instanceof Error ? error.message : 'Could not load the project.';
+		} finally {
+			if (generation === loadGeneration) busy = false;
+		}
 	}
 
 	async function save() {
-		if (readOnlyNotice || !project) return;
+		if (readOnlyNotice || !project || busy) return;
+		if (snapshotProjectId !== project.id || serverRevision === null) {
+			status =
+				'The active project changed. Your draft is retained; reload or reconcile it before saving.';
+			return;
+		}
+		const projectId = project.id;
+		const version = editVersion;
+		const generation = loadGeneration;
 		await run('Saving site…', async () => {
-			await request('POST', {
+			const result = await request('POST', {
 				action: 'save',
-				site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) }
+				site: { pages: $state.snapshot(pages), composites: $state.snapshot(composites) },
+				revision: serverRevision!,
+				expectedProjectId: projectId
 			});
-			dirty = false;
-			status = 'Saved to the database';
+			if (generation !== loadGeneration || routePage.data.project?.id !== projectId) return;
+			if (
+				result.success !== true ||
+				!Number.isSafeInteger(result.revision) ||
+				result.revision! < 0
+			) {
+				throw new Error(
+					'Save response omitted the revision. Your draft is retained; reload or reconcile it.'
+				);
+			}
+			serverRevision = result.revision!;
+			dirty = version !== editVersion;
+			status = dirty ? 'More changes still need saving' : 'Saved to the database';
 		});
 	}
 
 	function touch() {
+		editVersion++;
 		dirty = true;
 		status = 'Unsaved changes';
 	}

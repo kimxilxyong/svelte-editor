@@ -86,6 +86,7 @@ describe('navigation trail', () => {
 		const names = { a: 'About' };
 		expect(describePath('/', names)).toEqual({ label: 'Projects', section: 'projects' });
 		expect(describePath('/pages', names)).toEqual({ label: 'Pages', section: 'pages' });
+		expect(describePath('/images', names)).toEqual({ label: 'Images', section: 'images' });
 		expect(describePath('/editor?page=a', names).label).toBe('Editor · About');
 		expect(describePath('/editor').label).toBe('Editor');
 		expect(describePath('/about').label).toBe('About');
@@ -97,6 +98,10 @@ describe('navigation trail', () => {
 		expect(breadcrumbsFor('/pages', names)).toEqual([
 			{ label: 'Projects', path: '/' },
 			{ label: 'Pages', path: null }
+		]);
+		expect(breadcrumbsFor('/images', names)).toEqual([
+			{ label: 'Projects', path: '/' },
+			{ label: 'Images', path: null }
 		]);
 		expect(breadcrumbsFor('/editor?page=a', names)).toEqual([
 			{ label: 'Projects', path: '/' },

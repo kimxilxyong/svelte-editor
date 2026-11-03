@@ -5,6 +5,7 @@
 	 *
 	 * Link clicks are reported through `onnavigate` so the editor can block them; exported pages
 	 * follow the per-entry link normally.
+	 * Local targets can contain percent-encoded characters, such as project image filenames.
 	 *
 	 * @prop {string} [action] - Button label.
 	 * @prop {string} [items] - Menu entries, one per line as `Label | /link` (link optional).
@@ -18,7 +19,7 @@
 		onnavigate
 	}: { action?: string; items?: string; onnavigate?: (event: MouseEvent) => void } = $props();
 	const safe = (href: string) =>
-		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href);
+		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href);
 	const entries = $derived(
 		(items || 'Dashboard\nSettings\nSign out')
 			.split('\n')

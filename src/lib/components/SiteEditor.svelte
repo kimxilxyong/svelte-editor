@@ -13,7 +13,10 @@
 	 * The editor always works on the **active project** (`/editor/api`, see `server/project-store.ts`).
 	 * A fresh project has neither pages nor composites: `hasDocuments` is then `false` and an empty
 	 * state ("Add first page", "New composite…", "Add starter composites") replaces the workspace.
-	 * Switching the project (navigation chip) reloads the site. Only the widgets are always available.
+	 * Switching the project (navigation chip) reloads the site and its image library. Requests are
+	 * aborted/invalidated on project changes, and responses must match the layout's project id.
+	 * An unexpected project change retains the unsaved draft; an AppNav switch discards it only
+	 * after confirmation and successful switching, signalled by `svelte-editor:discard-project-draft`.
 	 *
 	 * Architecture & Features:
 	 * 1. Palette:
@@ -34,14 +37,18 @@
 	 *    - Debounced snapshot-based Undo/Redo stack with keyboard shortcuts (Ctrl+Z, Ctrl+Shift+Z/Y).
 	 *    - Duplicate (Ctrl+D) and Delete (Delete/Backspace) keyboard commands.
 	 * 4. Inspector (UI extracted to `BlockInspector.svelte`; this component only supplies the
-	 *    selected block and callbacks for dirty marking, geometry clamping, layer order,
+	 *    selected block, active-project images and callbacks for dirty marking, geometry clamping, layer order,
 	 *    duplicate and delete, and keeps history/navigation/persistence):
 	 *    - Geometry controls (X, Y, Width, Height — all px), edge/fill docking, and layer ordering.
 	 *    - Content controls limited to the fields each kind supports (`inspector-fields.ts`),
 	 *      including the Link Navigation group of link, button and card widgets.
-	 *    - Preview-mode link clicks (`handleLinkClick`) are routed here for in-app navigation.
+	 *    - Preview-mode page links route in-app; registered image URLs use browser navigation.
+	 *      Menu widgets use the clicked anchor's href because their entries have independent targets.
 	 * 5. Database Integration:
-	 *    - Seamless load and save of `EditorSite` models with `/editor/api`.
+	 *    - `/editor/api` loads a site and server revision; each save supplies that revision and
+	 *      expected project id. Conflicts preserve the draft and require reload/reconciliation.
+	 *    - The local edit counter tracks changes made while a save is in flight, independently of
+	 *      the server revision shared by site and image-library mutations.
 	 */
 
 	/**
@@ -63,6 +70,7 @@
 	import { blockMenu, canvasMenu, paletteItemMenu } from '../editor-menus.js';
 	import { provideComposites } from '../composite-context.js';
 	import { seedComposites } from '../composite-seeds.js';
+	import type { ProjectImage } from '../image-types.js';
 	import {
 		blockLimits,
 		compositeLimits,
@@ -102,7 +110,14 @@
 	type EditorApiResponse = {
 		project?: { id: string; name: string } | null;
 		site?: EditorSite;
+		revision?: number;
 		success?: boolean;
+		error?: string;
+	};
+	/** Metadata returned by the cookie-selected project's image library. */
+	type ImageApiResponse = {
+		project?: { id: string; name: string } | null;
+		images?: ProjectImage[];
 		error?: string;
 	};
 	type PaletteTab = 'composites' | 'widgets' | 'custom';
@@ -223,6 +238,17 @@
 	let project = $state<{ id: string; name: string } | null>(null);
 	let databaseBusy = $state(true);
 	let databaseStatus = $state('Loading project…');
+	/** Last revision acknowledged by the server, never the local edit counter below. */
+	let serverRevision: number | null = null;
+	let images = $state.raw<ProjectImage[]>([]);
+	let imagesProjectId = $state<string | null>(null);
+	let imageStatus = $state('');
+	/** Never expose images for a different project even before an effect processes a switch. */
+	const inspectorImages = $derived(
+		project?.id && project.id === routePage.data.project?.id && imagesProjectId === project.id
+			? images
+			: []
+	);
 	/**
 	 * Set for `guest` users, who may view but not change the site (the server rejects their writes
 	 * as well; this only explains and disables the Save button). Read from the root layout data.
@@ -239,7 +265,9 @@
 		activePageId: composing ? null : currentDocumentId,
 		unsavedChanges: hasUnsavedChanges
 	}));
+	/** Increments for each local edit so an in-flight save cannot mark newer edits as saved. */
 	let revision = $state(0);
+	let saveConflict = false;
 	let routeError = $state<string | null>(null);
 	let undoStack = $state.raw<string[]>([]);
 	let redoStack = $state.raw<string[]>([]);
@@ -321,26 +349,74 @@
 	let canRedo = $derived(redoStack.length > 0);
 
 	onMount(() => {
-		void loadDatabaseState();
-		return () => clearTimeout(historyTimer);
+		// AppNav emits this only after a successful project switch and explicit confirmation.
+		// Ordinary cross-tab changes and failed switches must retain the editor's draft.
+		const discardConfirmedDraft = () => {
+			hasUnsavedChanges = false;
+		};
+		window.addEventListener('svelte-editor:discard-project-draft', discardConfirmedDraft);
+		return () => {
+			window.removeEventListener('svelte-editor:discard-project-draft', discardConfirmedDraft);
+			clearTimeout(historyTimer);
+		};
 	});
 
-	// Another project became active (project chip): load its site instead.
-	let loadedProjectId = routePage.data.project?.id;
+	// Each effect generation owns its GETs. This effect synchronizes external requests with the
+	// layout's project, not derived UI state: it must clear project data and abort on cleanup.
+	// Abort saves work; identity/generation checks also reject responses from servers or fetch
+	// implementations that complete despite aborting. Untracking prevents edits and responses
+	// from restarting the requests while preserving the explicit project-id dependency.
+	let loadGeneration = 0;
 	$effect(() => {
-		const id = routePage.data.project?.id;
-		if (id === loadedProjectId) return;
-		loadedProjectId = id;
-		void loadDatabaseState();
+		const projectId = routePage.data.project?.id ?? null;
+		const controller = new AbortController();
+		const generation = ++loadGeneration;
+		untrack(() => {
+			images = [];
+			imagesProjectId = null;
+			imageStatus = '';
+			if (hasUnsavedChanges) {
+				databaseBusy = false;
+				if ((project?.id ?? null) !== projectId) {
+					databaseStatus =
+						'The active project changed. Your draft is retained; reload or reconcile it before saving.';
+				} else if (projectId) {
+					void loadProjectImages(projectId, generation, controller.signal);
+				}
+			} else {
+				void loadDatabaseState(projectId, generation, controller.signal);
+			}
+		});
+		return () => {
+			controller.abort();
+			loadGeneration++;
+		};
 	});
 
+	/** True only for the still-mounted view and the project that started this request. */
+	function isCurrentLoad(projectId: string | null, generation: number): boolean {
+		return generation === loadGeneration && (routePage.data.project?.id ?? null) === projectId;
+	}
+
+	/** HTTP failure with its status retained so saves can distinguish conflicts from other errors. */
+	class EditorApiError extends Error {
+		readonly status: number;
+		constructor(message: string, status: number) {
+			super(message);
+			this.status = status;
+		}
+	}
+
+	/** Read a snapshot or save a revision-checked site, preserving HTTP status on errors. */
 	async function requestApi(
 		method: 'GET' | 'POST',
-		payload?: { action: 'save'; site: EditorSite }
+		payload?: { action: 'save'; site: EditorSite; revision: number; expectedProjectId: string },
+		signal?: AbortSignal
 	): Promise<EditorApiResponse> {
 		const response = await fetch('/editor/api', {
 			method,
 			cache: 'no-store',
+			signal,
 			...(payload
 				? {
 						headers: { 'content-type': 'application/json' },
@@ -348,17 +424,23 @@
 					}
 				: {})
 		});
-		const result = (await response.json()) as EditorApiResponse;
+		const result = (await response.json().catch(() => null)) as EditorApiResponse | null;
 
 		if (!response.ok) {
-			throw new Error(result.error ?? `Database request failed (${response.status}).`);
+			throw new EditorApiError(
+				result?.error ?? `Database request failed (${response.status}).`,
+				response.status
+			);
 		}
-
+		if (!result || typeof result !== 'object') throw new Error('Invalid database response.');
 		return result;
 	}
 
+	/** Replace the editor state only after the project identity and revision have been validated. */
 	function applyDatabaseState(result: EditorApiResponse) {
 		project = result.project ?? null;
+		serverRevision = result.revision!;
+		saveConflict = false;
 		const site = result.site ?? { pages: [], composites: [] };
 		if (composing) {
 			stashedPages = site.pages;
@@ -380,20 +462,69 @@
 				: `${project.name} · loaded from the database`;
 	}
 
-	async function loadDatabaseState() {
+	/** Load site and revision together and reject cookie/layout project mismatches. */
+	async function loadDatabaseState(
+		projectId: string | null,
+		generation: number,
+		signal: AbortSignal
+	) {
 		databaseBusy = true;
+		const startRevision = revision;
 		try {
-			applyDatabaseState(await requestApi('GET'));
+			const result = await requestApi('GET', undefined, signal);
+			if (!isCurrentLoad(projectId, generation)) return;
+			if ((result.project?.id ?? null) !== projectId) {
+				throw new Error('The active project changed. Reload or reconcile your draft.');
+			}
+			if (!Number.isSafeInteger(result.revision) || result.revision! < 0 || !result.site) {
+				throw new Error('The project returned an invalid site or revision. Please reload.');
+			}
+			// Editing may continue while GET is in flight. Never replace those newer edits.
+			if (revision !== startRevision || hasUnsavedChanges) {
+				databaseStatus =
+					'Your draft is retained. Reload or reconcile it before switching projects.';
+				return;
+			}
+			applyDatabaseState(result);
+			if (projectId) void loadProjectImages(projectId, generation, signal);
 		} catch (error) {
+			if (!isCurrentLoad(projectId, generation) || signal.aborted) return;
 			databaseStatus =
 				error instanceof Error ? error.message : 'Unable to load the page from the database.';
 		} finally {
-			databaseBusy = false;
+			if (isCurrentLoad(projectId, generation)) databaseBusy = false;
 		}
 	}
 
+	/** Loads metadata only for the displayed project; never falls back to another cookie-selected library. */
+	async function loadProjectImages(projectId: string, generation: number, signal: AbortSignal) {
+		try {
+			const response = await fetch('/images/api', { signal, cache: 'no-store' });
+			const result = (await response.json().catch(() => null)) as ImageApiResponse | null;
+			if (!isCurrentLoad(projectId, generation) || project?.id !== projectId) return;
+			if (!response.ok) {
+				throw new Error(result?.error ?? `Image library request failed (${response.status}).`);
+			}
+			if (result?.project?.id !== projectId || !Array.isArray(result.images)) {
+				throw new Error('The image library does not match the active project. Please reload.');
+			}
+			images = result.images;
+			imagesProjectId = projectId;
+			imageStatus = '';
+		} catch (error) {
+			if (!isCurrentLoad(projectId, generation) || signal.aborted) return;
+			imageStatus = error instanceof Error ? error.message : 'Unable to load project images.';
+		}
+	}
+
+	/** Save a snapshot with optimistic concurrency; newer local edits and conflicts remain unsaved. */
 	async function savePageToDatabase() {
-		if (databaseBusy || readOnlyNotice || !project) return;
+		if (databaseBusy || readOnlyNotice || !project || serverRevision === null) return;
+		if (project.id !== routePage.data.project?.id) {
+			databaseStatus =
+				'The active project changed. Your draft is retained; reload or reconcile it before saving.';
+			return;
+		}
 
 		if (
 			documents.some((document) => document.blocks.some((block) => !isValidLinkHref(block.href)))
@@ -403,6 +534,9 @@
 		}
 
 		const savedRevision = revision;
+		const expectedProjectId = project.id;
+		const expectedRevision = serverRevision;
+		const generation = loadGeneration;
 		const edited = $state.snapshot(documents);
 		const siteSnapshot = mergeEditorDocuments(editorMode, edited, stashedPages, stashedComposites);
 		const cycle = findCompositeCycle(siteSnapshot.composites);
@@ -414,22 +548,48 @@
 		databaseStatus = 'Saving site to the database…';
 
 		try {
-			await requestApi('POST', { action: 'save', site: siteSnapshot });
+			const result = await requestApi('POST', {
+				action: 'save',
+				site: siteSnapshot,
+				revision: expectedRevision,
+				expectedProjectId
+			});
+			if (!isCurrentLoad(expectedProjectId, generation)) return;
+			if (
+				result.success !== true ||
+				!Number.isSafeInteger(result.revision) ||
+				result.revision! < 0
+			) {
+				throw new Error(
+					'Save response omitted the revision. Your draft is retained; reload or reconcile it.'
+				);
+			}
+			serverRevision = result.revision!;
+			saveConflict = false;
 			hasUnsavedChanges = revision !== savedRevision;
 			databaseStatus = hasUnsavedChanges
 				? 'More changes still need saving'
 				: 'Saved to the database';
 		} catch (error) {
-			databaseStatus = error instanceof Error ? error.message : 'Unable to save the page.';
+			if (!isCurrentLoad(expectedProjectId, generation)) return;
+			if (error instanceof EditorApiError && error.status === 409) {
+				saveConflict = true;
+				hasUnsavedChanges = true;
+				databaseStatus = `${error.message} Your draft is retained; reload or reconcile it before saving.`;
+			} else {
+				databaseStatus = error instanceof Error ? error.message : 'Unable to save the page.';
+			}
 		} finally {
-			databaseBusy = false;
+			if (isCurrentLoad(expectedProjectId, generation)) databaseBusy = false;
 		}
 	}
 
 	function markUnsaved() {
 		revision += 1;
 		hasUnsavedChanges = true;
-		databaseStatus = 'Unsaved changes';
+		databaseStatus = saveConflict
+			? 'Your draft is retained after a conflict; reload or reconcile it before saving.'
+			: 'Unsaved changes';
 		historyPending = true;
 		clearTimeout(historyTimer);
 		historyTimer = setTimeout(commitHistory, 350);
@@ -466,7 +626,9 @@
 		committedSnapshot = snapshot;
 		revision += 1;
 		hasUnsavedChanges = true;
-		databaseStatus = 'Unsaved changes';
+		databaseStatus = saveConflict
+			? 'Your draft is retained after a conflict; reload or reconcile it before saving.'
+			: 'Unsaved changes';
 	}
 
 	function undo() {
@@ -520,17 +682,30 @@
 		return slug === '' ? linkPages[0] : linkPages.find((page) => page.slug === slug);
 	}
 
+	/** Intercept page routes in preview, while leaving external and managed-asset anchors to the browser. */
 	function handleLinkClick(event: MouseEvent, block: BuilderBlock) {
-		if (!isPreview || !block.href || !isValidLinkHref(block.href)) {
+		// Navigation widgets can render several links from `items`, so the clicked anchor rather
+		// than the parent block is authoritative. Read the attribute to preserve relative URLs.
+		const anchor =
+			event.target instanceof Element
+				? event.target.closest('a[href]')
+				: event.currentTarget instanceof Element
+					? event.currentTarget.closest('a[href]')
+					: null;
+		const href = anchor?.getAttribute('href') ?? block.href;
+		if (!isPreview || !href || !isValidLinkHref(href)) {
 			event.preventDefault();
 			return;
 		}
-		if (!block.href.startsWith('/')) return;
+		if (!href.startsWith('/')) return;
+		// Managed or linked image URLs are assets, not editor page slugs. Preserve browser
+		// navigation and modifier keys even when a linked image is outside /media/.
+		if (href.startsWith('/media/') || inspectorImages.some((image) => image.url === href)) return;
 
 		event.preventDefault();
-		const target = resolveInternalPage(block.href);
+		const target = resolveInternalPage(href);
 		if (target && !composing) selectDocument(target.id);
-		else routeError = `No page found at ${block.href}`;
+		else routeError = `No page found at ${href}`;
 	}
 
 	/** Composites that may be placed on the open document (never itself or one that contains it). */
@@ -1522,11 +1697,13 @@
 
 			{#if !isPreview}
 				<aside class="inspector-panel" aria-label="Selection inspector">
+					{#if imageStatus}<p role="status">{imageStatus}</p>{/if}
 					<BlockInspector
 						bind:block={() => selectedBlock, () => {}}
 						label={selectedLabel}
 						mark={selectedBlock ? componentInfo[selectedBlock.kind].mark : ''}
 						{linkPages}
+						images={inspectorImages}
 						compositeEdit={selectedComposite}
 						hasFillBlock={anotherBlockUsesFill}
 						siteTheme={routePage.data.siteTheme}

@@ -103,6 +103,9 @@ export const accessRules: readonly AccessRule[] = [
 	// Projects (list, open, create, edit, delete): signed-in users read, editors change. The API itself
 	// restricts every project to its owner (admins: all); see `server/project-store.ts`.
 	{ prefix: '/projects/api', read: 'guest', write: 'user' },
+	// Image libraries belong to the active project; guests can view, editors can modify.
+	{ prefix: '/images', read: 'guest', write: 'user' },
+	{ prefix: '/media', read: 'guest' },
 	{ prefix: '/pages', read: 'guest' },
 	// Saved site of the active project: everybody signed-in may read it, editors may change it.
 	{ prefix: '/editor/api', read: 'guest', write: 'user' },

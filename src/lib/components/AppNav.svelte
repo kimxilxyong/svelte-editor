@@ -11,7 +11,7 @@
 	 * | ----------------- | ---------------------------------------------------------------- |
 	 * | Where am I?       | Breadcrumb (`Projects › Pages › Editor · Home`) and the highlighted tab |
 	 * | Where was I?      | Back button label ("Back to …") and the History menu            |
-	 * | Where can I go?   | Tabs (Projects / Pages / Editor / Composites / Code / Theme / Admin / About), the project switcher, the "Open page" switcher, History forward |
+	 * | Where can I go?   | Tabs (Projects / Pages / Editor / Images / Composites / Code / Theme / Admin / About), the project switcher, the "Open page" switcher, History forward |
 	 * | Which project?    | Project chip: the active project and a menu to switch or manage projects |
 	 * | Go back one step  | Back button – identical to the browser Back button               |
 	 * | Who am I?         | `UserMenu` (account, sign out) at the right end                  |
@@ -34,7 +34,8 @@
 	 * `useNavContext(() => ({ pages, activePageId, unsavedChanges }))` from `navigation.svelte.ts`;
 	 * this component reads `nav.pages`, `nav.activePageId` and `nav.unsavedChanges`. On routes that
 	 * do not publish anything (admin, about, login …) the "Open page" switcher is simply hidden.
-	 * The unsaved flag is consumed by the layout's `beforeNavigate` confirmation.
+	 * The unsaved flag is consumed by the layout's `beforeNavigate` confirmation and by the
+	 * project switcher, whose invalidation is not a navigation.
 	 *
 	 * @example
 	 * <!-- +layout.svelte -->
@@ -53,6 +54,7 @@
 		splitPath,
 		toPath,
 		componentEditorPath,
+		imagesPath,
 		pagesPath,
 		projectsPath
 	} from '../navigation-trail.js';
@@ -73,6 +75,7 @@
 	const onEditor = $derived(splitPath(currentPath).pathname === '/editor');
 	const onProjects = $derived(splitPath(currentPath).pathname === projectsPath);
 	const onPages = $derived(splitPath(currentPath).pathname === pagesPath);
+	const onImages = $derived(splitPath(currentPath).pathname === imagesPath);
 	const onComposites = $derived(splitPath(currentPath).pathname === '/composites');
 	const onComponents = $derived(splitPath(currentPath).pathname === componentEditorPath);
 	const onTheme = $derived(splitPath(currentPath).pathname === '/theme');
@@ -83,6 +86,7 @@
 	const role = $derived(routePage.data.user?.role ?? null);
 	const showProjects = $derived(canAccess(role, projectsPath));
 	const showPages = $derived(canAccess(role, pagesPath));
+	const showImages = $derived(canAccess(role, imagesPath));
 	const showEditor = $derived(canAccess(role, '/editor'));
 	const showComposites = $derived(canAccess(role, '/composites'));
 	const showComponents = $derived(canAccess(role, componentEditorPath));
@@ -140,9 +144,14 @@
 	async function switchProject(id: string) {
 		projectMenuOpen = false;
 		if (id === activeProject?.id) return;
+		// invalidateAll is not navigation, so the layout's beforeNavigate guard does not run.
+		const discardDraft = nav.unsavedChanges;
+		if (discardDraft && !window.confirm('Discard unsaved changes and switch projects?')) return;
 		projectError = '';
 		try {
 			await projectApi({ action: 'open', id });
+			// Only after the switch succeeds may an editor discard the explicitly confirmed draft.
+			if (discardDraft) window.dispatchEvent(new Event('svelte-editor:discard-project-draft'));
 			resetProjectContext();
 			await invalidateAll();
 		} catch (error) {
@@ -228,6 +237,17 @@
 			<li>
 				<a href={editorHref} class:active={onEditor} aria-current={onEditor ? 'page' : undefined}>
 					Editor
+				</a>
+			</li>
+		{/if}
+		{#if showImages}
+			<li>
+				<a
+					href={resolve('/images')}
+					class:active={onImages}
+					aria-current={onImages ? 'page' : undefined}
+				>
+					Images
 				</a>
 			</li>
 		{/if}
@@ -757,6 +777,12 @@
 
 		.tabs {
 			margin-left: 0;
+			max-width: 100%;
+			overflow-x: auto;
+		}
+		.app-nav > * {
+			min-width: 0;
+			max-width: 100%;
 		}
 	}
 </style>

@@ -10,8 +10,10 @@
 	 * `inspector-fields.ts`), so a control exists only when the widget renders that field. Universal
 	 * controls (layer order, Align To, fixed position/size, theme) are always shown for a selection.
 	 *
-	 * Link Navigation (`widget-link`, `widget-button`, `widget-card` CTA) edits the existing
-	 * `href` / `newTab` block fields with page-route suggestions and {@link isValidLinkHref} validation.
+	 * Link Navigation (link, button, card CTA and gradient button) edits the existing `href` /
+	 * `newTab` fields with page-route suggestions and {@link isValidLinkHref} validation. Project
+	 * images can also be chosen for image sources, link destinations, navigation-list entries and
+	 * URL-like custom string props, without replacing their manual text editors.
 	 *
 	 * Data flow: the block is mutated in place through `bind:` (the host passes a function binding to
 	 * its derived selection) and every text/option edit calls `onchange` so the host marks the
@@ -25,8 +27,9 @@
 	 * @prop {string} label - Display name of the selected block's kind.
 	 * @prop {string} mark - Glyph of the selected block's kind.
 	 * @prop {{ id: string; name: string; slug: string }[]} [linkPages=[]] - Internal pages offered as link suggestions.
+	 * @prop {ProjectImage[]} [images=[]] - Active project's image library offered by the picker; not bindable.
 	 * @prop {{ id: string; name: string }} [compositeEdit] - Composite a `composite:` block instantiates; shows an "Edit composite" link.
-	 * @prop {SiteTheme} [siteTheme] - Site theme whose foreground/background are the colour pickers' defaults.
+	 * @prop {SiteTheme} [siteTheme=defaultSiteTheme] - Site theme whose foreground/background are the colour pickers' defaults.
 	 * @prop {() => void} onchange - A content value was edited (mark unsaved).
 	 * @prop {boolean} [hasFillBlock=false] - Another block on this canvas already uses Fill.
 	 * @prop {(alignment: AlignTo) => void} onalign - Align To was changed.
@@ -41,10 +44,18 @@
 	 *   onduplicate={duplicate} ondelete={remove} />
 	 */
 	import { resolve } from '$app/paths';
-	import { blockLimits, isValidLinkHref, type AlignTo, type BuilderBlock } from '../editor.js';
+	import {
+		blockLimits,
+		isValidLinkHref,
+		type AlignTo,
+		type BuilderBlock,
+		type WidgetKind
+	} from '../editor.js';
 	import { defaultSiteTheme, siteBackground, siteForeground, type SiteTheme } from '../theme.js';
 	import { inspectorFields } from '../inspector-fields.js';
 	import { widgetCatalog } from '../widget-catalog.js';
+	import type { ProjectImage } from '../image-types.js';
+	import ImagePicker from './ImagePicker.svelte';
 
 	type LayerAction = 'front' | 'back' | 'forward' | 'backward';
 	type GeometryField = 'x' | 'y' | 'width' | 'height';
@@ -54,6 +65,7 @@
 		label,
 		mark,
 		linkPages = [],
+		images = [],
 		compositeEdit,
 		hasFillBlock = false,
 		siteTheme = defaultSiteTheme,
@@ -68,6 +80,7 @@
 		label: string;
 		mark: string;
 		linkPages?: { id: string; name: string; slug: string }[];
+		images?: ProjectImage[];
 		compositeEdit?: { id: string; name: string };
 		hasFillBlock?: boolean;
 		siteTheme?: SiteTheme;
@@ -84,6 +97,59 @@
 	const fields = $derived(block ? inspectorFields(block.kind) : {});
 	const hrefValid = $derived(block ? isValidLinkHref(block.href) : true);
 	const hrefExternal = $derived(block ? /^https?:\/\//i.test(block.href) : false);
+	/** These widgets interpret the second pipe-separated cell of each line as a link. */
+	const navigationListKinds = new Set([
+		'widget-breadcrumb',
+		'widget-navbar',
+		'widget-footer',
+		'widget-sidebar',
+		'widget-dropdown'
+	]);
+	const isNavigationList = $derived(block ? navigationListKinds.has(block.kind) : false);
+
+	/** Recognize URL-bearing custom props without turning arbitrary prose fields into pickers. */
+	function isUrlProp(key: string, value: string): boolean {
+		return (
+			/(url|uri|href|src|source|image|img|photo|picture|thumbnail|avatar|logo|icon|background)/i.test(
+				key
+			) || /^(https?:\/\/|\/(?!\/))/i.test(value.trim())
+		);
+	}
+
+	/**
+	 * Replace only the second cell of a navigation line, retaining all other lines, whitespace,
+	 * extra cells and CRLF line endings. A label-only line gains the missing URL separator.
+	 */
+	function navigationWithUrl(items: string, index: number, url: string): string {
+		const lines = items.split('\n');
+		const line = lines[index];
+		if (line === undefined) return items;
+		const separator = line.indexOf('|');
+		if (separator < 0) {
+			const ending = line.endsWith('\r') ? '\r' : '';
+			lines[index] = `${ending ? line.slice(0, -1) : line} | ${url}${ending}`;
+		} else {
+			const remainder = line.slice(separator + 1);
+			const match = /^([ \t]*)([^|\r]*?)([ \t]*)(\|[^\r]*)?(\r?)$/.exec(remainder);
+			if (!match) return items;
+			lines[index] =
+				`${line.slice(0, separator + 1)}${match[1]}${url}${match[3]}${match[4] ?? ''}${match[5]}`;
+		}
+		return lines.join('\n');
+	}
+
+	/** Read exactly the URL cell that the navigation widgets render. */
+	function navigationUrl(line: string): string {
+		return (line.split('|')[1] ?? '').trim();
+	}
+
+	/** Match the navigation widgets' stricter path rules and do not introduce another cell. */
+	function acceptsNavigationUrl(url: string): boolean {
+		return (
+			!url.includes('|') &&
+			(/^https?:\/\/[^\s]+$/i.test(url) || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(url))
+		);
+	}
 	/** Entries of the select widget (the block's own list, or the catalog sample). */
 	const selectOptions = $derived(
 		(block?.items || widgetCatalog['widget-select'].defaults.items || '')
@@ -276,9 +342,21 @@
 				id="{uid}-action"
 				class="field-control"
 				bind:value={current.action}
-				maxlength="48"
+				maxlength={current.kind === 'widget-image' ? 2048 : 48}
 				oninput={onchange}
 			/>
+			{#if current.kind === 'widget-image'}
+				<ImagePicker
+					{images}
+					value={current.action}
+					label="Choose image for image URL"
+					onselect={(url) => {
+						if (current.action === url) return;
+						current.action = url;
+						onchange();
+					}}
+				/>
+			{/if}
 		{/if}
 
 		{#if fields.link}
@@ -289,7 +367,7 @@
 					id="{uid}-href"
 					class="field-control"
 					list="{uid}-routes"
-					maxlength="200"
+					maxlength="2048"
 					placeholder="/page or https://…"
 					aria-invalid={!hrefValid}
 					aria-describedby="{uid}-href-hint"
@@ -300,6 +378,17 @@
 					{#each linkPages as page (page.id)}<option value="/{page.slug}">{page.name}</option
 						>{/each}
 				</datalist>
+				<ImagePicker
+					{images}
+					value={current.href}
+					label="Choose image for link address"
+					accept={isValidLinkHref}
+					onselect={(url) => {
+						if (current.href === url) return;
+						current.href = url;
+						onchange();
+					}}
+				/>
 				{#if !hrefValid}
 					<p class="route-error" role="alert">Use /page-route or an http(s) address.</p>
 				{/if}
@@ -348,9 +437,37 @@
 				class="field-control field-textarea"
 				bind:value={current.items}
 				rows="6"
-				maxlength="600"
+				maxlength={isNavigationList ? 10000 : 600}
 				oninput={onchange}></textarea>
 			<p class="panel-hint">{fields.items}</p>
+			{#if isNavigationList}
+				<!-- Empty items render the widget's catalog sample; choosing an image materializes it. -->
+				{@const navigationItems =
+					current.items || widgetCatalog[current.kind as WidgetKind]?.defaults.items || ''}
+				<div class="navigation-image-pickers">
+					<!-- The line index is its address in the editable text, even when labels repeat. -->
+					{#each navigationItems.split('\n') as line, index (index)}
+						{#if line.trim()}
+							<ImagePicker
+								{images}
+								value={navigationUrl(line)}
+								label="Choose image for {line.split('|')[0].trim() || `entry ${index + 1}`}"
+								maxLength={Math.max(
+									0,
+									10000 - navigationWithUrl(navigationItems, index, '').length
+								)}
+								accept={acceptsNavigationUrl}
+								onselect={(url) => {
+									const next = navigationWithUrl(navigationItems, index, url);
+									if (next === navigationItems || next.length > 10000) return;
+									current.items = next;
+									onchange();
+								}}
+							/>
+						{/if}
+					{/each}
+				</div>
+			{/if}
 		{/if}
 		{#if fields.level}
 			<label class="field-label" for="{uid}-level">Value ({current.level}%)</label>
@@ -398,11 +515,24 @@
 						id="{uid}-prop-{propKey}"
 						class="field-control"
 						value={String(propVal)}
+						maxlength="2048"
 						oninput={(e) => {
 							props[propKey] = e.currentTarget.value;
 							onchange();
 						}}
 					/>
+					{#if typeof propVal === 'string' && isUrlProp(propKey, propVal)}
+						<ImagePicker
+							{images}
+							value={propVal}
+							label="Choose image for {propKey}"
+							onselect={(url) => {
+								if (props[propKey] === url) return;
+								props[propKey] = url;
+								onchange();
+							}}
+						/>
+					{/if}
 				{/if}
 			{/each}
 		{/if}
@@ -779,6 +909,7 @@
 		.selected-component,
 		.field-divider,
 		.color-options,
+		.navigation-image-pickers,
 		.link-group {
 			grid-column: 1 / -1;
 		}

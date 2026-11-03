@@ -6,6 +6,7 @@
 	 * The CTA is shown when `action` is non-empty. With a non-empty, safe `href` it is an accessible
 	 * anchor, otherwise a plain `<button>`. Unsafe hrefs fall back to the button (see WidgetButton).
 	 * External links get `rel="noopener noreferrer"`, `target="_blank"` only when `newTab` is set.
+	 * Local paths allow percent-encoded characters, including project image filenames.
 	 *
 	 * @prop {string} title - Card heading.
 	 * @prop {string} body - Card text.
@@ -33,7 +34,7 @@
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
-	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href));
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">

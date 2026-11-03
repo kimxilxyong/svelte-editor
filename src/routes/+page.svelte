@@ -20,6 +20,7 @@
 	 * Data flow: `data.projects` (server load) is the source of truth; `draft` holds the unsaved edits of
 	 * the selected project. Every mutation calls `/projects/api` through `projectApi` and then
 	 * `invalidateAll()`, which reloads this page and the layout (active project, theme, switcher).
+	 * Folder operations send the active project precondition and report imported image counts.
 	 * Guests are read-only (the server rejects their writes as well).
 	 *
 	 * @prop {import('./$types').PageData} data - `projects` (visible projects) plus the layout's
@@ -289,7 +290,7 @@
 			const response = await fetch('/editor/api/project', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ root: draft.path.trim(), ...body })
+				body: JSON.stringify({ root: draft.path.trim(), ...body, expectedProjectId: activeId })
 			});
 			const result = await response.json();
 			if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status}).`);
@@ -297,7 +298,7 @@
 			const skipped: FileNote[] = result.skipped ?? [];
 			const warnings: string[] = result.warnings ?? [];
 			if (body.action === 'import') {
-				folderMessage = `Imported ${result.pages.length} pages, ${result.composites?.length ?? 0} composites, ${result.components?.length ?? 0} components${skipped.length ? `, skipped ${skipped.length}` : ''}.`;
+				folderMessage = `Imported ${result.pages.length} pages, ${result.composites?.length ?? 0} composites, ${result.components?.length ?? 0} components, ${result.imageCount ?? 0} images${skipped.length ? `, skipped ${skipped.length}` : ''}.`;
 				folderDetails = [
 					...result.pages.map((item: { slug: string }) => `read /${item.slug}`),
 					...skipped.map((item) => `skipped ${item.file} (${item.reason})`)

@@ -5,6 +5,7 @@
 	 *
 	 * Link clicks are reported through `onnavigate` so the editor can block them; exported pages
 	 * follow the per-entry link normally.
+	 * Local targets can contain percent-encoded characters, such as project image filenames.
 	 *
 	 * @prop {string} [items] - Crumbs, one per line as `Label | /link` (link optional; only `https://`
 	 *   and `/path` targets are used). Defaults to Home / Projects / Flowbite.
@@ -15,7 +16,7 @@
 	let { items = '', onnavigate }: { items?: string; onnavigate?: (event: MouseEvent) => void } =
 		$props();
 	const safe = (href: string) =>
-		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href);
+		/^https?:\/\/[^\s]+$/i.test(href) || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href);
 	const crumbs = $derived(
 		(items || 'Home | /\nProjects | /projects\nFlowbite')
 			.split('\n')

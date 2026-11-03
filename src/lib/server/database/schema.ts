@@ -13,6 +13,9 @@
  *                     and the project's theme (`theme`, JSON text of a `SiteTheme`). Cascades on user deletion.
  * - `project_pages` – the pages of a project (`ordinal` keeps the order; `blocks` is JSON text).
  * - `project_composites` – the composite components of a project (same shape, `name` is unique per project).
+ * - `project_images` – image library metadata and, for managed images, base64-encoded file contents.
+ * - `project_revisions` – monotonically increasing site/library version for optimistic concurrency.
+ * - `project_image_seed_state` – records whether a project's starter images have been initialized.
  * - `user_identities` – external sign-in methods linked to a user: `provider` ∈ github | google | linkedin | wallet,
  *                     `provider_user_id` is the provider's stable subject (wallet: lower-case 0x address).
  * - `sessions`      – server-side sessions. `id` is the SHA-256 hex of the opaque cookie token, so a database
@@ -115,6 +118,26 @@ export const schemaStatements: readonly string[] = [
 		blocks TEXT NOT NULL,
 		PRIMARY KEY (project_id, id),
 		UNIQUE (project_id, name)
+	)`,
+	`CREATE TABLE IF NOT EXISTS project_revisions (
+		project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		revision INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE TABLE IF NOT EXISTS project_images (
+		project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		url TEXT NOT NULL,
+		category TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		mime_type TEXT,
+		size INTEGER,
+		data TEXT,
+		PRIMARY KEY (project_id, id),
+		UNIQUE (project_id, url)
+	)`,
+	`CREATE TABLE IF NOT EXISTS project_image_seed_state (
+		project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id) ON DELETE CASCADE
 	)`
 ];
 
@@ -128,7 +151,10 @@ export const copyOrder: readonly string[] = [
 	'audit_log',
 	'projects',
 	'project_pages',
-	'project_composites'
+	'project_composites',
+	'project_revisions',
+	'project_images',
+	'project_image_seed_state'
 ];
 
 /** Tables of earlier schema versions; they are removed by {@link dropAllTables} as well. */

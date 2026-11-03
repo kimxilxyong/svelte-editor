@@ -92,10 +92,22 @@ describe('isValidLinkHref', () => {
 			'ftp://example.com',
 			'home',
 			'https://exa mple.com',
-			`/${'a'.repeat(200)}`
+			`/${'a'.repeat(2048)}`
 		]) {
 			expect(isValidLinkHref(href), href).toBe(false);
 		}
+	});
+
+	it('accepts long image and link URLs without expanding ordinary action labels', () => {
+		const imageUrl = `https://example.com/${'a'.repeat(500)}.svg`;
+		expect(isValidLinkHref(`/${'a'.repeat(2047)}`)).toBe(true);
+		expect(
+			parseBuilderBlocks([{ ...base, kind: 'widget-image', action: imageUrl }])
+		).not.toBeNull();
+		expect(parseBuilderBlocks([{ ...base, action: 'x'.repeat(49) }])).toBeNull();
+		expect(
+			parseBuilderBlocks([{ ...base, kind: 'widget-image', action: 'x'.repeat(2049) }])
+		).toBeNull();
 	});
 });
 

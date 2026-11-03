@@ -1,10 +1,15 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+/**
+ * @fileoverview Exercises SvelteKit project export/import, including the bounded, conflict-safe
+ * image snapshot format. Fixtures live under the repository and are removed after each test.
+ */
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, rm, symlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { compile } from 'svelte/compiler';
 import { afterEach, describe, expect, it } from 'vitest';
 import { compositeKind, componentNames, type BlockKind, type EditorSite } from '../editor.js';
 import { seedComposites } from '../composite-seeds.js';
+import type { ImageExportRecord } from '../image-types.js';
 import {
 	exportSite,
 	importSite,
@@ -16,7 +21,8 @@ import {
 const dirs: string[] = [];
 
 async function makeProject() {
-	const root = await mkdtemp(path.join(tmpdir(), 'editor-project-'));
+	const root = path.join(process.cwd(), `.project-fixture-${randomUUID()}`);
+	await mkdir(root);
 	dirs.push(root);
 	await writeFile(path.join(root, 'package.json'), '{}');
 	await mkdir(path.join(root, 'src', 'routes'), { recursive: true });
@@ -166,6 +172,185 @@ describe('project export/import', () => {
 
 	it('rejects non-project folders and relative paths', async () => {
 		await expect(exportSite('relative/path', site)).rejects.toBeInstanceOf(ProjectError);
-		await expect(importSite(tmpdir())).rejects.toBeInstanceOf(ProjectError);
+		await expect(importSite(path.join(process.cwd(), 'src'))).rejects.toBeInstanceOf(ProjectError);
+	});
+});
+
+const emptySite: EditorSite = { pages: [], composites: [] };
+const managedBytes = Buffer.from('portable image bytes');
+const managed: ImageExportRecord = {
+	id: 'img_1',
+	name: 'Managed image',
+	url: '/media/img_1.png',
+	category: 'Photos',
+	kind: 'managed',
+	mimeType: 'image/png',
+	size: managedBytes.length,
+	data: managedBytes.toString('base64')
+};
+const linked: ImageExportRecord = {
+	id: 'external-1',
+	name: 'External image',
+	url: 'https://images.unsplash.com/photo-example?auto=format',
+	category: 'Backgrounds',
+	kind: 'link'
+};
+const manifestPath = path.join('static', 'media', '.svelte-editor-images.json');
+
+/** Write a deliberately constructed manifest for negative import tests. */
+async function writeManifest(root: string, images: unknown[]) {
+	await mkdir(path.join(root, 'static', 'media'), { recursive: true });
+	await writeFile(
+		path.join(root, manifestPath),
+		JSON.stringify({ generator: 'svelte-editor', version: 1, images })
+	);
+}
+
+function diskManaged() {
+	const image = { ...managed };
+	delete image.data;
+	return { ...image, sha256: createHash('sha256').update(managedBytes).digest('hex') };
+}
+
+describe('project image portability', () => {
+	it('round-trips managed bytes and external links and preserves absent-vs-empty snapshots', async () => {
+		const root = await makeProject();
+		expect((await importSite(root)).images).toBeUndefined();
+		const result = await exportSite(root, emptySite, undefined, { images: [managed, linked] });
+		expect(result.skipped).toEqual([]);
+		expect(result.written).toContain(path.join('static', 'media', 'img_1.png'));
+		expect(result.written).toContain(manifestPath);
+		expect(await readFile(path.join(root, 'static', 'media', 'img_1.png'))).toEqual(managedBytes);
+		const text = await readFile(path.join(root, manifestPath), 'utf8');
+		expect(text).not.toContain(managed.data);
+		expect((await importSite(root)).images).toEqual([managed, linked]);
+
+		// Identical files are safe; an existing generated manifest can be updated.
+		const second = await exportSite(root, emptySite, undefined, { images: [linked] });
+		expect(second.skipped).toEqual([]);
+		expect((await importSite(root)).images).toEqual([linked]);
+		await exportSite(root, emptySite, undefined, { images: [] });
+		expect((await importSite(root)).images).toEqual([]);
+	});
+
+	it('reports conflicts without overwriting existing files or writing an incomplete manifest', async () => {
+		const root = await makeProject();
+		await mkdir(path.join(root, 'static', 'media'), { recursive: true });
+		const file = path.join(root, 'static', 'media', 'img_1.png');
+		await writeFile(file, 'user image');
+		const result = await exportSite(root, emptySite, undefined, { images: [managed, linked] });
+		expect(result.skipped.map((item) => item.file)).toEqual([
+			path.join('static', 'media', 'img_1.png'),
+			manifestPath
+		]);
+		expect(await readFile(file, 'utf8')).toBe('user image');
+		expect((await importSite(root)).images).toBeUndefined();
+
+		await writeFile(path.join(root, manifestPath), 'user manifest');
+		const conflict = await exportSite(root, emptySite, undefined, { images: [linked] });
+		expect(conflict.skipped.some((item) => item.file === manifestPath)).toBe(true);
+		expect(await readFile(path.join(root, manifestPath), 'utf8')).toBe('user manifest');
+	});
+
+	it('preserves a previous manifest when a managed destination conflicts', async () => {
+		const root = await makeProject();
+		await exportSite(root, emptySite, undefined, { images: [managed] });
+		const before = await readFile(path.join(root, manifestPath));
+		const changed = Buffer.from('new data');
+		const result = await exportSite(root, emptySite, undefined, {
+			images: [{ ...managed, size: changed.length, data: changed.toString('base64') }]
+		});
+		expect(result.skipped.some((item) => item.file === manifestPath)).toBe(true);
+		expect(await readFile(path.join(root, manifestPath))).toEqual(before);
+		expect((await importSite(root)).images).toEqual([managed]);
+	});
+
+	it('does not replace a manifest whose recorded managed bytes no longer match', async () => {
+		const root = await makeProject();
+		await exportSite(root, emptySite, undefined, { images: [managed] });
+		const before = await readFile(path.join(root, manifestPath));
+		await writeFile(path.join(root, 'static', 'media', 'img_1.png'), 'edited outside editor');
+		const result = await exportSite(root, emptySite, undefined, { images: [linked] });
+		expect(result.skipped.some((item) => item.file === manifestPath)).toBe(true);
+		expect(await readFile(path.join(root, manifestPath))).toEqual(before);
+	});
+
+	it('rejects traversal, duplicate identifiers, invalid base64 and inconsistent sizes', async () => {
+		const root = await makeProject();
+		for (const image of [
+			{ ...managed, url: '/media/../img_1.png' },
+			{ ...managed, url: '/media/%2e%2e.png' },
+			{ ...managed, data: '!!!!' },
+			{ ...managed, data: 'YQ' },
+			{ ...managed, size: 1 }
+		]) {
+			await expect(
+				exportSite(root, emptySite, undefined, { images: [image] })
+			).rejects.toBeInstanceOf(ProjectError);
+		}
+		await expect(
+			exportSite(root, emptySite, undefined, { images: [linked, linked] })
+		).rejects.toBeInstanceOf(ProjectError);
+		await writeManifest(root, [{ ...diskManaged(), url: '/media/../../secret.png' }]);
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+	});
+
+	it('rejects missing, modified, malformed and oversized image snapshots', async () => {
+		const root = await makeProject();
+		await writeManifest(root, [diskManaged()]);
+		await expect(importSite(root)).rejects.toThrow(/Missing or invalid managed image/);
+		await writeFile(path.join(root, 'static', 'media', 'img_1.png'), 'modified');
+		await expect(importSite(root)).rejects.toThrow(/Missing or invalid managed image/);
+		await writeFile(
+			path.join(root, manifestPath),
+			JSON.stringify({ generator: 'svelte-editor', version: 2, images: [] })
+		);
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+		await writeFile(path.join(root, manifestPath), 'x'.repeat(1024 * 1024 + 1));
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+		await expect(
+			exportSite(root, emptySite, undefined, {
+				images: Array.from({ length: 501 }, (_, i) => ({ ...linked, id: String(i) }))
+			})
+		).rejects.toBeInstanceOf(ProjectError);
+		await expect(
+			exportSite(root, emptySite, undefined, {
+				images: [
+					{
+						...managed,
+						size: 10 * 1024 * 1024 + 1,
+						data: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
+					}
+				]
+			})
+		).rejects.toBeInstanceOf(ProjectError);
+	});
+
+	it('rejects symlinked media directories, manifests and managed files', async () => {
+		const root = await makeProject();
+		const outside = await makeProject();
+		await mkdir(path.join(root, 'static'));
+		await symlink(outside, path.join(root, 'static', 'media'));
+		expect(
+			(await exportSite(root, emptySite, undefined, { images: [managed] })).skipped[0].file
+		).toBe(manifestPath);
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+		await unlink(path.join(root, 'static', 'media'));
+		await mkdir(path.join(root, 'static', 'media'));
+		await writeFile(path.join(outside, 'manifest'), 'outside');
+		await symlink(path.join(outside, 'manifest'), path.join(root, manifestPath));
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+		expect(
+			(await exportSite(root, emptySite, undefined, { images: [managed] })).skipped[0].file
+		).toBe(manifestPath);
+		await unlink(path.join(root, manifestPath));
+		await writeManifest(root, [diskManaged()]);
+		await writeFile(path.join(outside, 'image.png'), managedBytes);
+		await symlink(path.join(outside, 'image.png'), path.join(root, 'static', 'media', 'img_1.png'));
+		await expect(importSite(root)).rejects.toBeInstanceOf(ProjectError);
+		await unlink(path.join(root, manifestPath));
+		const conflict = await exportSite(root, emptySite, undefined, { images: [managed] });
+		expect(conflict.skipped.some((item) => item.file.endsWith('img_1.png'))).toBe(true);
+		expect(await readFile(path.join(outside, 'image.png'))).toEqual(managedBytes);
 	});
 });

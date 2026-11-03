@@ -1,9 +1,9 @@
 /**
  * @fileoverview Persistence of projects, their pages and composite components, and their theme.
  *
- * This is the **only** module that reads or writes the `projects`, `project_pages` and
- * `project_composites` tables. It uses the portable SQL dialect only (see `database/types.ts`), so it
- * runs on SQLite and PostgreSQL alike.
+ * This is the **only** module that reads or writes project, page, composite, image and revision
+ * tables. It uses the portable SQL dialect only (see `database/types.ts`), so it runs on SQLite
+ * and PostgreSQL alike. A project revision serializes site saves and image-reference changes.
  *
  * ## Ownership
  * Every project belongs to one user. {@link getAccessibleProject} and {@link listProjects} apply the
@@ -24,6 +24,15 @@
 
 import { hasRole, type Role } from '../auth/roles.js';
 import { parseEditorSite, type EditorSite } from '../editor.js';
+import { findImageUses, replaceImageReferences } from '../image-references.js';
+import { starterImages } from '../image-seeds.js';
+import {
+	imageCategories,
+	type ImageCategory,
+	type ImageExportRecord,
+	type ProjectImage
+} from '../image-types.js';
+import { mergeImportedSite } from '../site-merge.js';
 import {
 	normalizeProjectName,
 	projectLimits,
@@ -35,7 +44,8 @@ import { defaultSiteTheme, parseSiteTheme, type SiteTheme } from '../theme.js';
 import type { SqlClient, SqlRow } from './database/types.js';
 
 /** Reason codes of {@link ProjectStoreError}. */
-export type ProjectStoreErrorCode = 'invalid_input' | 'name_taken' | 'not_found' | 'limit';
+export type ProjectStoreErrorCode =
+	'invalid_input' | 'name_taken' | 'not_found' | 'limit' | 'conflict' | 'in_use';
 
 /** Error with a message that is safe to show to the user. */
 export class ProjectStoreError extends Error {
@@ -292,13 +302,17 @@ export async function deleteProject(db: SqlClient, id: string): Promise<boolean>
 	return db.transaction(async (tx) => {
 		await tx.run('DELETE FROM project_pages WHERE project_id = ?', [id]);
 		await tx.run('DELETE FROM project_composites WHERE project_id = ?', [id]);
+		await tx.run('DELETE FROM project_images WHERE project_id = ?', [id]);
+		await tx.run('DELETE FROM project_image_seed_state WHERE project_id = ?', [id]);
+		await tx.run('DELETE FROM project_revisions WHERE project_id = ?', [id]);
 		const result = await tx.run('DELETE FROM projects WHERE id = ?', [id]);
 		return result.changes > 0;
 	});
 }
 
 /**
- * Copies a project (settings, pages and composites) for the same owner under a free name.
+ * Copies a project (settings, pages, composites and image library) for the same owner under a free
+ * name. Managed image bytes are independent in the copy; source and copy retain the same URLs.
  *
  * @param db - Database client.
  * @param id - Source project (the caller has already checked access).
@@ -306,18 +320,28 @@ export async function deleteProject(db: SqlClient, id: string): Promise<boolean>
  * @throws {ProjectStoreError} `not_found` or `limit`.
  */
 export async function duplicateProject(db: SqlClient, id: string): Promise<ProjectSummary> {
-	const source = await getProject(db, id);
-	if (!source) throw new ProjectStoreError('not_found', 'Project not found.');
-	const site = await loadSite(db, id);
-	const taken = await ownerNames(db, source.ownerId);
-	const copy = await createProject(db, source.ownerId, {
-		name: uniqueProjectName(`${source.name} copy`, taken),
-		description: source.description,
-		path: '',
-		theme: source.theme
+	return db.transaction(async (tx) => {
+		const source = await getProject(tx, id);
+		if (!source) throw new ProjectStoreError('not_found', 'Project not found.');
+		await lockProjectRevision(tx, id);
+		await ensureStarterImages(tx, id);
+		const site = await loadSite(tx, id);
+		const taken = await ownerNames(tx, source.ownerId);
+		const copy = await createProject(tx, source.ownerId, {
+			name: uniqueProjectName(`${source.name} copy`, taken),
+			description: source.description,
+			path: '',
+			theme: source.theme
+		});
+		await tx.run(
+			`INSERT INTO project_images (project_id, id, name, url, category, kind, mime_type, size, data)
+			 SELECT ?, id, name, url, category, kind, mime_type, size, data FROM project_images WHERE project_id = ?`,
+			[copy.id, id]
+		);
+		await tx.run('INSERT INTO project_image_seed_state (project_id) VALUES (?)', [copy.id]);
+		await saveSite(tx, copy.id, site);
+		return (await getProject(tx, copy.id))!;
 	});
-	await saveSite(db, copy.id, site);
-	return (await getProject(db, copy.id))!;
 }
 
 /**
@@ -364,49 +388,565 @@ export async function loadSite(db: SqlClient, projectId: string): Promise<Editor
  * @param db - Database client.
  * @param projectId - Project id (the caller has already checked access).
  * @param site - Validated site (see `parseEditorSite`).
- * @throws {ProjectStoreError} `not_found` when the project does not exist.
+ * @param expectedRevision - Revision read with the site; omitted for internal transactional writes.
+ * @returns The new site/library revision.
+ * @throws {ProjectStoreError} `not_found` for a missing project or `conflict` for a stale revision.
  */
-export async function saveSite(db: SqlClient, projectId: string, site: EditorSite): Promise<void> {
+export async function saveSite(
+	db: SqlClient,
+	projectId: string,
+	site: EditorSite,
+	expectedRevision?: number
+): Promise<number> {
+	return db.transaction(async (tx) => {
+		const revision = await advanceRevision(tx, projectId, expectedRevision);
+		await writeSite(tx, projectId, site);
+		return revision;
+	});
+}
+
+/** Replaces site rows inside the caller's already-locked transaction. */
+async function writeSite(tx: SqlClient, projectId: string, site: EditorSite): Promise<void> {
+	await tx.run('DELETE FROM project_pages WHERE project_id = ?', [projectId]);
+	await tx.run('DELETE FROM project_composites WHERE project_id = ?', [projectId]);
+	for (const [ordinal, page] of site.pages.entries()) {
+		await tx.run(
+			`INSERT INTO project_pages (project_id, id, ordinal, name, slug, width, height, blocks)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				projectId,
+				page.id,
+				ordinal,
+				page.name,
+				page.slug,
+				Math.round(page.width),
+				Math.round(page.height),
+				JSON.stringify(page.blocks)
+			]
+		);
+	}
+	for (const [ordinal, composite] of site.composites.entries()) {
+		await tx.run(
+			`INSERT INTO project_composites (project_id, id, ordinal, name, width, height, blocks)
+				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			[
+				projectId,
+				composite.id,
+				ordinal,
+				composite.name,
+				Math.round(composite.width),
+				Math.round(composite.height),
+				JSON.stringify(composite.blocks)
+			]
+		);
+	}
+	await tx.run('UPDATE projects SET updated_at = ? WHERE id = ?', [
+		new Date().toISOString(),
+		projectId
+	]);
+}
+
+/**
+ * Reads the current site/library revision. Older projects have revision zero until their first write.
+ *
+ * @param db - Database or transaction.
+ * @param projectId - Already authorized project identifier.
+ * @returns Non-negative revision number.
+ */
+export async function getProjectRevision(db: SqlClient, projectId: string): Promise<number> {
+	const row = await db.get<SqlRow>('SELECT revision FROM project_revisions WHERE project_id = ?', [
+		projectId
+	]);
+	return Number(row?.revision ?? 0);
+}
+
+/**
+ * Claims the project revision row in a transaction before touching site or image rows.
+ * The conditional update is also a row lock on PostgreSQL, preventing concurrent deletion and
+ * saves from passing each other's checks; SQLite serializes writers with BEGIN IMMEDIATE.
+ */
+async function advanceRevision(
+	tx: SqlClient,
+	projectId: string,
+	expected?: number
+): Promise<number> {
+	if (!(await tx.get('SELECT id FROM projects WHERE id = ?', [projectId]))) {
+		throw new ProjectStoreError('not_found', 'Project not found.');
+	}
+
+	await tx.run(
+		'INSERT INTO project_revisions (project_id, revision) VALUES (?, 0) ON CONFLICT (project_id) DO NOTHING',
+		[projectId]
+	);
+	const result =
+		expected === undefined
+			? await tx.run('UPDATE project_revisions SET revision = revision + 1 WHERE project_id = ?', [
+					projectId
+				])
+			: await tx.run(
+					'UPDATE project_revisions SET revision = revision + 1 WHERE project_id = ? AND revision = ?',
+					[projectId, expected]
+				);
+	if (!result.changes) {
+		throw new ProjectStoreError(
+			'conflict',
+			'This project changed in another tab. Reload or reconcile your draft before saving.'
+		);
+	}
+	return getProjectRevision(tx, projectId);
+}
+
+/**
+ * Takes the same database row lock as writers without changing its revision. Call only in a
+ * transaction while preparing a consistent export or project duplicate.
+ */
+async function lockProjectRevision(tx: SqlClient, projectId: string): Promise<void> {
+	if (!(await tx.get('SELECT id FROM projects WHERE id = ?', [projectId]))) {
+		throw new ProjectStoreError('not_found', 'Project not found.');
+	}
+	await tx.run(
+		'INSERT INTO project_revisions (project_id, revision) VALUES (?, 0) ON CONFLICT (project_id) DO NOTHING',
+		[projectId]
+	);
+	await tx.run('UPDATE project_revisions SET revision = revision WHERE project_id = ?', [
+		projectId
+	]);
+}
+
+/**
+ * Loads a mutually consistent site and revision, retrying if another writer committed while reading.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @returns Saved site and the revision that must accompany its next save.
+ * @throws {ProjectStoreError} When concurrent changes prevent a consistent read.
+ */
+export async function loadSiteSnapshot(
+	db: SqlClient,
+	projectId: string
+): Promise<{ site: EditorSite; revision: number }> {
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const before = await getProjectRevision(db, projectId);
+		const site = await loadSite(db, projectId);
+		const revision = await getProjectRevision(db, projectId);
+		if (before === revision) return { site, revision };
+	}
+	throw new ProjectStoreError('conflict', 'The project is changing. Please try loading it again.');
+}
+
+/** Validates the user-visible metadata and the URL used in editor widgets. */
+function validateImageMetadata(name: unknown, category: unknown, url: unknown) {
+	if (typeof name !== 'string' || !name.trim() || name.trim().length > 120) {
+		throw new ProjectStoreError('invalid_input', 'Enter an image name of up to 120 characters.');
+	}
+	if (typeof category !== 'string' || !imageCategories.some((item) => item === category)) {
+		throw new ProjectStoreError('invalid_input', 'Choose a valid image category.');
+	}
+	if (
+		typeof url !== 'string' ||
+		!url ||
+		url.length > 2048 ||
+		/\s/.test(url) ||
+		[...url].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+	) {
+		throw new ProjectStoreError(
+			'invalid_input',
+			'Enter a valid image URL (up to 2048 characters).'
+		);
+	}
+	if (!/^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(url)) {
+		let parsed: URL;
+		try {
+			parsed = new URL(url);
+		} catch {
+			throw new ProjectStoreError('invalid_input', 'Use an HTTP(S) URL or a local path.');
+		}
+		if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+			throw new ProjectStoreError('invalid_input', 'Use an HTTP(S) URL without credentials.');
+		}
+	}
+	return { name: name.trim(), category: category as ImageCategory, url };
+}
+
+/** Converts a database row to the public representation; binary data never goes in list responses. */
+function imageFromRow(row: SqlRow): ProjectImage {
+	const metadata = validateImageMetadata(row.name, row.category, row.url);
+	if (row.kind !== 'link' && row.kind !== 'managed')
+		throw new Error('Stored image kind is invalid.');
+	return {
+		id: String(row.id),
+		...metadata,
+		kind: row.kind,
+		...(typeof row.mime_type === 'string' ? { mimeType: row.mime_type } : {}),
+		...(row.size !== null && row.size !== undefined ? { size: Number(row.size) } : {})
+	};
+}
+
+/**
+ * Lists an active project's images without returning their file contents.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @returns Images sorted by name.
+ */
+export async function listProjectImages(db: SqlClient, projectId: string): Promise<ProjectImage[]> {
+	await ensureStarterImages(db, projectId);
+	const rows = await db.all<SqlRow>(
+		'SELECT id, name, url, category, kind, mime_type, size FROM project_images WHERE project_id = ? ORDER BY name, id',
+		[projectId]
+	);
+	return rows.map(imageFromRow);
+}
+
+/**
+ * Returns image metadata and managed file contents for project export.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @returns Portable image records; managed contents are encoded as base64.
+ */
+export async function listProjectImageRecords(
+	db: SqlClient,
+	projectId: string
+): Promise<ImageExportRecord[]> {
+	await ensureStarterImages(db, projectId);
+	const rows = await db.all<SqlRow>(
+		'SELECT id, name, url, category, kind, mime_type, size, data FROM project_images WHERE project_id = ? ORDER BY name, id',
+		[projectId]
+	);
+	return rows.map((row) => ({
+		...imageFromRow(row),
+		...(typeof row.data === 'string' ? { data: row.data } : {})
+	}));
+}
+
+/**
+ * Takes a mutually consistent snapshot of saved site and images for project export.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @returns Site, image records and their shared revision.
+ */
+export async function loadProjectExportSnapshot(
+	db: SqlClient,
+	projectId: string
+): Promise<{ site: EditorSite; images: ImageExportRecord[]; revision: number }> {
+	return db.transaction(async (tx) => {
+		await lockProjectRevision(tx, projectId);
+		const site = await loadSite(tx, projectId);
+		const images = await listProjectImageRecords(tx, projectId);
+		const revision = await getProjectRevision(tx, projectId);
+		return { site, images, revision };
+	});
+}
+
+/**
+ * Reads one image, including managed content, by project-scoped id.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @param id - Image identifier.
+ * @returns The record or `null` if it does not exist in this project.
+ */
+export async function getProjectImageRecord(
+	db: SqlClient,
+	projectId: string,
+	id: string
+): Promise<ImageExportRecord | null> {
+	const row = await db.get<SqlRow>(
+		'SELECT id, name, url, category, kind, mime_type, size, data FROM project_images WHERE project_id = ? AND id = ?',
+		[projectId, id]
+	);
+	return row
+		? { ...imageFromRow(row), ...(typeof row.data === 'string' ? { data: row.data } : {}) }
+		: null;
+}
+
+/** Checks a URL for uniqueness under the project revision lock. */
+async function assertImageUrlAvailable(
+	tx: SqlClient,
+	projectId: string,
+	url: string,
+	exceptId = ''
+) {
+	const row = await tx.get('SELECT id FROM project_images WHERE project_id = ? AND url = ?', [
+		projectId,
+		url
+	]);
+	if (row && row.id !== exceptId) {
+		throw new ProjectStoreError(
+			'conflict',
+			'An image with this URL already exists in the project.'
+		);
+	}
+}
+
+/**
+ * Creates a validated project image. Managed data must first pass the image import validator.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @param image - Image record including prevalidated managed file contents.
+ * @returns The public image metadata.
+ * @throws {ProjectStoreError} For invalid metadata or duplicate URLs.
+ */
+export async function createProjectImage(
+	db: SqlClient,
+	projectId: string,
+	image: ImageExportRecord
+): Promise<ProjectImage> {
+	const metadata = validateImageMetadata(image.name, image.category, image.url);
+	if (!/^[a-zA-Z0-9_-]{1,80}$/.test(image.id) || !['link', 'managed'].includes(image.kind)) {
+		throw new ProjectStoreError('invalid_input', 'The image identifier is invalid.');
+	}
+	if (image.kind === 'managed') {
+		const extensions: Record<string, string> = {
+			'image/png': 'png',
+			'image/jpeg': 'jpg',
+			'image/gif': 'gif',
+			'image/webp': 'webp',
+			'image/svg+xml': 'svg'
+		};
+		const extension = image.mimeType ? extensions[image.mimeType] : undefined;
+		if (
+			!extension ||
+			image.url !== `/media/${image.id}.${extension}` ||
+			typeof image.data !== 'string' ||
+			image.data.length > Math.ceil((10 * 1024 * 1024) / 3) * 4 ||
+			!Number.isSafeInteger(image.size) ||
+			!image.size ||
+			image.size > 10 * 1024 * 1024
+		) {
+			throw new ProjectStoreError('invalid_input', 'The image file is missing or invalid.');
+		}
+		const bytes = Buffer.from(image.data, 'base64');
+		if (bytes.length !== image.size || bytes.toString('base64') !== image.data) {
+			throw new ProjectStoreError('invalid_input', 'The image file is missing or invalid.');
+		}
+	} else if (image.data !== undefined || image.mimeType !== undefined || image.size !== undefined) {
+		throw new ProjectStoreError('invalid_input', 'A linked image cannot contain file data.');
+	}
+	return db.transaction(async (tx) => {
+		await advanceRevision(tx, projectId);
+		await ensureStarterImages(tx, projectId);
+		await assertImageUrlAvailable(tx, projectId, metadata.url);
+		const usage = await tx.get<SqlRow>(
+			`SELECT CAST(COUNT(*) AS INTEGER) AS count, CAST(COALESCE(SUM(size), 0) AS INTEGER) AS bytes
+					 FROM project_images WHERE project_id = ?`,
+			[projectId]
+		);
+		if (Number(usage?.count ?? 0) >= 500) {
+			throw new ProjectStoreError('limit', 'A project can contain at most 500 images.');
+		}
+		if (Number(usage?.bytes ?? 0) + (image.size ?? 0) > 50 * 1024 * 1024) {
+			throw new ProjectStoreError('limit', 'Managed images cannot exceed 50 MiB per project.');
+		}
+		await tx.run(
+			`INSERT INTO project_images (project_id, id, name, url, category, kind, mime_type, size, data)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				projectId,
+				image.id,
+				metadata.name,
+				metadata.url,
+				metadata.category,
+				image.kind,
+				image.mimeType ?? null,
+				image.size ?? null,
+				image.data ?? null
+			]
+		);
+		const created = await tx.get<SqlRow>(
+			'SELECT id, name, url, category, kind, mime_type, size FROM project_images WHERE project_id = ? AND id = ?',
+			[projectId, image.id]
+		);
+		if (!created) throw new Error('The saved image could not be read.');
+		return imageFromRow(created);
+	});
+}
+
+/**
+ * Updates image metadata and rewrites all recognized saved references when a linked URL changes.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @param id - Existing image identifier.
+ * @param input - New name, category and URL.
+ * @returns Updated public image metadata.
+ * @throws {ProjectStoreError} When the image is missing, invalid or conflicts with another URL.
+ */
+export async function updateProjectImage(
+	db: SqlClient,
+	projectId: string,
+	id: string,
+	input: { name: unknown; category: unknown; url: unknown }
+): Promise<ProjectImage> {
+	const metadata = validateImageMetadata(input.name, input.category, input.url);
+	return db.transaction(async (tx) => {
+		await advanceRevision(tx, projectId);
+		await ensureStarterImages(tx, projectId);
+		const old = await getProjectImageRecord(tx, projectId, id);
+		if (!old) throw new ProjectStoreError('not_found', 'Image not found.');
+		if (old.kind === 'managed' && old.url !== metadata.url) {
+			throw new ProjectStoreError('invalid_input', 'Uploaded image URLs cannot be changed.');
+		}
+		await assertImageUrlAvailable(tx, projectId, metadata.url, id);
+		if (old.url !== metadata.url) {
+			const site = replaceImageReferences(await loadSite(tx, projectId), old.url, metadata.url);
+			if (!parseEditorSite(site)) {
+				throw new ProjectStoreError(
+					'invalid_input',
+					'The new URL is too long for a referencing field.'
+				);
+			}
+			await writeSite(tx, projectId, site);
+		}
+		await tx.run(
+			'UPDATE project_images SET name = ?, category = ?, url = ? WHERE project_id = ? AND id = ?',
+			[metadata.name, metadata.category, metadata.url, projectId, id]
+		);
+		return { ...old, ...metadata, data: undefined };
+	});
+}
+
+/**
+ * Deletes an image only when no saved page or composite refers to it.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @param id - Image identifier.
+ * @throws {ProjectStoreError} If the image is missing or is still used.
+ */
+export async function deleteProjectImage(
+	db: SqlClient,
+	projectId: string,
+	id: string
+): Promise<void> {
+	await db.transaction(async (tx) => {
+		await advanceRevision(tx, projectId);
+		await ensureStarterImages(tx, projectId);
+		const image = await getProjectImageRecord(tx, projectId, id);
+		if (!image) throw new ProjectStoreError('not_found', 'Image not found.');
+		const uses = findImageUses(await loadSite(tx, projectId), image.url);
+		if (uses.length) {
+			const locations = [...new Set(uses.map((use) => `${use.kind} "${use.document}"`))];
+			throw new ProjectStoreError(
+				'in_use',
+				`Image is used in ${locations.join(', ')}. Remove those references first.`
+			);
+		}
+		await tx.run('DELETE FROM project_images WHERE project_id = ? AND id = ?', [projectId, id]);
+	});
+}
+
+/**
+ * Merges imported pages, composites and image records atomically under the project revision lock.
+ * Unchanged starter entries can be replaced by their imported versions; other conflicting images
+ * are rejected rather than overwriting user work. An empty project with an untouched starter
+ * library restores the imported library exactly, including intentionally deleted starter icons.
+ *
+ * @param db - Database client.
+ * @param projectId - Already authorized project identifier.
+ * @param imported - Parsed site and prevalidated image records from the target project.
+ * @returns The merged site and the number of pages or composites dropped at the editor limits.
+ * @throws {ProjectStoreError} When an imported image conflicts or the merged site is invalid.
+ */
+export async function mergeImportedProject(
+	db: SqlClient,
+	projectId: string,
+	imported: {
+		pages: EditorSite['pages'];
+		composites: EditorSite['composites'];
+		images?: ImageExportRecord[];
+	}
+): Promise<{ site: EditorSite; dropped: number }> {
+	return db.transaction(async (tx) => {
+		await advanceRevision(tx, projectId);
+		await ensureStarterImages(tx, projectId);
+		const existingSite = await loadSite(tx, projectId);
+		const merged = mergeImportedSite(existingSite, imported);
+		const starters = new Map(starterImages().map((image) => [image.id, image]));
+		const sameImage = (left: ImageExportRecord, right: ImageExportRecord) =>
+			left.id === right.id &&
+			left.name === right.name &&
+			left.url === right.url &&
+			left.category === right.category &&
+			left.kind === right.kind &&
+			left.mimeType === right.mimeType &&
+			left.size === right.size &&
+			left.data === right.data;
+		if (
+			imported.images !== undefined &&
+			!existingSite.pages.length &&
+			!existingSite.composites.length
+		) {
+			const currentImages = await listProjectImageRecords(tx, projectId);
+			const untouched =
+				currentImages.length === starters.size &&
+				currentImages.every((image) => {
+					const starter = starters.get(image.id);
+					return starter && sameImage(image, starter);
+				});
+			if (untouched) await tx.run('DELETE FROM project_images WHERE project_id = ?', [projectId]);
+		}
+		if (!parseEditorSite(merged.site)) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				'The imported pages or components are not valid.'
+			);
+		}
+		for (const image of imported.images ?? []) {
+			const existing = await getProjectImageRecord(tx, projectId, image.id);
+			if (existing) {
+				if (sameImage(existing, image)) continue;
+				const starter = starters.get(existing.id);
+				if (!starter || !sameImage(existing, starter)) {
+					throw new ProjectStoreError(
+						'conflict',
+						`The imported image "${image.name}" conflicts with an existing image.`
+					);
+				}
+				// Replacing an untouched default is not an overwrite of user metadata; update
+				// references in both preserved and imported documents in the same transaction.
+				await tx.run('DELETE FROM project_images WHERE project_id = ? AND id = ?', [
+					projectId,
+					existing.id
+				]);
+				merged.site = replaceImageReferences(merged.site, existing.url, image.url);
+			}
+			await createProjectImage(tx, projectId, image);
+		}
+		if (!parseEditorSite(merged.site)) {
+			throw new ProjectStoreError(
+				'invalid_input',
+				'An imported image URL is too long for a referencing field.'
+			);
+		}
+		await writeSite(tx, projectId, merged.site);
+		return merged;
+	});
+}
+
+/**
+ * Initializes starter links once per project, including projects created before this feature.
+ * The marker and records commit together so deleted starter entries are never re-created.
+ */
+async function ensureStarterImages(db: SqlClient, projectId: string): Promise<void> {
 	await db.transaction(async (tx) => {
 		if (!(await tx.get('SELECT id FROM projects WHERE id = ?', [projectId]))) {
 			throw new ProjectStoreError('not_found', 'Project not found.');
 		}
-		await tx.run('DELETE FROM project_pages WHERE project_id = ?', [projectId]);
-		await tx.run('DELETE FROM project_composites WHERE project_id = ?', [projectId]);
-		for (const [ordinal, page] of site.pages.entries()) {
+		const marker = await tx.run(
+			'INSERT INTO project_image_seed_state (project_id) VALUES (?) ON CONFLICT (project_id) DO NOTHING',
+			[projectId]
+		);
+		if (!marker.changes) return;
+		for (const image of starterImages()) {
 			await tx.run(
-				`INSERT INTO project_pages (project_id, id, ordinal, name, slug, width, height, blocks)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				[
-					projectId,
-					page.id,
-					ordinal,
-					page.name,
-					page.slug,
-					Math.round(page.width),
-					Math.round(page.height),
-					JSON.stringify(page.blocks)
-				]
+				`INSERT INTO project_images (project_id, id, name, url, category, kind)
+				 VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+				[projectId, image.id, image.name, image.url, image.category, image.kind]
 			);
 		}
-		for (const [ordinal, composite] of site.composites.entries()) {
-			await tx.run(
-				`INSERT INTO project_composites (project_id, id, ordinal, name, width, height, blocks)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				[
-					projectId,
-					composite.id,
-					ordinal,
-					composite.name,
-					Math.round(composite.width),
-					Math.round(composite.height),
-					JSON.stringify(composite.blocks)
-				]
-			);
-		}
-		await tx.run('UPDATE projects SET updated_at = ? WHERE id = ?', [
-			new Date().toISOString(),
-			projectId
-		]);
 	});
 }

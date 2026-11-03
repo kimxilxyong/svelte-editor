@@ -35,7 +35,14 @@ import {
 import { removeProjectWidgets } from '../../../lib/server/widget-files.js';
 import type { ProjectInput } from '../../../lib/projects.js';
 
-const errorStatus = { invalid_input: 400, name_taken: 409, not_found: 404, limit: 409 } as const;
+const errorStatus = {
+	invalid_input: 400,
+	name_taken: 409,
+	not_found: 404,
+	limit: 409,
+	conflict: 409,
+	in_use: 409
+} as const;
 
 export const GET: RequestHandler = async ({ locals }) => {
 	const user = requireUser(locals);

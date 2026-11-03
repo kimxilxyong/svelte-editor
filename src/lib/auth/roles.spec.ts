@@ -33,6 +33,13 @@ describe('requiredRoleFor', () => {
 		expect(requiredRoleFor('/pages/', 'GET')).toBe('guest');
 	});
 
+	it('allows guests to view images and only editors to change the library', () => {
+		expect(requiredRoleFor('/images', 'GET')).toBe('guest');
+		expect(requiredRoleFor('/images/api', 'GET')).toBe('guest');
+		expect(requiredRoleFor('/images/api', 'POST')).toBe('user');
+		expect(requiredRoleFor('/media/icon.svg', 'GET')).toBe('guest');
+	});
+
 	it('ignores trailing and duplicate slashes', () => {
 		expect(requiredRoleFor('/admin/', 'GET')).toBe('admin');
 		expect(requiredRoleFor('//admin', 'GET')).toBe('admin');

@@ -185,6 +185,22 @@ describe('backend switching', () => {
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			['project-1', 'user-1', 'Site', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z']
 		);
+		await source.run(
+			`INSERT INTO project_images (project_id, id, name, url, category, kind, mime_type, size, data)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				'project-1',
+				'image-1',
+				'Icon',
+				'/media/image-1.png',
+				'Icons',
+				'managed',
+				'image/png',
+				3,
+				'YWJj'
+			]
+		);
+		await source.run('INSERT INTO project_image_seed_state (project_id) VALUES (?)', ['project-1']);
 
 		const result = await switchBackend(
 			{ backend: 'postgres', postgresUrl: 'postgres://admin:topsecret@pglite.local/app' },
@@ -193,6 +209,8 @@ describe('backend switching', () => {
 		expect(result.backend).toBe('postgres');
 		expect(result.copied.users).toBe(1);
 		expect(result.copied.projects).toBe(1);
+		expect(result.copied.project_images).toBe(1);
+		expect(result.copied.project_image_seed_state).toBe(1);
 		expect(await getActiveConfig()).toEqual({
 			backend: 'postgres',
 			postgresUrl: 'postgres://admin:topsecret@pglite.local/app'
@@ -202,6 +220,11 @@ describe('backend switching', () => {
 		expect(active.backend).toBe('postgres');
 		expect(await active.get<SqlRow>('SELECT email FROM users WHERE id = ?', ['user-1'])).toEqual({
 			email: 'admin@example.test'
+		});
+		expect(
+			await active.get<SqlRow>('SELECT data FROM project_images WHERE id = ?', ['image-1'])
+		).toEqual({
+			data: 'YWJj'
 		});
 		const status = await describeActiveBackend();
 		expect(status).toMatchObject({

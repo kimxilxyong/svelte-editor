@@ -43,6 +43,31 @@ npm run dev
 npm run dev -- --open
 ```
 
+### Project images
+
+The Images page manages the active project's image library. Add an existing HTTP(S) URL, upload
+a PNG, JPEG, GIF, WebP or SVG file, or import an image from a public HTTP(S) URL. Imported files
+are limited to 10 MiB and SVGs are sanitized before storage. A project can contain up to 500
+images (including starter links) and 50 MiB of managed image data. Guests can browse the library;
+editors can change it. Images referenced by saved pages or composite components cannot be deleted
+until those references are removed. A URL change updates recognized saved references; drafts in
+other tabs must be reloaded or reconciled before saving.
+
+Remote downloads reject redirects and private or reserved network addresses. Decoded images are
+limited to 16 million pixels. SVG sanitization retains common geometry, gradients, masks and clip
+paths, but removes scripts, external resources, CSS and other unsupported features.
+
+Each project starts with linked icons from SVG Repo's
+[Isometric 3D Interface Icons collection](https://www.svgrepo.com/collection/isometric-3d-interface-icons/).
+The collection identifies the icons as CC0; the links remain dependent on SVG Repo's availability.
+Removing a starter image does not cause it to be added again.
+
+Project export copies managed images into the target project's `static/media` directory and includes
+library metadata for re-import. URLs embedded in arbitrary hand-written components are outside the
+editor's reference tracking. Remote images linked rather than imported remain hosted by their source.
+In an adapter-node production deployment, set `BODY_SIZE_LIMIT` to at least `11M` to permit 10 MiB
+uploads; the application also enforces its own smaller file-content limit.
+
 ## Building
 
 To create a production version of your app:

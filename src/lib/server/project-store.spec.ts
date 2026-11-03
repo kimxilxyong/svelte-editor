@@ -19,15 +19,22 @@ import type { SqlClient, SqlParam, SqlRow } from './database/types.js';
 import {
 	canAccessProject,
 	createProject,
+	createProjectImage,
 	defaultProject,
 	deleteProject,
+	deleteProjectImage,
 	duplicateProject,
 	firstProjectName,
 	getAccessibleProject,
 	listProjects,
+	listProjectImageRecords,
+	listProjectImages,
 	loadSite,
+	loadSiteSnapshot,
+	mergeImportedProject,
 	ProjectStoreError,
 	saveSite,
+	updateProjectImage,
 	updateProject
 } from './project-store.js';
 
@@ -37,6 +44,234 @@ let db: SqlClient;
 beforeEach(async () => {
 	db = openSqliteClient(':memory:');
 	await ensureSchema(db);
+});
+
+describe('project image library', () => {
+	it('updates saved references, blocks deletion and rejects stale site saves', async () => {
+		const user = await account('images@example.com');
+		const project = (await defaultProject(db, user))!;
+		const originalUrl = 'https://example.com/image.svg';
+		const newUrl = 'https://example.com/new-image.svg';
+		await createProjectImage(db, project.id, {
+			id: 'image1',
+			name: 'Example',
+			url: originalUrl,
+			category: 'Icons',
+			kind: 'link'
+		});
+		const document = site();
+		document.pages[0].blocks[0].href = originalUrl;
+		document.composites[0].blocks[0].customProps = { imageUrl: originalUrl };
+		document.pages[0].blocks.push({
+			...block('image'),
+			kind: 'widget-image',
+			action: originalUrl
+		});
+		document.pages[0].blocks.push({
+			...block('navigation'),
+			kind: 'widget-navbar',
+			items: `Image | ${originalUrl}`
+		});
+		await saveSite(db, project.id, document);
+		const snapshot = await loadSiteSnapshot(db, project.id);
+		await expect(deleteProjectImage(db, project.id, 'image1')).rejects.toMatchObject({
+			code: 'in_use'
+		});
+		await updateProjectImage(db, project.id, 'image1', {
+			name: 'Renamed',
+			category: 'Photos',
+			url: newUrl
+		});
+		const updated = await loadSite(db, project.id);
+		expect(updated.pages[0].blocks[0].href).toBe(newUrl);
+		expect(updated.pages[0].blocks[1].action).toBe(newUrl);
+		expect(updated.pages[0].blocks[2].items).toBe(`Image | ${newUrl}`);
+		expect(updated.composites[0].blocks[0].customProps?.imageUrl).toBe(newUrl);
+		await expect(saveSite(db, project.id, snapshot.site, snapshot.revision)).rejects.toMatchObject({
+			code: 'conflict'
+		});
+		await expect(deleteProjectImage(db, project.id, 'image1')).rejects.toMatchObject({
+			code: 'in_use'
+		});
+		await saveSite(db, project.id, { pages: [], composites: [] });
+		await deleteProjectImage(db, project.id, 'image1');
+		expect((await listProjectImages(db, project.id)).some((image) => image.id === 'image1')).toBe(
+			false
+		);
+	});
+
+	it('isolates and duplicates managed image data with the project', async () => {
+		const user = await account('copies@example.com');
+		const project = (await defaultProject(db, user))!;
+		await createProjectImage(db, project.id, {
+			id: 'icon1',
+			name: 'Icon',
+			url: '/media/icon1.png',
+			category: 'Icons',
+			kind: 'managed',
+			mimeType: 'image/png',
+			size: 3,
+			data: 'YWJj'
+		});
+		const copy = await duplicateProject(db, project.id);
+		expect(await listProjectImages(db, copy.id)).toEqual(await listProjectImages(db, project.id));
+		await deleteProjectImage(db, copy.id, 'icon1');
+		expect((await listProjectImages(db, project.id)).some((image) => image.id === 'icon1')).toBe(
+			true
+		);
+		await deleteProject(db, project.id);
+		await expect(listProjectImages(db, project.id)).rejects.toMatchObject({ code: 'not_found' });
+	});
+
+	it('seeds each project once without restoring deleted starter icons', async () => {
+		const user = await account('seeds@example.com');
+		const project = (await defaultProject(db, user))!;
+		const initial = await listProjectImages(db, project.id);
+		expect(initial).toHaveLength(50);
+		expect(initial.find((image) => image.id === 'svgrepo-530481')?.url).toBe(
+			'https://www.svgrepo.com/show/530481/menu.svg'
+		);
+		await deleteProjectImage(db, project.id, 'svgrepo-530481');
+		expect(await listProjectImages(db, project.id)).toHaveLength(49);
+		expect(
+			(await listProjectImages(db, project.id)).some((image) => image.id === 'svgrepo-530481')
+		).toBe(false);
+	});
+
+	it('enforces the project-wide managed image quota before writing', async () => {
+		const user = await account('quota@example.com');
+		const project = (await defaultProject(db, user))!;
+		await listProjectImages(db, project.id);
+		await db.run(
+			`INSERT INTO project_images (project_id, id, name, url, category, kind, mime_type, size, data)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				project.id,
+				'full',
+				'Full',
+				'/media/full.png',
+				'Icons',
+				'managed',
+				'image/png',
+				50 * 1024 * 1024,
+				'YWJj'
+			]
+		);
+		await expect(
+			createProjectImage(db, project.id, {
+				id: 'extra',
+				name: 'Extra',
+				url: '/media/extra.png',
+				category: 'Icons',
+				kind: 'managed',
+				mimeType: 'image/png',
+				size: 1,
+				data: 'YQ=='
+			})
+		).rejects.toMatchObject({ code: 'limit' });
+		expect((await listProjectImages(db, project.id)).some((image) => image.id === 'extra')).toBe(
+			false
+		);
+	});
+
+	it('counts starter links when enforcing the 500-image limit', async () => {
+		const user = await account('image-count@example.com');
+		const project = (await defaultProject(db, user))!;
+		await listProjectImages(db, project.id);
+		for (let index = 0; index < 450; index += 1) {
+			await db.run(
+				`INSERT INTO project_images (project_id, id, name, url, category, kind)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
+				[project.id, `link-${index}`, 'Link', `https://example.com/${index}.svg`, 'Icons', 'link']
+			);
+		}
+		await expect(
+			createProjectImage(db, project.id, {
+				id: 'one-too-many',
+				name: 'One too many',
+				url: 'https://example.com/last.svg',
+				category: 'Icons',
+				kind: 'link'
+			})
+		).rejects.toMatchObject({ code: 'limit' });
+	});
+
+	it('rolls back the site and revision when an imported image conflicts', async () => {
+		const user = await account('import-conflict@example.com');
+		const project = (await defaultProject(db, user))!;
+		const image = {
+			id: 'external',
+			name: 'Existing',
+			url: 'https://example.com/one.svg',
+			category: 'Icons' as const,
+			kind: 'link' as const
+		};
+		await createProjectImage(db, project.id, image);
+		await saveSite(db, project.id, site());
+		const before = await loadSiteSnapshot(db, project.id);
+		const imported = site();
+		imported.pages[0].name = 'Imported';
+		await expect(
+			mergeImportedProject(db, project.id, {
+				...imported,
+				images: [{ ...image, url: 'https://example.com/other.svg' }]
+			})
+		).rejects.toMatchObject({ code: 'conflict' });
+		expect(await loadSiteSnapshot(db, project.id)).toEqual(before);
+	});
+
+	it('restores edited and deleted starters when importing into a fresh project', async () => {
+		const user = await account('starter-import@example.com');
+		const source = (await defaultProject(db, user))!;
+		await listProjectImages(db, source.id);
+		await deleteProjectImage(db, source.id, 'svgrepo-530481');
+		await updateProjectImage(db, source.id, 'svgrepo-530482', {
+			name: 'My dial',
+			category: 'Logos',
+			url: 'https://example.com/my-dial.svg'
+		});
+		const images = await listProjectImageRecords(db, source.id);
+		const target = await createProject(db, user.id, { name: 'Imported project' });
+		await mergeImportedProject(db, target.id, { pages: [], composites: [], images });
+		expect(await listProjectImageRecords(db, target.id)).toEqual(images);
+		expect(
+			(await listProjectImages(db, target.id)).some((image) => image.id === 'svgrepo-530481')
+		).toBe(false);
+	});
+
+	it('keeps starter images when importing an older project without an image manifest', async () => {
+		const user = await account('legacy-import@example.com');
+		const project = (await defaultProject(db, user))!;
+		await mergeImportedProject(db, project.id, { pages: [], composites: [] });
+		expect(await listProjectImages(db, project.id)).toHaveLength(50);
+	});
+
+	it('updates preserved references when an import replaces an untouched starter', async () => {
+		const user = await account('starter-merge@example.com');
+		const project = (await defaultProject(db, user))!;
+		const seedUrl = 'https://www.svgrepo.com/show/530481/menu.svg';
+		const existing = site();
+		existing.pages[0].blocks[0].href = seedUrl;
+		await saveSite(db, project.id, existing);
+		const updatedUrl = 'https://example.com/new-menu.svg';
+		await mergeImportedProject(db, project.id, {
+			pages: [],
+			composites: [],
+			images: [
+				{
+					id: 'svgrepo-530481',
+					name: 'Custom menu',
+					url: updatedUrl,
+					category: 'Icons',
+					kind: 'link'
+				}
+			]
+		});
+		expect((await loadSite(db, project.id)).pages[0].blocks[0].href).toBe(updatedUrl);
+		expect(
+			(await listProjectImages(db, project.id)).find((image) => image.id === 'svgrepo-530481')
+		).toMatchObject({ name: 'Custom menu', url: updatedUrl });
+	});
 });
 
 const account = (email: string, role: 'user' | 'poweruser' | 'admin' = 'poweruser') =>
@@ -276,10 +511,20 @@ describe('PostgreSQL backend', () => {
 			role: 'poweruser'
 		});
 		const project = (await defaultProject(pg, ada))!;
+		await createProjectImage(pg, project.id, {
+			id: 'postgres-image',
+			name: 'Postgres image',
+			url: 'https://example.com/postgres.svg',
+			category: 'Icons',
+			kind: 'link'
+		});
 		await saveSite(pg, project.id, site());
 		expect(await loadSite(pg, project.id)).toEqual(site());
 		const copy = await duplicateProject(pg, project.id);
 		expect(copy.pageCount).toBe(2);
+		expect(
+			(await listProjectImages(pg, copy.id)).some((image) => image.id === 'postgres-image')
+		).toBe(true);
 		expect(await listProjects(pg, ada)).toHaveLength(2);
 		await recreateSchema(pg);
 		expect(await pg.all('SELECT id FROM projects')).toEqual([]);

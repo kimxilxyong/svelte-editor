@@ -29,6 +29,7 @@ import { lstat, mkdir, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defaultSiteTheme, type SiteTheme } from '../theme.js';
 import type { EditorSite } from '../editor.js';
+import type { ImageExportRecord } from '../image-types.js';
 import { exportSite, ProjectError, type ExportResult } from './project.js';
 
 /** Raw `package.json` of the editor itself; the source of the dependency version ranges. */
@@ -76,6 +77,8 @@ export type CreateProjectOptions = {
 	install?: boolean;
 	/** Project whose widget overrides are written into the new app. */
 	widgetProjectId?: string;
+	/** Image metadata and managed files copied to the scaffold's static directory. */
+	images?: ImageExportRecord[];
 };
 
 /**
@@ -476,7 +479,8 @@ export async function createProject(
 
 	const result = await exportSite(root, site, theme, {
 		libImportStyle: 'subpath',
-		widgetProjectId: options.widgetProjectId
+		widgetProjectId: options.widgetProjectId,
+		images: options.images
 	});
 	const written = [...Object.keys(scaffold), ...result.written];
 

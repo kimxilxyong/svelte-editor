@@ -9,6 +9,8 @@
  * - Layout and positioning models (absolute pixel geometry plus edge/fill alignment).
  * - Site structure (`EditorSite` -> `EditorPage` -> `BuilderBlock`).
  * - Runtime validation and sanitization for block attributes, routes, and link targets.
+ *   Image source and link URLs allow up to 2048 characters; ordinary action labels remain
+ *   limited to 48. Navigation lists allow 10000 characters for multiple URL-bearing entries.
  */
 
 /**
@@ -429,7 +431,7 @@ const slugPattern = /^[a-z0-9-]{1,40}$/;
  *   (a protocol-relative `//host` address would leave the site)
  * - Absolute HTTP/HTTPS URLs matching `^https?://[^\s]+$`
  *
- * Rejects javascript: URLs, data: URIs, or overly long inputs (>200 chars).
+ * Rejects javascript: URLs, data: URIs, or overly long inputs (>2048 chars).
  *
  * @param href - The link target string to validate.
  * @returns `true` if the href is safe and valid.
@@ -437,8 +439,8 @@ const slugPattern = /^[a-z0-9-]{1,40}$/;
 export function isValidLinkHref(href: string): boolean {
 	return (
 		href === '' ||
-		(href.length <= 200 &&
-			(/^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href) || /^https?:\/\/[^\s]+$/i.test(href)))
+		(href.length <= 2048 &&
+			(/^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href) || /^https?:\/\/[^\s]+$/i.test(href)))
 	);
 }
 
@@ -490,7 +492,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			typeof block.body !== 'string' ||
 			block.body.length > 240 ||
 			typeof block.action !== 'string' ||
-			block.action.length > 48 ||
+			block.action.length > (block.kind === 'widget-image' ? 2048 : 48) ||
 			typeof block.theme !== 'string' ||
 			!themes.includes(block.theme as Theme) ||
 			!isValidBlockColor(block.foreground) ||
@@ -525,7 +527,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			!isValidLinkHref(href) ||
 			typeof newTab !== 'boolean' ||
 			typeof items !== 'string' ||
-			items.length > 600
+			items.length > 10000
 		) {
 			return null;
 		}
@@ -544,7 +546,7 @@ export function parseBuilderBlocks(value: unknown): BuilderBlock[] | null {
 			customProps = {};
 			for (const [k, v] of Object.entries(block.customProps as Record<string, unknown>)) {
 				if (typeof k === 'string' && k.length <= 60) {
-					if (typeof v === 'string' && v.length <= 500) customProps[k] = v;
+					if (typeof v === 'string' && v.length <= 2048) customProps[k] = v;
 					else if (typeof v === 'number' && Number.isFinite(v)) customProps[k] = v;
 					else if (typeof v === 'boolean') customProps[k] = v;
 				}

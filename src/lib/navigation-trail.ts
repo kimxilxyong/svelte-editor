@@ -24,6 +24,7 @@
  * browser. The reactive wrapper lives in `navigation.svelte.ts`.
  *
  * A "path" in this module is `pathname + search` (the hash is ignored on purpose).
+ * The project image library participates in the same breadcrumb and history model.
  */
 
 /** Navigation types reported by SvelteKit's `afterNavigate` (`Navigation['type']`). */
@@ -42,7 +43,16 @@ export interface PathDescription {
 	/** Short label, for example `Pages` or `Editor · Home`. */
 	label: string;
 	/** Coarse area of the app, used for icons and grouping. */
-	section: 'projects' | 'pages' | 'editor' | 'components' | 'auth' | 'account' | 'admin' | 'other';
+	section:
+		| 'projects'
+		| 'pages'
+		| 'editor'
+		| 'images'
+		| 'components'
+		| 'auth'
+		| 'account'
+		| 'admin'
+		| 'other';
 }
 
 /** One breadcrumb segment. `path` is `null` for the current (non-clickable) segment. */
@@ -63,6 +73,9 @@ export const projectsPath = '/';
 
 /** The path of the page list of the active project. */
 export const pagesPath = '/pages';
+
+/** Path of the active project's image library. */
+export const imagesPath = '/images';
 
 /** The base path of the single-page editor. */
 export const editorPath = '/editor';
@@ -203,6 +216,7 @@ export function describePath(
 	const { pathname, pageId } = splitPath(path);
 	if (pathname === projectsPath) return { label: 'Projects', section: 'projects' };
 	if (pathname === pagesPath) return { label: 'Pages', section: 'pages' };
+	if (pathname === imagesPath) return { label: 'Images', section: 'images' };
 	if (pathname === editorPath) {
 		const name = pageId ? pageNames[pageId] : undefined;
 		return { label: name ? `Editor · ${name}` : 'Editor', section: 'editor' };

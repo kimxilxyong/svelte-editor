@@ -24,10 +24,17 @@
  *    - Imports pages and binds component references back into the editor's live state.
  * 5. Granular Single-Component Export/Import:
  *    - Allows exporting or importing individual components on demand.
+ * 6. Optional image portability:
+ *    - Stores bounded, versioned metadata and SHA-256 digests in static/media; managed bytes
+ *      are kept at their original /media URLs. Imports reject malformed or incomplete manifests.
+ *    - Does not access the database or sanitize image content; callers must revalidate imports.
  */
 
-import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { imageCategories, type ImageExportRecord, type ProjectImage } from '../image-types.js';
 import { defaultSiteTheme, normalizeSiteTheme, type SiteTheme } from '../theme.js';
 import { effectiveWidgetSource } from './widget-files.js';
 import {
@@ -96,6 +103,8 @@ export type ExportSiteOptions = {
 	libImportStyle?: LibImportStyle;
 	/** Project whose widget overrides are exported instead of the built-in defaults. */
 	widgetProjectId?: string;
+	/** Optional complete image-library snapshot. Managed entries require canonical base64 data. */
+	images?: ImageExportRecord[];
 };
 
 /**
@@ -110,7 +119,355 @@ export type ImportResult = {
 	components: ParsedComponentMetadata[];
 	/** Files that failed validation or could not be parsed. */
 	skipped: { file: string; reason: string }[];
+	/** Image snapshot, present only when a valid manifest exists; caller must sanitize it. */
+	images?: ImageExportRecord[];
 };
+
+// The manifest is inside the public media directory but contains metadata and digests only.
+const imageManifestFile = path.join('static', 'media', '.svelte-editor-images.json');
+const maxImageCount = 500;
+const maxImageBytes = 10 * 1024 * 1024;
+const maxTotalImageBytes = 50 * 1024 * 1024;
+const maxImageManifestBytes = 1024 * 1024;
+const managedUrlPattern = /^\/media\/([A-Za-z0-9_-]{1,128})\.(png|jpg|gif|webp|svg)$/;
+const digestPattern = /^[a-f0-9]{64}$/;
+
+/** On-disk managed entries carry a digest instead of base64 data. */
+type ManifestImage = ProjectImage & { sha256?: string };
+type ImageManifest = { generator: 'svelte-editor'; version: 1; images: ManifestImage[] };
+
+/** Reject unbounded or ambiguous data before it can become a filesystem path or manifest. */
+function validateImage(value: unknown, manifest: boolean): ManifestImage & { data?: string } {
+	if (!value || typeof value !== 'object' || Array.isArray(value))
+		throw new ProjectError('Invalid image entry.');
+	const record = value as Record<string, unknown>;
+	const fields = new Set([
+		'id',
+		'name',
+		'url',
+		'category',
+		'kind',
+		'mimeType',
+		'size',
+		manifest ? 'sha256' : 'data'
+	]);
+	if (Object.keys(record).some((key) => !fields.has(key)))
+		throw new ProjectError('Unexpected image entry field.');
+	const boundedString = (v: unknown, max: number): v is string =>
+		typeof v === 'string' &&
+		v.length > 0 &&
+		v.length <= max &&
+		![...v].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
+	if (
+		!boundedString(record.id, 128) ||
+		!boundedString(record.name, 512) ||
+		!boundedString(record.url, 4096) ||
+		!imageCategories.some((category) => category === record.category) ||
+		(record.kind !== 'link' && record.kind !== 'managed') ||
+		(record.mimeType !== undefined && !boundedString(record.mimeType, 128)) ||
+		(record.size !== undefined &&
+			(!Number.isSafeInteger(record.size) || (record.size as number) < 0))
+	)
+		throw new ProjectError('Invalid image metadata.');
+	if (record.kind === 'managed') {
+		const match = managedUrlPattern.exec(record.url);
+		if (!match || match[1] !== record.id) throw new ProjectError('Invalid managed image URL.');
+		if (manifest) {
+			if (typeof record.sha256 !== 'string' || !digestPattern.test(record.sha256))
+				throw new ProjectError('Invalid managed image digest.');
+		} else if (typeof record.data !== 'string') {
+			throw new ProjectError('Managed image data is required.');
+		}
+	} else if (record.sha256 !== undefined || record.data !== undefined) {
+		throw new ProjectError('Linked images cannot contain managed image data.');
+	}
+	return record as ManifestImage & { data?: string };
+}
+
+/** Canonical encoding avoids permissive base64 decoding and bounds allocation before decoding. */
+function decodeImage(image: ImageExportRecord): Buffer {
+	const data = image.data;
+	if (
+		typeof data !== 'string' ||
+		data.length === 0 ||
+		data.length > Math.ceil(maxImageBytes / 3) * 4 ||
+		data.length % 4 !== 0 ||
+		!/^[A-Za-z0-9+/]*={0,2}$/.test(data)
+	)
+		throw new ProjectError('Invalid or oversized managed image data.');
+	const bytes = Buffer.from(data, 'base64');
+	if (bytes.length > maxImageBytes || bytes.toString('base64') !== data)
+		throw new ProjectError('Invalid or oversized managed image data.');
+	if (image.size !== undefined && image.size !== bytes.length)
+		throw new ProjectError('Managed image size does not match its data.');
+	return bytes;
+}
+
+function imageDigest(bytes: Buffer): string {
+	return createHash('sha256').update(bytes).digest('hex');
+}
+
+/** Parse all entries together, rejecting duplicates and extra fields rather than partially importing. */
+function validateImageManifest(value: unknown): ImageManifest {
+	if (!value || typeof value !== 'object' || Array.isArray(value))
+		throw new ProjectError('Invalid image manifest.');
+	const record = value as Record<string, unknown>;
+	if (
+		Object.keys(record).some((key) => !['generator', 'version', 'images'].includes(key)) ||
+		record.generator !== 'svelte-editor' ||
+		record.version !== 1 ||
+		!Array.isArray(record.images) ||
+		record.images.length > maxImageCount
+	)
+		throw new ProjectError('Invalid or unsupported image manifest.');
+	const ids = new Set<string>();
+	const urls = new Set<string>();
+	const images = record.images.map((item) => {
+		const image = validateImage(item, true);
+		if (ids.has(image.id) || (image.kind === 'managed' && urls.has(image.url)))
+			throw new ProjectError('Duplicate image in manifest.');
+		ids.add(image.id);
+		if (image.kind === 'managed') urls.add(image.url);
+		return image;
+	});
+	return { generator: 'svelte-editor', version: 1, images };
+}
+
+/** Check each fixed directory component with lstat; never resolve a symlink into another tree. */
+async function mediaDirectory(root: string, create: boolean): Promise<boolean> {
+	let current = root;
+	for (const part of ['static', 'media']) {
+		current = path.join(current, part);
+		let stat;
+		try {
+			stat = await lstat(current);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+			if (!create) return false;
+			await mkdir(current);
+			stat = await lstat(current);
+		}
+		if (!stat.isDirectory()) throw new ProjectError(`Image path ${part} is not a normal folder.`);
+	}
+	return true;
+}
+
+/**
+ * Open the final component with O_NOFOLLOW and read at most limit + 1 bytes, including if the
+ * file grows after stat. Parent components are checked separately before every access.
+ */
+async function readMediaFile(
+	root: string,
+	name: string,
+	limit: number
+): Promise<Buffer | undefined> {
+	if (!(await mediaDirectory(root, false))) return undefined;
+	const file = path.join(root, 'static', 'media', name);
+	let handle;
+	try {
+		handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+		throw new ProjectError(`Cannot safely open image file ${name}.`);
+	}
+	try {
+		const stat = await handle.stat();
+		if (!stat.isFile() || stat.size > limit)
+			throw new ProjectError(`Image file ${name} is not a bounded regular file.`);
+		const buffer = Buffer.alloc(stat.size + 1);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+			if (!bytesRead) break;
+			offset += bytesRead;
+		}
+		if (offset > stat.size) throw new ProjectError(`Image file ${name} changed while reading.`);
+		return buffer.subarray(0, offset);
+	} finally {
+		await handle.close();
+	}
+}
+
+async function readImageManifest(root: string): Promise<ImageManifest | undefined> {
+	const bytes = await readMediaFile(root, path.basename(imageManifestFile), maxImageManifestBytes);
+	if (!bytes) return undefined;
+	try {
+		return validateImageManifest(JSON.parse(bytes.toString('utf8')));
+	} catch (error) {
+		throw new ProjectError(
+			`Invalid image manifest: ${error instanceof Error ? error.message : error}`
+		);
+	}
+}
+
+/** Read the complete snapshot or fail; never expose a partial set when bytes are missing. */
+async function importImages(root: string): Promise<ImageExportRecord[] | undefined> {
+	const manifest = await readImageManifest(root);
+	if (!manifest) return undefined;
+	let total = 0;
+	const images: ImageExportRecord[] = [];
+	for (const { sha256, ...image } of manifest.images) {
+		if (image.kind === 'link') {
+			images.push(image);
+			continue;
+		}
+		const bytes = await readMediaFile(root, image.url.slice('/media/'.length), maxImageBytes);
+		if (
+			!bytes ||
+			bytes.length === 0 ||
+			imageDigest(bytes) !== sha256 ||
+			(image.size !== undefined && image.size !== bytes.length)
+		)
+			throw new ProjectError(`Missing or invalid managed image ${image.url}.`);
+		total += bytes.length;
+		if (total > maxTotalImageBytes) throw new ProjectError('Image library is too large.');
+		images.push({ ...image, data: bytes.toString('base64') });
+	}
+	return images;
+}
+
+/**
+ * Export a complete snapshot only after preflighting every destination. Existing image bytes are
+ * immutable unless identical; this conservative policy also protects edited generated assets.
+ * A prior valid editor manifest is the only non-identical manifest we will replace.
+ */
+async function exportImages(
+	root: string,
+	input: ImageExportRecord[],
+	result: ExportResult
+): Promise<void> {
+	if (!Array.isArray(input) || input.length > maxImageCount)
+		throw new ProjectError('Invalid or oversized image library.');
+	const files = new Map<string, Buffer>();
+	const entries: ManifestImage[] = [];
+	let total = 0;
+	for (const value of input) {
+		const { data, ...image } = validateImage(value, false);
+		if (image.kind === 'managed') {
+			const bytes = decodeImage({ ...image, data });
+			total += bytes.length;
+			if (total > maxTotalImageBytes) throw new ProjectError('Image library is too large.');
+			files.set(image.url.slice('/media/'.length), bytes);
+			entries.push({ ...image, sha256: imageDigest(bytes) });
+		} else {
+			entries.push(image);
+		}
+	}
+	const manifest = validateImageManifest({
+		generator: 'svelte-editor',
+		version: 1,
+		images: entries
+	});
+	const content = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+	if (content.length > maxImageManifestBytes)
+		throw new ProjectError('Image manifest is too large.');
+
+	let existingManifest: Buffer | undefined;
+	try {
+		existingManifest = await readMediaFile(
+			root,
+			path.basename(imageManifestFile),
+			maxImageManifestBytes
+		);
+		if (existingManifest && !existingManifest.equals(content)) {
+			// Ownership requires both the marker and matching digests for every managed entry.
+			await importImages(root);
+		}
+	} catch (error) {
+		result.skipped.push({
+			file: imageManifestFile,
+			reason: `unsafe or unrecognized manifest: ${error instanceof Error ? error.message : error}`
+		});
+		return;
+	}
+	for (const [name, bytes] of files) {
+		try {
+			const existing = await readMediaFile(root, name, maxImageBytes);
+			if (existing && !existing.equals(bytes))
+				result.skipped.push({
+					file: path.join('static', 'media', name),
+					reason: 'image exists with different content'
+				});
+		} catch (error) {
+			result.skipped.push({
+				file: path.join('static', 'media', name),
+				reason: `unsafe image destination: ${error instanceof Error ? error.message : error}`
+			});
+		}
+	}
+	if (result.skipped.length) {
+		result.skipped.push({
+			file: imageManifestFile,
+			reason: 'image snapshot not exported because of conflicts'
+		});
+		return;
+	}
+	await mediaDirectory(root, true);
+	for (const [name, bytes] of files) {
+		// Exclusive creation prevents races from replacing an unrelated file after preflight.
+		const existing = await readMediaFile(root, name, maxImageBytes);
+		if (existing) {
+			if (!existing.equals(bytes)) throw new ProjectError(`Image destination changed: ${name}.`);
+			continue;
+		}
+		const handle = await open(
+			path.join(root, 'static', 'media', name),
+			constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+			0o644
+		);
+		try {
+			await handle.writeFile(bytes);
+		} finally {
+			await handle.close();
+		}
+		result.written.push(path.join('static', 'media', name));
+	}
+	// Recheck all referenced bytes before publishing metadata, including already existing files.
+	for (const [name, bytes] of files) {
+		const existing = await readMediaFile(root, name, maxImageBytes);
+		if (!existing || !existing.equals(bytes))
+			throw new ProjectError(`Managed image changed during export: ${name}.`);
+	}
+	if (!existingManifest || !existingManifest.equals(content)) {
+		// Open without following links and compare again through the same descriptor before overwrite.
+		const flags = existingManifest
+			? constants.O_RDWR
+			: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL;
+		const handle = await open(
+			path.join(root, imageManifestFile),
+			flags | constants.O_NOFOLLOW,
+			0o644
+		);
+		try {
+			if (existingManifest) {
+				const stat = await handle.stat();
+				if (
+					!stat.isFile() ||
+					stat.size > maxImageManifestBytes ||
+					!(await handle.readFile()).equals(existingManifest)
+				)
+					throw new ProjectError('Image manifest changed during export.');
+				await handle.truncate(0);
+				let offset = 0;
+				while (offset < content.length) {
+					const { bytesWritten } = await handle.write(
+						content,
+						offset,
+						content.length - offset,
+						offset
+					);
+					if (!bytesWritten) throw new ProjectError('Could not write the image manifest.');
+					offset += bytesWritten;
+				}
+			} else {
+				await handle.writeFile(content);
+			}
+		} finally {
+			await handle.close();
+		}
+		result.written.push(imageManifestFile);
+	}
+}
 
 /**
  * Validates that `root` is a valid, existing SvelteKit project directory.
@@ -231,8 +588,9 @@ async function writeGenerated(
  * @param rootInput - Absolute path to target SvelteKit project.
  * @param site - EditorSite model containing pages to export.
  * @param theme - Site theme values copied into the generated theme module.
- * @param options - Import style supported by the target project's package configuration.
+ * @param options - Import style, widget overrides, and optional complete image snapshot.
  * @returns Result object with lists of written and skipped files.
+ * @throws {ProjectError} For invalid project or image data; image conflicts appear in `skipped`.
  */
 export async function exportSite(
 	rootInput: unknown,
@@ -244,6 +602,8 @@ export async function exportSite(
 	const importStyle = options.libImportStyle ?? 'sveltekit';
 	const result: ExportResult = { written: [], skipped: [], warnings: [] };
 	const componentDir = path.join(root, 'src', 'lib', 'components', 'editor');
+
+	if (options.images !== undefined) await exportImages(root, options.images, result);
 
 	// Export all built-in components & widgets as real native Name.svelte components
 	for (const name of Object.values(componentNames)) {
@@ -351,9 +711,12 @@ async function scanComponents(
  * Scans:
  * - `src/lib/components/` for all `.svelte` components.
  * - `src/routes/` for valid editor `+page.svelte` files.
+ * - Optional `static/media/.svelte-editor-images.json` and its managed files. Import validates
+ *   integrity and bounds, not image safety: the caller must sanitize before storing or serving.
  *
  * @param rootInput - Absolute path to candidate SvelteKit project directory.
  * @returns Discovered pages, parsed component descriptors, and skipped file reports.
+ * @throws {ProjectError} If the image snapshot is unsafe, malformed, or incomplete.
  */
 export async function importSite(rootInput: unknown): Promise<ImportResult> {
 	const root = await resolveProject(rootInput);
@@ -362,6 +725,8 @@ export async function importSite(rootInput: unknown): Promise<ImportResult> {
 
 	const components = await scanComponents(componentsDir, root);
 	const result: ImportResult = { pages: [], composites: [], components, skipped: [] };
+	const images = await importImages(root);
+	if (images !== undefined) result.images = images;
 
 	// Composites first: pages and other composites need their names to recognise instances.
 	const compositeFiles: { file: string; source: string }[] = [];

@@ -60,8 +60,12 @@ setup('create administrator and sign in', async ({ page }) => {
 		],
 		composites: seedComposites()
 	};
-	const saved = await page.request.post('/editor/api', { data: { action: 'save', site } });
+	const current = await page.request.get('/editor/api');
+	const { revision } = (await current.json()) as { revision: number };
+	const saved = await page.request.post('/editor/api', {
+		data: { action: 'save', site, revision, expectedProjectId: projects[0].id }
+	});
 	expect(saved.ok()).toBe(true);
 
-	await page.context().storageState({ path: '.data/e2e-auth.json' });
+	await page.context().storageState({ path: process.env.E2E_AUTH_PATH ?? '.data/e2e-auth.json' });
 });

@@ -5,6 +5,7 @@
 	 *
 	 * With a non-empty, safe `href` it renders an anchor, otherwise a plain button (same rules as
 	 * WidgetButton).
+	 * Local paths allow percent-encoded characters, including project image filenames.
 	 *
 	 * @prop {string} [action] - Button label.
 	 * @prop {string} [body] - Tooltip text.
@@ -28,7 +29,7 @@
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
-	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href));
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">

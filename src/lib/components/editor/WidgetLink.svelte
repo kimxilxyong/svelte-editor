@@ -5,6 +5,7 @@
 	 *
 	 * Unsafe hrefs (anything but `/route` or http(s); `//host` included) render without an `href`, so a tampered value
 	 * can never become a `javascript:` link.
+	 * Local paths allow percent-encoded characters, including project image filenames.
 	 *
 	 * @prop {string} title - Link text.
 	 * @prop {string} body - Tooltip text.
@@ -28,7 +29,7 @@
 		onnavigate?: (event: MouseEvent) => void;
 	} = $props();
 	const externalHref = $derived(/^https?:\/\/[^\s]+$/i.test(href));
-	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.]*$/i.test(href));
+	const safeHref = $derived(externalHref || /^\/(?!\/)[a-z0-9\-_/#?=&.%]*$/i.test(href));
 </script>
 
 <div class="flex h-full w-full items-center overflow-hidden">

@@ -8,6 +8,7 @@
  */
 
 import type { Role } from '../auth/roles.js';
+import type { PostgresUrlParts } from './postgres-url.js';
 
 /** Data handling choice when switching the database backend. */
 export type DataMode = 'copy' | 'replace' | 'keep';
@@ -69,6 +70,11 @@ export type BackendSummary = {
 	source: 'config-file' | 'env' | 'default';
 	serverVersion?: string;
 	userCount: number;
+	/**
+	 * Parts of the active PostgreSQL URL, including the password, used to prefill the connection
+	 * builder. Only ever sent to signed-in administrators (the `/admin` load requires the role).
+	 */
+	postgres: PostgresUrlParts | null;
 };
 
 /** One external sign-in provider row on the admin overview. */

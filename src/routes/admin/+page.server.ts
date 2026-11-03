@@ -42,6 +42,7 @@ import {
 	switchBackend,
 	testConnection
 } from '../../lib/server/database/manager.js';
+import { parsePostgresUrl } from '../../lib/admin/postgres-url.js';
 import type { DatabaseConfig } from '../../lib/server/database/types.js';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -82,13 +83,29 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 		countUsersByRole(db)
 	]);
 
+	const config = await getActiveConfig();
+	const parsed =
+		config.backend === 'postgres' && config.postgresUrl
+			? parsePostgresUrl(config.postgresUrl)
+			: null;
+	// Admin-only page (requireRole above): the stored credentials prefill the connection builder.
+	const stored = parsed && {
+		host: parsed.host,
+		port: parsed.port,
+		database: parsed.database,
+		user: parsed.user,
+		password: parsed.password,
+		sslMode: parsed.sslMode
+	};
+
 	// Only the fields the browser may see (location is already masked by the manager).
 	const backend: BackendSummary = {
 		backend: info.backend,
 		location: info.location,
 		source: info.source,
 		serverVersion: info.serverVersion,
-		userCount: info.userCount
+		userCount: info.userCount,
+		postgres: stored
 	};
 	const providers = getOAuthProviderStatus(getRuntimeOAuthConfig()).map((status) => {
 		const setup = providerSetup(status.id, url.origin);

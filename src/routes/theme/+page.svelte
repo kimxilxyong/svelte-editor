@@ -172,21 +172,6 @@
 					<code>{draft.secondary}</code>
 				</label>
 				<label class="row">
-					<span>Background colour</span>
-					<input
-						type="color"
-						aria-label="Background colour"
-						value={siteBackground(draft)}
-						oninput={(event) => (draft.background = event.currentTarget.value)}
-					/>
-					<code>{draft.background || `${siteBackground(draft)} (automatic)`}</code>
-					{#if draft.background}
-						<button type="button" class="reset" onclick={() => (draft.background = '')}>
-							Automatic
-						</button>
-					{/if}
-				</label>
-				<label class="row">
 					<span>Foreground colour</span>
 					<input
 						type="color"
@@ -201,6 +186,22 @@
 						</button>
 					{/if}
 				</label>
+				<label class="row">
+					<span>Background colour</span>
+					<input
+						type="color"
+						aria-label="Background colour"
+						value={siteBackground(draft)}
+						oninput={(event) => (draft.background = event.currentTarget.value)}
+					/>
+					<code>{draft.background || `${siteBackground(draft)} (automatic)`}</code>
+					{#if draft.background}
+						<button type="button" class="reset" onclick={() => (draft.background = '')}>
+							Automatic
+						</button>
+					{/if}
+				</label>
+
 				{#if lowContrast}
 					<p class="error" role="alert">
 						White text on this primary colour is below the WCAG AA contrast (4.5:1). Pick a darker

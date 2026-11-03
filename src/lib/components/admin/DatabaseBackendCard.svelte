@@ -7,8 +7,8 @@
 	 *
 	 * ## Security decisions
 	 * - The PostgreSQL URL is entered in a plain, readable text field (so it can be checked and
-	 *   copied) next to a connection builder. It is **never** pre-filled and is cleared from client
-	 *   state after a successful switch. The server never returns it; the active URL is only shown
+	 *   copied) next to a connection builder. The stored connection values, including the password, pre-fill the builder and URL (the page is admin-only, so an admin who forgot the password can recover it). The form is cleared from client
+	 *   state after a successful switch. The active location in the facts list stays
 	 *   masked (`******host:port/db`).
 	 * - The builder's password input has no `name`, so it is never submitted on its own; only the
 	 *   assembled URL (user and password percent-encoded by `postgres-url.ts`) is posted.
@@ -62,8 +62,11 @@
 	let sqlitePath = $state(
 		untrack(() => form?.values.sqlitePath || (backend.backend === 'sqlite' ? backend.location : ''))
 	);
-	let postgresUrl = $state('');
-	let pgParts = $state<PostgresUrlParts>(emptyPostgresParts());
+	// Prefilled from the stored connection (admin-only page).
+	let pgParts = $state<PostgresUrlParts>(
+		untrack(() => ({ ...emptyPostgresParts(), ...backend.postgres }))
+	);
+	let postgresUrl = $state(untrack(() => (backend.postgres ? buildPostgresUrl(pgParts) : '')));
 	let pgPasswordRevealed = $state(false);
 	let dataMode = $state<DataMode>(untrack(() => form?.values.dataMode ?? 'copy'));
 	let confirmReplace = $state(false);
@@ -200,8 +203,8 @@
 				/>
 			</label>
 			<p id="pg-help" class="hint">
-				Paste a URL or build one below. It is sent to the server and stored there only; it is never
-				shown again — the active connection appears masked.
+				Paste a URL or build one below. The fields start with the stored connection of the active
+				backend.
 			</p>
 
 			<details class="builder" open>
